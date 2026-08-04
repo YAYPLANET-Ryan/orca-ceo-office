@@ -17,6 +17,7 @@ import { useWorkspaceBoardPanel } from './useWorkspaceBoardPanel'
 import { resolveLeftSidebarStyleVariables } from '@/lib/left-sidebar-appearance'
 import { useSystemPrefersDark } from '@/components/terminal-pane/use-system-prefers-dark'
 import { lazyWithRetry } from '@/lib/lazy-with-retry'
+import CeoOfficeSidebar from '../ceo-office/CeoOfficeSidebar'
 
 const WorktreeMetaDialog = lazyWithRetry(() => import('./WorktreeMetaDialog'))
 const RemoveFolderDialog = lazyWithRetry(() => import('./RemoveFolderDialog'))
@@ -138,6 +139,7 @@ function Sidebar({
             {/* Fixed controls */}
             <SidebarNav />
             <SidebarHeader onWorkspaceBoardMenuOpenChange={setWorkspaceBoardMenuOpen} />
+            <CeoOfficeSidebar />
 
             <WorktreeList
               scrollOffsetRef={worktreeScrollOffsetRef}
