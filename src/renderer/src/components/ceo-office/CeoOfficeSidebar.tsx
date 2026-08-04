@@ -20,6 +20,7 @@ const GROUP_ICONS = [BriefcaseBusiness, CircleUserRound, FolderKanban, ShieldChe
 
 export default function CeoOfficeSidebar(): React.JSX.Element | null {
   const settings = useAppStore((s) => s.settings)
+  const addNonGitFolder = useAppStore((s) => s.addNonGitFolder)
   const activeWorktree = useActiveWorktree()
   const [manifest, setManifest] = React.useState<CeoOfficeManifest | null>(null)
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({})
@@ -39,7 +40,9 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
       worktreeId: activeWorktree.id
     })
       .then(({ content }) => {
-        if (canceled) return
+        if (canceled) {
+          return
+        }
         try {
           setManifest(parseCeoOfficeManifest(JSON.parse(content)))
         } catch {
@@ -47,15 +50,27 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
         }
       })
       .catch(() => {
-        if (!canceled) setManifest(null)
+        if (!canceled) {
+          setManifest(null)
+        }
       })
     return () => {
       canceled = true
     }
   }, [activeWorktree, settings])
 
-  if (!manifest || !activeWorktree) return null
+  if (!manifest || !activeWorktree) {
+    return null
+  }
   const currentWorktree = activeWorktree
+
+  const openManifestItem = async (item: CeoOfficeManifest['groups'][number]['items'][number]) => {
+    const itemPath = joinPath(currentWorktree.path, item.path)
+    // CEO Office entries are folder-backed project/session roots. Registering
+    // them through Orca keeps navigation inside the app and activates the
+    // resulting workspace instead of delegating to Windows Explorer.
+    await addNonGitFolder(itemPath)
+  }
 
   return (
     <section
@@ -89,9 +104,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
                       key={item.id}
                       title={item.path}
                       onClick={() => {
-                        void window.api.shell
-                          .openPath(joinPath(currentWorktree.path, item.path))
-                          .catch(() => undefined)
+                        void openManifestItem(item).catch(() => undefined)
                       }}
                       className={cn(
                         'block w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] text-worktree-sidebar-foreground/60',
