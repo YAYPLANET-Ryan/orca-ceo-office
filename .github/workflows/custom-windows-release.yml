@@ -64,10 +64,26 @@ jobs:
         shell: pwsh
         run: pnpm run build:desktop
 
-      - name: Build and publish Windows installer
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          pnpm run ensure:electron-runtime
+          pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish never
+
+      - name: Publish Windows release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pnpm run ensure:electron-runtime
-          pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish always
+          $tag = "v$env:ORCA_RELEASE_VERSION"
+          $assets = @(
+            "dist/orca-windows-setup.exe",
+            "dist/orca-windows-setup.exe.blockmap",
+            "dist/latest.yml"
+          )
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset)) {
+              throw "Missing release asset: $asset"
+            }
+          }
+          gh release create $tag @assets --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title $env:ORCA_RELEASE_VERSION --notes "Custom Orca Windows build with the CEO Office sidebar."
