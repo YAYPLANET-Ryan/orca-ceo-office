@@ -1,0 +1,73 @@
+name: Custom Windows Release
+
+on:
+  push:
+    branches:
+      - ryan/ceo-office-sidebar
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version greater than the currently installed version (for example 1.4.169-ceo.20260805.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: custom-windows-release
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    env:
+      ORCA_UPDATE_OWNER: YAY-LABS
+      ORCA_UPDATE_REPO: orca-ceo-office
+    steps:
+      - name: Checkout custom branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable pnpm
+        shell: pwsh
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: pwsh
+        run: pnpm install --no-frozen-lockfile --ignore-scripts
+
+      - name: Resolve release version
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          if ($env:INPUT_VERSION) {
+            $version = $env:INPUT_VERSION
+          } else {
+            $base = node -p "require('./package.json').version.split('-')[0]"
+            $parts = $base.Split('.')
+            $parts[2] = ([int]$parts[2] + 1).ToString()
+            $version = "$($parts -join '.')-ceo.$((Get-Date).ToUniversalTime().ToString('yyyyMMdd')).$env:RUN_NUMBER"
+          }
+          "ORCA_RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          "Resolved release version: $version"
+
+      - name: Build desktop
+        shell: pwsh
+        run: pnpm run build:desktop
+
+      - name: Build and publish Windows installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pnpm run ensure:electron-runtime
+          pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish always

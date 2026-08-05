@@ -1,0 +1,61 @@
+name: Sync Orca Upstream
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-orca-upstream
+  cancel-in-progress: false
+
+jobs:
+  open-sync-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout custom branch
+        uses: actions/checkout@v4
+        with:
+          ref: ryan/ceo-office-sidebar
+          fetch-depth: 0
+
+      - name: Compare upstream
+        id: compare
+        shell: bash
+        run: |
+          git remote add upstream https://github.com/stablyai/orca.git
+          git fetch upstream main --quiet
+          if git diff --quiet HEAD upstream/main; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Merge upstream into sync branch
+        if: steps.compare.outputs.changed == 'true'
+        shell: bash
+        run: |
+          branch="automation/upstream-sync-${GITHUB_RUN_ID}"
+          git checkout -b "$branch"
+          git config user.name "orca-upstream-sync[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-edit upstream/main
+
+      - name: Open sync pull request
+        if: steps.compare.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: ryan/ceo-office-sidebar
+          branch: automation/upstream-sync-${{ github.run_id }}
+          title: 'chore: sync Orca upstream changes'
+          commit-message: 'chore: sync Orca upstream changes'
+          body: |
+            Automated upstream sync from `stablyai/orca`.
+
+            Review the diff before merging. Merging this PR triggers the custom Windows release workflow.
+          labels: upstream-sync
