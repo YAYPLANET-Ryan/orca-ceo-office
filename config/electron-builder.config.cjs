@@ -36,6 +36,9 @@ const devChannelBuildVersion = isMacHourly
 // to install. Keeping adhoc separate from hourly too means a branch build cannot
 // be picked up by someone who only meant to ride main.
 const devChannelRepo = isMacHourly ? 'orca-hourly' : isMacAdhoc ? 'orca-adhoc' : null
+// Custom GitHub feeds are not SignPath-signed, so updater verification must not
+// advertise the official publisher for builds produced by this workflow.
+const isCustomUpdateFeed = Boolean(process.env.ORCA_UPDATE_OWNER || process.env.ORCA_UPDATE_REPO)
 const appId = 'com.stablyai.orca'
 const featureWallResources = {
   from: 'resources/onboarding/feature-wall',
@@ -278,9 +281,13 @@ module.exports = {
     executableName: 'Orca',
     // Why: Windows installers are signed after electron-builder packaging by
     // SignPath, so the packager cannot infer the updater publisherName.
-    signtoolOptions: {
-      publisherName: 'SignPath Foundation'
-    },
+    ...(isCustomUpdateFeed
+      ? {}
+      : {
+          signtoolOptions: {
+            publisherName: 'SignPath Foundation'
+          }
+        }),
     extraResources: [
       ...commonExtraResources,
       ...createPackagedRuntimeNodeModuleResources('win32'),
