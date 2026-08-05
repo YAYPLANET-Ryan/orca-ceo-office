@@ -22,7 +22,7 @@ jobs:
   build-and-publish:
     runs-on: windows-latest
     env:
-      ORCA_UPDATE_OWNER: YAY-LABS
+      ORCA_UPDATE_OWNER: YAYPLANET-Ryan
       ORCA_UPDATE_REPO: orca-ceo-office
     steps:
       - name: Checkout custom branch

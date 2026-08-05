@@ -1,12 +1,12 @@
 # CEO Office custom update pipeline
 
-The custom Windows installer publishes to `YAY-LABS/orca-ceo-office` and
+The custom Windows installer publishes to `YAYPLANET-Ryan/orca-ceo-office` and
 keeps the CEO Office sidebar in every build. The workspace at `E:\ORCA` is
 not bundled into the installer and remains a separate data repository.
 
 ## One-time GitHub setup
 
-Create `YAY-LABS/orca-ceo-office` as a public repository. A public repository
+Create `YAYPLANET-Ryan/orca-ceo-office` as a public repository. A public repository
 is required for unauthenticated installed clients to read GitHub Release
 update metadata and download installer assets. Do not put business documents,
 credentials, or private workspace data in this repository.
@@ -14,7 +14,7 @@ credentials, or private workspace data in this repository.
 Then push the custom branch:
 
 ```powershell
-git remote add custom https://github.com/YAY-LABS/orca-ceo-office.git
+git remote add custom https://github.com/YAYPLANET-Ryan/orca-ceo-office.git
 git push -u custom ryan/ceo-office-sidebar
 ```
 

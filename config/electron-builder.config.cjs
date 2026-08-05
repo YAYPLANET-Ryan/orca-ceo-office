@@ -490,7 +490,7 @@ module.exports = {
   npmRebuild: true,
   publish: {
     provider: 'github',
-    owner: process.env.ORCA_UPDATE_OWNER ?? 'YAY-LABS',
+    owner: process.env.ORCA_UPDATE_OWNER ?? 'YAYPLANET-Ryan',
     repo: process.env.ORCA_UPDATE_REPO ?? 'orca-ceo-office',
     releaseType: devChannelRepo ? 'prerelease' : 'release'
   }
