@@ -6,15 +6,15 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
-  pull-requests: write
 
 concurrency:
   group: sync-orca-upstream
   cancel-in-progress: false
 
 jobs:
-  open-sync-pr:
+  sync-and-release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout custom branch
@@ -35,27 +35,18 @@ jobs:
           fi
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Merge upstream into sync branch
+      - name: Merge upstream into the custom branch
         if: steps.compare.outputs.changed == 'true'
         shell: bash
         run: |
-          branch="automation/upstream-sync-${GITHUB_RUN_ID}"
-          git checkout -b "$branch"
           git config user.name "orca-upstream-sync[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git merge --no-edit upstream/main
+          git push origin HEAD:ryan/ceo-office-sidebar
 
-      - name: Open sync pull request
+      - name: Start the custom Windows release
         if: steps.compare.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          base: ryan/ceo-office-sidebar
-          branch: automation/upstream-sync-${{ github.run_id }}
-          title: 'chore: sync Orca upstream changes'
-          commit-message: 'chore: sync Orca upstream changes'
-          body: |
-            Automated upstream sync from `stablyai/orca`.
-
-            Review the diff before merging. Merging this PR triggers the custom Windows release workflow.
-          labels: upstream-sync
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run custom-windows-release.yml --repo "$GITHUB_REPOSITORY" --ref ryan/ceo-office-sidebar
