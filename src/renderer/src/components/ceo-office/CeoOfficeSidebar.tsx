@@ -22,6 +22,11 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
   const settings = useAppStore((s) => s.settings)
   const addNonGitFolder = useAppStore((s) => s.addNonGitFolder)
   const activeWorktree = useActiveWorktree()
+  const connectionId = useAppStore((s) =>
+    activeWorktree
+      ? (s.repos.find((repo) => repo.id === activeWorktree.repoId)?.connectionId ?? undefined)
+      : undefined
+  )
   const [manifest, setManifest] = React.useState<CeoOfficeManifest | null>(null)
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({})
 
@@ -37,7 +42,9 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
       settings,
       filePath: joinPath(activeWorktree.path, MANIFEST_PATH),
       relativePath: MANIFEST_PATH,
-      worktreeId: activeWorktree.id
+      worktreeId: activeWorktree.id,
+      connectionId,
+      expectedExternalSshTargetId: connectionId
     })
       .then(({ content }) => {
         if (canceled) {
@@ -57,7 +64,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
     return () => {
       canceled = true
     }
-  }, [activeWorktree, settings])
+  }, [activeWorktree, connectionId, settings])
 
   if (!manifest || !activeWorktree) {
     return null
