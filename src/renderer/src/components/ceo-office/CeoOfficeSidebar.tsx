@@ -18,6 +18,41 @@ const MANIFEST_PATH = '.orca/ceo-office.json'
 
 const GROUP_ICONS = [BriefcaseBusiness, CircleUserRound, FolderKanban, ShieldCheck]
 
+// Keep the CEO navigation visible while an SSH-backed manifest is loading. The
+// remote manifest remains the source of truth and replaces this once available.
+const DEFAULT_MANIFEST: CeoOfficeManifest = {
+  version: 1,
+  title: 'CEO Office',
+  groups: [
+    {
+      id: 'businesses',
+      label: 'Businesses',
+      items: [
+        { id: 'oildealer', label: 'OilDealer', path: '02_BUSINESSES/oildealer', kind: 'folder' },
+        { id: 'cubeplanet', label: 'CubePlanet', path: '02_BUSINESSES/cubeplanet', kind: 'folder' },
+        { id: 'yieldcore', label: 'YieldCore', path: '02_BUSINESSES/yieldcore', kind: 'folder' },
+        { id: 'gasstation', label: 'GasStation', path: '02_BUSINESSES/gasstation', kind: 'folder' },
+        { id: 'compagnon', label: 'Compagnon', path: '02_BUSINESSES/compagnon', kind: 'folder' },
+        { id: 'family', label: 'Family', path: '02_BUSINESSES/family', kind: 'folder' }
+      ]
+    },
+    {
+      id: 'personal',
+      label: 'Personal',
+      items: [{ id: 'personal-root', label: 'Personal Office', path: '02_PERSONAL', kind: 'folder' }]
+    },
+    {
+      id: 'shared',
+      label: 'Shared',
+      items: [
+        { id: 'shared-root', label: 'Shared Controls', path: '03_SHARED', kind: 'folder' },
+        { id: 'review', label: 'Review Queue', path: '05_REVIEW', kind: 'section' },
+        { id: 'approved', label: 'Approval Gates', path: '05_APPROVED', kind: 'section' }
+      ]
+    }
+  ]
+}
+
 export default function CeoOfficeSidebar(): React.JSX.Element | null {
   const settings = useAppStore((s) => s.settings)
   const addNonGitFolder = useAppStore((s) => s.addNonGitFolder)
@@ -27,7 +62,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
       ? (s.repos.find((repo) => repo.id === activeWorktree.repoId)?.connectionId ?? undefined)
       : undefined
   )
-  const [manifest, setManifest] = React.useState<CeoOfficeManifest | null>(null)
+  const [manifest, setManifest] = React.useState<CeoOfficeManifest | null>(DEFAULT_MANIFEST)
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({})
 
   React.useEffect(() => {
@@ -38,6 +73,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
         canceled = true
       }
     }
+    setManifest(DEFAULT_MANIFEST)
     void readRuntimeFileContent({
       settings,
       filePath: joinPath(activeWorktree.path, MANIFEST_PATH),
@@ -52,15 +88,9 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
         }
         try {
           setManifest(parseCeoOfficeManifest(JSON.parse(content)))
-        } catch {
-          setManifest(null)
-        }
+        } catch {}
       })
-      .catch(() => {
-        if (!canceled) {
-          setManifest(null)
-        }
-      })
+      .catch(() => undefined)
     return () => {
       canceled = true
     }
