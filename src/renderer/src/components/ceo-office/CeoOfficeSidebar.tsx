@@ -57,6 +57,11 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
   const settings = useAppStore((s) => s.settings)
   const addNonGitFolder = useAppStore((s) => s.addNonGitFolder)
   const activeWorktree = useActiveWorktree()
+  const workspaceRoot = useAppStore((s) =>
+    activeWorktree
+      ? (s.repos.find((repo) => repo.id === activeWorktree.repoId)?.path ?? activeWorktree.path)
+      : undefined
+  )
   const connectionId = useAppStore((s) =>
     activeWorktree
       ? (s.repos.find((repo) => repo.id === activeWorktree.repoId)?.connectionId ?? undefined)
@@ -76,7 +81,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
     setManifest(DEFAULT_MANIFEST)
     void readRuntimeFileContent({
       settings,
-      filePath: joinPath(activeWorktree.path, MANIFEST_PATH),
+      filePath: joinPath(workspaceRoot ?? activeWorktree.path, MANIFEST_PATH),
       relativePath: MANIFEST_PATH,
       worktreeId: activeWorktree.id,
       connectionId,
@@ -94,15 +99,13 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
     return () => {
       canceled = true
     }
-  }, [activeWorktree, connectionId, settings])
+  }, [activeWorktree, connectionId, settings, workspaceRoot])
 
   if (!manifest || !activeWorktree) {
     return null
   }
-  const currentWorktree = activeWorktree
-
   const openManifestItem = async (item: CeoOfficeManifest['groups'][number]['items'][number]) => {
-    const itemPath = joinPath(currentWorktree.path, item.path)
+    const itemPath = joinPath(workspaceRoot ?? activeWorktree.path, item.path)
     // CEO Office entries are folder-backed project/session roots. Registering
     // them through Orca keeps navigation inside the app and activates the
     // resulting workspace instead of delegating to Windows Explorer.
