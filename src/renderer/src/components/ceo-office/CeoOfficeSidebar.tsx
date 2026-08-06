@@ -55,7 +55,6 @@ const DEFAULT_MANIFEST: CeoOfficeManifest = {
 
 export default function CeoOfficeSidebar(): React.JSX.Element | null {
   const settings = useAppStore((s) => s.settings)
-  const addNonGitFolder = useAppStore((s) => s.addNonGitFolder)
   const activeWorktree = useActiveWorktree()
   const workspaceRoot = useAppStore((s) =>
     activeWorktree
@@ -66,6 +65,9 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
     activeWorktree
       ? (s.repos.find((repo) => repo.id === activeWorktree.repoId)?.connectionId ?? undefined)
       : undefined
+  )
+  const activePtyId = useAppStore((s) =>
+    s.activeTabId ? (s.ptyIdsByTabId[s.activeTabId] ?? undefined) : undefined
   )
   const [manifest, setManifest] = React.useState<CeoOfficeManifest | null>(DEFAULT_MANIFEST)
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({})
@@ -106,10 +108,12 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
   }
   const openManifestItem = async (item: CeoOfficeManifest['groups'][number]['items'][number]) => {
     const itemPath = joinPath(workspaceRoot ?? activeWorktree.path, item.path)
-    // CEO Office entries are folder-backed project/session roots. Registering
-    // them through Orca keeps navigation inside the app and activates the
-    // resulting workspace instead of delegating to Windows Explorer.
-    await addNonGitFolder(itemPath)
+    const escapedPath = itemPath.replaceAll("'", "''")
+    if (connectionId && activePtyId?.startsWith(`ssh:${connectionId}@@`)) {
+      window.api.pty.write(activePtyId, `Set-Location -LiteralPath '${escapedPath}'\r`)
+      return
+    }
+    throw new Error('Open the DESKTOP ORCA SSH terminal before using CEO Office navigation.')
   }
 
   return (
