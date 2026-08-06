@@ -67,7 +67,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
       : undefined
   )
   const activePtyId = useAppStore((s) =>
-    s.activeTabId ? (s.ptyIdsByTabId[s.activeTabId] ?? undefined) : undefined
+    s.activeTabId ? s.ptyIdsByTabId[s.activeTabId]?.[0] : undefined
   )
   const [manifest, setManifest] = React.useState<CeoOfficeManifest | null>(DEFAULT_MANIFEST)
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({})
