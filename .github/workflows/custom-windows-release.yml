@@ -62,7 +62,7 @@ jobs:
 
       - name: Build desktop
         shell: pwsh
-        run: pnpm run build:desktop
+        run: pnpm run build:release
 
       - name: Build Windows installer
         shell: pwsh
