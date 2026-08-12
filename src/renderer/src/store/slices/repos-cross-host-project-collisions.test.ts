@@ -164,7 +164,7 @@ describe('deleting one host copy of a same-named project', () => {
     expect(repoRmCalls()).toEqual([
       expect.objectContaining({
         selector: 'env-a',
-        params: { repo: 'env-a-uuid' }
+        params: { repo: 'env-a-uuid', confirm: true }
       })
     ])
     expect(reposRemove).not.toHaveBeenCalled()
@@ -190,7 +190,7 @@ describe('deleting one host copy of a same-named project', () => {
     expect(repoRmCalls()).toEqual([
       expect.objectContaining({
         selector: 'env-a',
-        params: { repo: 'env-a-uuid' }
+        params: { repo: 'env-a-uuid', confirm: true }
       })
     ])
     expect(remainingRepoIds(store)).toEqual(['env-b-uuid'])
@@ -239,7 +239,7 @@ describe('deleting one host copy of a project whose id exists on two hosts', () 
     expect(repoRmCalls()).toEqual([
       expect.objectContaining({
         selector: 'env-a',
-        params: { repo: 'dup-id' }
+        params: { repo: 'dup-id', confirm: true }
       })
     ])
     expect(reposRemove).not.toHaveBeenCalled()

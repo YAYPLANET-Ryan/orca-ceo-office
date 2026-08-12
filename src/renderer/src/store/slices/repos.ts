@@ -3313,11 +3313,17 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         (repo) => repo.id === projectId && getRepoExecutionHostId(repo) !== ownerHostId
       )
       try {
+        // Why: newer runtimes reject repo.rm without explicit destructive acknowledgement.
         await (target.kind === 'local'
           ? idExistsOnOtherHost
             ? window.api.repos.removeForHost({ repoId: projectId, hostId: ownerHostId })
             : window.api.repos.remove({ repoId: projectId })
-          : callRuntimeRpc(target, 'repo.rm', { repo: projectId }, { timeoutMs: 15_000 }))
+          : callRuntimeRpc(
+              target,
+              'repo.rm',
+              { repo: projectId, confirm: true },
+              { timeoutMs: 15_000 }
+            ))
       } catch (err) {
         // Why: the owner already dropped this project, so purge the local ghost row instead of aborting (#11994).
         if (!hasRuntimeRpcErrorCode(err, 'repo_not_found')) {

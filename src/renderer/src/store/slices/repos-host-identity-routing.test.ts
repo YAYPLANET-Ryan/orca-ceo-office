@@ -394,7 +394,7 @@ describe('repo slice host identity routing', () => {
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'repo.rm',
-      params: { repo: 'same-repo' },
+      params: { repo: 'same-repo', confirm: true },
       timeoutMs: 15_000
     })
     expect(reposRemoveForHost).not.toHaveBeenCalled()
@@ -486,7 +486,7 @@ describe('repo slice host identity routing', () => {
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'repo.rm',
-      params: { repo: 'same-repo' },
+      params: { repo: 'same-repo', confirm: true },
       timeoutMs: 15_000
     })
     expect(reposRemove).not.toHaveBeenCalled()
