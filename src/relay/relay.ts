@@ -68,6 +68,11 @@ import {
 import { relayLogLine } from './relay-diagnostic-log'
 import { remoteCliRequestTimeoutMs } from './remote-cli-timeout'
 import { shouldReadRemoteCliStdin } from './remote-cli-stdin'
+import { prepareRemoteArtifactCliInput } from './remote-artifact-cli-input'
+import {
+  assertRemoteArtifactCliForwardingFits,
+  type RemoteArtifactCliForwardingParams
+} from './remote-artifact-cli-forwarding'
 import { registerManagedHookInstaller } from './managed-hook-installer'
 import { registerRelayPluginHostCallHandlers } from './plugin-host-call-handler'
 import { DispatcherClientWriter } from './dispatcher-client-writer'
@@ -302,7 +307,34 @@ async function runOrcaCliMode(
   endpointCredential?: string
 ): Promise<void> {
   const myVersion = readLaunchVersion()
-  const stdin = shouldReadRemoteCliStdin(argv) ? await readOrcaCliStdin() : undefined
+  let preparedArtifact: Awaited<ReturnType<typeof prepareRemoteArtifactCliInput>>
+  try {
+    preparedArtifact = await prepareRemoteArtifactCliInput(argv, process.cwd())
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    process.exitCode = 1
+    return
+  }
+  const stdin =
+    preparedArtifact.stdin ??
+    (shouldReadRemoteCliStdin(argv) ? await readOrcaCliStdin() : undefined)
+  const env = pickRemoteCliEnv(process.env)
+  const requestParams: RemoteArtifactCliForwardingParams = {
+    argv,
+    cwd: process.cwd(),
+    env,
+    ...(stdin !== undefined ? { stdin } : {}),
+    ...(preparedArtifact.artifactInput ? { artifactInput: preparedArtifact.artifactInput } : {})
+  }
+  if (preparedArtifact.artifactInput) {
+    try {
+      assertRemoteArtifactCliForwardingFits(requestParams)
+    } catch (error) {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+      process.exitCode = 1
+      return
+    }
+  }
   const sock = createConnection({ path: sockPath })
   const stdoutWriter = new DispatcherClientWriter(
     (data, onSettled) =>
@@ -327,18 +359,12 @@ async function runOrcaCliMode(
   let initialExitCode = 0
 
   const sendRequest = (): void => {
-    const env = pickRemoteCliEnv(process.env)
     const frame = encodeJsonRpcFrame(
       {
         jsonrpc: '2.0',
         id: requestId,
         method: 'orca.cli',
-        params: {
-          argv,
-          cwd: process.cwd(),
-          env,
-          ...(stdin !== undefined ? { stdin } : {})
-        }
+        params: requestParams
       },
       nextSeq++,
       highestReceivedSeq
@@ -1008,7 +1034,9 @@ async function main(): Promise<void> {
         const clientId = socketClients.get(sock)
         socketClients.delete(sock)
         if (clientId !== undefined) {
-          dispatcher.detachClient(clientId)
+          // Why 'peer-closed' only here: the socket itself ended, which is the one signal that
+          // actually says the client is gone rather than merely slow.
+          dispatcher.detachClient(clientId, 'peer-closed')
         }
         relayLogLine(`[relay] Socket client closed (clients=${socketClients.size})`)
         if (!stdoutAlive && socketClients.size === 0) {
@@ -1159,7 +1187,7 @@ async function main(): Promise<void> {
   process.stdout.on('error', () => {
     stdoutAlive = false
     flushStdoutDrainWaiters()
-    dispatcher.invalidateClient()
+    dispatcher.invalidateClient('peer-closed')
   })
 
   function startGrace(reason: string, options?: { retryDeferredShutdown?: boolean }): void {
@@ -1214,7 +1242,7 @@ async function main(): Promise<void> {
       // Why: stdin close means the SSH channel is gone; mark stdout dead so its write callback no-ops instead of hitting a dead pipe.
       stdoutAlive = false
       flushStdoutDrainWaiters()
-      dispatcher.invalidateClient()
+      dispatcher.invalidateClient('peer-closed')
       if (socketClients.size === 0) {
         startGrace('stdin ended')
       }
@@ -1223,7 +1251,7 @@ async function main(): Promise<void> {
     process.stdin.on('error', () => {
       stdoutAlive = false
       flushStdoutDrainWaiters()
-      dispatcher.invalidateClient()
+      dispatcher.invalidateClient('peer-closed')
       if (socketClients.size === 0) {
         startGrace('stdin error')
       }
