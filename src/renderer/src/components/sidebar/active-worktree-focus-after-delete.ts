@@ -81,7 +81,9 @@ function focusNextWorktreeAfterActiveDelete(
   }
   const nextWorktreeId = pickNextWorktreeIdAfterDelete(state, repoId, deletedWorktreeId)
   if (nextWorktreeId) {
-    activateAndRevealWorktree(nextWorktreeId)
+    // Why: delete handoff should select the surviving workspace without manufacturing
+    // an empty shell in its base checkout. The user can open a terminal explicitly.
+    activateAndRevealWorktree(nextWorktreeId, { ensureInitialTerminal: false })
   }
 }
 

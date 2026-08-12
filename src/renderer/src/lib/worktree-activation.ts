@@ -283,6 +283,8 @@ export function activateAndRevealWorktree(
     sidebarRevealBehavior?: PendingSidebarWorktreeReveal['behavior']
     notifyHostRuntime?: boolean
     revealInSidebar?: boolean
+    /** Select the workspace without manufacturing a blank terminal, such as after deleting it. */
+    ensureInitialTerminal?: boolean
     executionHostId?: ExecutionHostId
     backendStartupTerminalSpawned?: boolean
   }
@@ -339,15 +341,18 @@ export function activateAndRevealWorktree(
   resumeSleepingAgentSessionsForWorktree(worktreeId)
 
   // 4. Ensure a focusable surface exists for externally-created worktrees
-  const primaryTabId = ensureWorktreeHasInitialTerminal(
-    useAppStore.getState(),
-    worktreeId,
-    opts?.startup,
-    opts?.setup,
-    opts?.issueCommand,
-    opts?.defaultTabs,
-    opts?.backendStartupTerminalSpawned ? { backendStartupTerminalSpawned: true } : undefined
-  )
+  const primaryTabId =
+    opts?.ensureInitialTerminal === false
+      ? null
+      : ensureWorktreeHasInitialTerminal(
+          useAppStore.getState(),
+          worktreeId,
+          opts?.startup,
+          opts?.setup,
+          opts?.issueCommand,
+          opts?.defaultTabs,
+          opts?.backendStartupTerminalSpawned ? { backendStartupTerminalSpawned: true } : undefined
+        )
   if (primaryTabId && opts?.initialCwd) {
     useAppStore.getState().queueTabInitialCwd(primaryTabId, opts.initialCwd)
   }

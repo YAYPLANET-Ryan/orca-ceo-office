@@ -110,6 +110,17 @@ describe('activateAndRevealWorktree', () => {
     activateAndExpectNoRelaunch(target.id)
   })
 
+  it('can focus a workspace after delete without creating a replacement terminal', () => {
+    const worktree = makeWorktree()
+    const { revealWorktreeInSidebar } = seedEmptyActivatableWorktree(worktree)
+
+    const result = activateAndRevealWorktree(worktree.id, { ensureInitialTerminal: false })
+
+    expect(result).toEqual({ primaryTabId: null })
+    expect(useAppStore.getState().tabsByWorktree[worktree.id]).toBeUndefined()
+    expect(revealWorktreeInSidebar).toHaveBeenCalledWith(worktree.id)
+  })
+
   it('does not relaunch when activation opts carry no startup payload', () => {
     const worktree = makeWorktree()
     seedEmptyActivatableWorktree(worktree)
