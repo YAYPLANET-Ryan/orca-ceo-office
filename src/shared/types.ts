@@ -3119,6 +3119,9 @@ export type GlobalSettings = {
   experimentalAgentHibernation?: boolean
   /** Milliseconds a completed agent must stay idle before hibernation can be considered. */
   agentHibernationIdleMs?: number
+  /** Automatically complete and archive Orca-created Codex/Claude workspaces once
+   *  every agent pane is idle, the working tree is clean, and the branch is pushed. */
+  autoArchiveCompletedAgentWorkspaces?: boolean
   /** Experimental: opt-in preview of the updated worktree-card layout and metadata behavior. */
   experimentalNewWorktreeCardStyle?: boolean
   /** Experimental: per-workspace on-demand environment recipes and setup surface. */

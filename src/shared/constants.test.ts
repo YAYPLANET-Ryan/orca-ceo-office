@@ -107,6 +107,10 @@ describe('getDefaultSettings', () => {
     expect(getDefaultSettings('/tmp').experimentalEphemeralVms).toBe(false)
   })
 
+  it('automatically archives safely completed agent workspaces by default', () => {
+    expect(getDefaultSettings('/tmp').autoArchiveCompletedAgentWorkspaces).toBe(true)
+  })
+
   it('keeps the agent dashboard popout disabled by default', () => {
     expect(getDefaultSettings('/tmp').experimentalAgentDashboardPopout).toBeUndefined()
     expect(getDefaultSettings('/tmp').experimentalAgentDashboardShowIdle).toBeUndefined()

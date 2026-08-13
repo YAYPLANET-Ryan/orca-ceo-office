@@ -5886,6 +5886,36 @@ describe('createRemoteRuntimePtyTransport', () => {
     }
   })
 
+  it('preserves PowerShell input from a paired web client', async () => {
+    vi.useFakeTimers()
+    try {
+      const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
+      const transport = createRemoteRuntimePtyTransport('windows-host', {
+        worktreeId: 'repo::C:\\worktree',
+        tabId: 'paired-laptop-tab',
+        leafId: 'powershell-pane'
+      })
+
+      await transport.connect({ url: '', callbacks: {} })
+      const { streamId } = latestSubscribePayload()
+      runtimeCall.mockClear()
+      subscriptionSendBinary.mockClear()
+      const command = "Get-ChildItem -LiteralPath 'C:\\worktree' | Select-Object -First 1\r"
+
+      expect(transport.sendInput(command)).toBe(true)
+      await vi.runOnlyPendingTimersAsync()
+
+      expect(runtimeCall).not.toHaveBeenCalled()
+      expect(subscriptionSendBinary).toHaveBeenCalledTimes(1)
+      const frame = decodeTerminalStreamFrame(subscriptionSendBinary.mock.calls[0][0])
+      expect(frame?.opcode).toBe(TerminalStreamOpcode.Input)
+      expect(frame?.streamId).toBe(streamId)
+      expect(frame ? decodeTerminalStreamText(frame.payload) : '').toBe(command)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('coalesces rapid remote viewport updates before sending the latest size', async () => {
     vi.useFakeTimers()
     try {
