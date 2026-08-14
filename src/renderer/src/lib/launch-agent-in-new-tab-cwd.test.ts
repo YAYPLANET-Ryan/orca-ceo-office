@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mockQueueTabInitialCwd = vi.fn()
 const mockLaunchAgentInWebHostTab = vi.fn()
 const mockIsWebRuntimeSessionActive = vi.fn()
+const mockCallRuntimeRpc = vi.fn()
 
 const store = {
   settings: {
@@ -11,8 +12,8 @@ const store = {
     agentDefaultEnv: {},
     activeRuntimeEnvironmentId: null as string | null
   },
-  repos: [],
-  allWorktrees: vi.fn(() => []),
+  repos: [] as { id: string; path: string; connectionId?: string }[],
+  allWorktrees: vi.fn(() => [] as { id: string; repoId: string; path: string }[]),
   tabsByWorktree: { 'wt-1': [{ id: 'tab-1' }] },
   openFiles: [] as { id: string; worktreeId: string }[],
   browserTabsByWorktree: {} as Record<string, { id: string }[]>,
@@ -40,6 +41,10 @@ vi.mock('@/lib/native-chat-transcript-readability', () => ({
 
 vi.mock('@/runtime/web-runtime-session', () => ({
   isWebRuntimeSessionActive: mockIsWebRuntimeSessionActive
+}))
+
+vi.mock('@/runtime/runtime-rpc-client', () => ({
+  callRuntimeRpc: mockCallRuntimeRpc
 }))
 
 vi.mock('@/lib/worktree-runtime-owner', () => ({
@@ -71,6 +76,65 @@ describe('launchAgentInNewTab initial cwd', () => {
       delivered: true,
       failureNotified: false
     })
+    store.repos = []
+    store.allWorktrees.mockReturnValue([])
+    mockCallRuntimeRpc.mockReset()
+  })
+
+  it('falls back to the bare command when an older paired runtime lacks the resolver', async () => {
+    mockIsWebRuntimeSessionActive.mockReturnValue(true)
+    mockCallRuntimeRpc.mockRejectedValue(new Error('Unknown method'))
+    store.repos = [{ id: 'repo-1', path: '/repo' }]
+    store.allWorktrees.mockReturnValue([{ id: 'wt-1', repoId: 'repo-1', path: '/repo/project' }])
+    const { launchAgentInNewTabWithWorkspaceLauncher } =
+      await import('./launch-agent-with-workspace-launcher')
+
+    await expect(
+      launchAgentInNewTabWithWorkspaceLauncher({ agent: 'claude', worktreeId: 'wt-1' })
+    ).resolves.toEqual(expect.objectContaining({ tabId: null }))
+    expect(mockLaunchAgentInWebHostTab).toHaveBeenCalledTimes(1)
+    expect(mockLaunchAgentInWebHostTab).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startupPlan: expect.objectContaining({
+          launchCommand: expect.stringMatching(/^claude(?:\s|$)/)
+        })
+      })
+    )
+    expect(store.createTab).not.toHaveBeenCalled()
+  })
+
+  it('waits for workspace launcher resolution before creating exactly one tab', async () => {
+    let finishResolution!: (value: { workspaceRoot: string; launcherPath: string }) => void
+    const resolution = new Promise<{ workspaceRoot: string; launcherPath: string }>((resolve) => {
+      finishResolution = resolve
+    })
+    store.repos = [{ id: 'repo-1', path: '/repo' }]
+    store.allWorktrees.mockReturnValue([{ id: 'wt-1', repoId: 'repo-1', path: '/repo/project' }])
+    const resolveWorkspaceAgentLauncher = vi.fn(() => resolution)
+    vi.stubGlobal('window', { api: { fs: { resolveWorkspaceAgentLauncher } } })
+    const { launchAgentInNewTabWithWorkspaceLauncher } =
+      await import('./launch-agent-with-workspace-launcher')
+
+    const launch = launchAgentInNewTabWithWorkspaceLauncher({
+      agent: 'codex',
+      worktreeId: 'wt-1'
+    })
+    expect(store.createTab).not.toHaveBeenCalled()
+
+    finishResolution({
+      workspaceRoot: '/repo',
+      launcherPath: '/repo/scripts/start-orca-agent'
+    })
+    await expect(launch).resolves.toEqual(expect.objectContaining({ tabId: 'tab-1' }))
+    expect(store.createTab).toHaveBeenCalledTimes(1)
+    expect(store.queueTabStartupCommand).toHaveBeenCalledWith(
+      'tab-1',
+      expect.objectContaining({
+        command: expect.stringMatching(
+          /^'\/repo\/scripts\/start-orca-agent' '--agent' 'codex'(?:\s|$)/
+        )
+      })
+    )
   })
 
   it('queues the original cwd before a local Agent session starts', async () => {

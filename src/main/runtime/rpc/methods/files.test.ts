@@ -868,4 +868,28 @@ describe('file RPC methods', () => {
     expect(runtime.statRuntimeFile).toHaveBeenCalledWith('id:wt-1', 'readme.md')
     expect(response).toMatchObject({ ok: true, result: { isDirectory: false } })
   })
+
+  it('resolves the workspace launcher on the runtime execution host', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      resolveRuntimeWorkspaceAgentLauncher: vi.fn().mockResolvedValue({
+        workspaceRoot: '/repo',
+        launcherPath: '/repo/scripts/start-orca-agent'
+      })
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: FILE_METHODS })
+
+    const response = await dispatcher.dispatch(
+      makeRequest('files.resolveWorkspaceAgentLauncher', {
+        worktree: 'id:wt-1',
+        platform: 'linux'
+      })
+    )
+
+    expect(runtime.resolveRuntimeWorkspaceAgentLauncher).toHaveBeenCalledWith('id:wt-1', 'linux')
+    expect(response).toMatchObject({
+      ok: true,
+      result: { launcherPath: '/repo/scripts/start-orca-agent' }
+    })
+  })
 })

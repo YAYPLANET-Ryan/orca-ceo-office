@@ -3167,6 +3167,11 @@ const api = {
       ipcRenderer.invoke('fs:stat', args),
     pathExists: (args: { filePath: string; connectionId?: string }): Promise<boolean> =>
       ipcRenderer.invoke('fs:pathExists', args),
+    resolveWorkspaceAgentLauncher: (args: {
+      workspacePath: string
+      connectionId?: string
+      platform: NodeJS.Platform
+    }) => ipcRenderer.invoke('fs:resolveWorkspaceAgentLauncher', args),
     listFiles: (args: {
       rootPath: string
       connectionId?: string

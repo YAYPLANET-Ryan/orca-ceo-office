@@ -40,7 +40,7 @@ import { resolveWindowsShellLaunchTarget } from './windows-shell-launch'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import { useDetectedAgents } from '@/hooks/useDetectedAgents'
 import { useAgentDetectionTargetForWorktree } from '@/hooks/useAgentDetectionTarget'
-import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
+import { launchAgentInNewTabWithWorkspaceLauncher } from '@/lib/launch-agent-with-workspace-launcher'
 import { normalizeRelativePath } from '@/lib/path'
 import {
   getWindowsTerminalCapabilityOwnerKey,
@@ -591,27 +591,28 @@ function TabBarInner({
   }
   const launchAgentFromNewTabEntry = (agent: TuiAgent): void => {
     const option = agentLaunchOptions.find((candidate) => candidate.agent === agent)
-    const result = launchAgentInNewTab({
+    void launchAgentInNewTabWithWorkspaceLauncher({
       agent,
       worktreeId,
       groupId: resolvedGroupId,
       launchSource: 'tab_bar_quick_launch'
-    })
-    if (!result) {
-      toast.error(
-        translate(
-          'auto.components.tab.bar.TabBar.ab589350e5',
-          'Could not build launch command for {{value0}}.',
-          { value0: option?.label ?? agent }
+    }).then((result) => {
+      if (!result) {
+        toast.error(
+          translate(
+            'auto.components.tab.bar.TabBar.ab589350e5',
+            'Could not build launch command for {{value0}}.',
+            { value0: option?.label ?? agent }
+          )
         )
-      )
-      return
-    }
-    if (result.tabId) {
-      queueTerminalTabFocusAfterNewTabMenuClose(result.tabId)
-      return
-    }
-    queueNewActiveTerminalFocusAfterNewTabMenuClose()
+        return
+      }
+      if (result.tabId) {
+        queueTerminalTabFocusAfterNewTabMenuClose(result.tabId)
+        return
+      }
+      queueNewActiveTerminalFocusAfterNewTabMenuClose()
+    })
   }
   const runPendingNewTabMenuFocusAfterClose = (): void => {
     const pendingFocus = pendingNewTabMenuFocusRef.current

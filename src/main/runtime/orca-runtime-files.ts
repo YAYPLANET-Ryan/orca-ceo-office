@@ -90,6 +90,8 @@ import { beginWatcherInstall } from '../ipc/watcher-removal-gate'
 import { assertSshMutationExpectation } from '../ssh/ssh-connection-generation'
 import { toSshExecutionHostId, type ExecutionHostId } from '../../shared/execution-host'
 import { renameLocalPathSerializedByDestination } from '../destination-serialized-local-rename'
+import { resolveWorkspaceAgentLauncher } from '../workspace-agent-launcher-resolution'
+import type { WorkspaceAgentLauncherResolution } from '../../shared/workspace-agent-launcher-contract'
 
 const MOBILE_FILE_LIST_LIMIT = 5000
 const MOBILE_FILE_PATH_SEARCH_CACHE_LIMIT = 20_000
@@ -1903,6 +1905,40 @@ export class RuntimeFileCommands {
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
     const stats = await stat(filePath)
     return { size: stats.size, isDirectory: stats.isDirectory(), mtime: stats.mtimeMs }
+  }
+
+  async resolveRuntimeWorkspaceAgentLauncher(
+    worktreeSelector: string,
+    platform: NodeJS.Platform
+  ): Promise<WorkspaceAgentLauncherResolution | null> {
+    const target = await this.host.resolveRuntimeFileTarget(worktreeSelector)
+    const provider = target.connectionId ? getSshFilesystemProvider(target.connectionId) : null
+    if (target.connectionId && !provider) {
+      throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
+    }
+    return resolveWorkspaceAgentLauncher({
+      workspacePath: target.worktree.path,
+      platform,
+      statPath: async (candidate) => {
+        try {
+          if (provider) {
+            const entry = await provider.stat(candidate)
+            return entry.type === 'file'
+              ? 'file'
+              : entry.type === 'directory'
+                ? 'directory'
+                : 'other'
+          }
+          const entry = await stat(candidate)
+          return entry.isFile() ? 'file' : entry.isDirectory() ? 'directory' : 'other'
+        } catch (error) {
+          if (isENOENT(error)) {
+            return null
+          }
+          throw error
+        }
+      }
+    })
   }
 
   private async searchLocalRuntimeFiles(
