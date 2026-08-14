@@ -3,6 +3,7 @@ import type { AppState } from '@/store/types'
 import type { PersistedTrustedOrcaHooks } from '../../../shared/types'
 import {
   __resetTrustPromptChainForTests,
+  confirmWorkspaceAgentLauncher,
   ensureHooksConfirmed,
   readAndConfirmRuntimeIssueCommand
 } from './ensure-hooks-confirmed'
@@ -71,6 +72,40 @@ describe('ensureHooksConfirmed', () => {
     clearRuntimeCompatibilityCacheForTests()
     installHooksApiMock()
     __resetTrustPromptChainForTests()
+  })
+
+  it('prompts before a repository workspace launcher runs for the first time', async () => {
+    const { state, pending } = createTestState()
+
+    const decision = confirmWorkspaceAgentLauncher(
+      state,
+      'repo-1',
+      'Repo One',
+      '/repo/scripts/start-orca-agent'
+    )
+
+    await vi.waitFor(() => expect(pending).toHaveLength(1))
+    expect(pending[0]).toMatchObject({
+      modal: 'confirm-orca-yaml-hooks',
+      data: {
+        repoId: 'repo-1',
+        repoName: 'Repo One',
+        scriptKind: 'agentLauncher',
+        scriptContent: '/repo/scripts/start-orca-agent'
+      }
+    })
+    pending[0].resolve('run')
+    await expect(decision).resolves.toBe('run')
+  })
+
+  it('does not prompt for a workspace launcher after repository-wide trust', async () => {
+    const { state, pending } = createTestState()
+    state.trustedOrcaHooks['repo-1'] = { all: { approvedAt: 1 } }
+
+    await expect(
+      confirmWorkspaceAgentLauncher(state, 'repo-1', 'Repo One', '/repo/scripts/start-orca-agent')
+    ).resolves.toBe('run')
+    expect(pending).toHaveLength(0)
   })
 
   it('short-circuits to run when the persisted content hash matches the current script', async () => {

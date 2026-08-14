@@ -6,6 +6,7 @@ import {
   type LaunchAgentInNewTabResult
 } from '@/lib/launch-agent-in-new-tab'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { confirmWorkspaceAgentLauncher } from '@/lib/ensure-hooks-confirmed'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
 import { isWebRuntimeSessionActive } from '@/runtime/web-runtime-session'
@@ -31,6 +32,17 @@ export function isWorkspaceAgentLauncherTrusted(args: {
   connectionId: string | null
   runtimeEnvironmentId: string | null
 }): boolean {
+  const repo = findWorkspaceAgentLauncherTrustRepo(args)
+  return Boolean(repo && args.store.trustedOrcaHooks?.[repo.id]?.all)
+}
+
+export function findWorkspaceAgentLauncherTrustRepo(args: {
+  store: ReturnType<typeof useAppStore.getState>
+  repo: ReturnType<typeof useAppStore.getState>['repos'][number] | null
+  workspaceRoot: string
+  connectionId: string | null
+  runtimeEnvironmentId: string | null
+}): ReturnType<typeof useAppStore.getState>['repos'][number] | null {
   const candidates = (
     args.store.repos?.length ? args.store.repos : args.repo ? [args.repo] : []
   ).filter(
@@ -50,9 +62,9 @@ export function isWorkspaceAgentLauncherTrusted(args: {
   })
   const repoIds = new Set(hostCandidates.map((repo) => repo.id))
   if (hostCandidates.length !== 1 || repoIds.size !== 1) {
-    return false
+    return null
   }
-  return Boolean(args.store.trustedOrcaHooks?.[hostCandidates[0].id]?.all)
+  return hostCandidates[0]
 }
 
 /** Resolves a repository-owned launcher before creating the tab, then falls back to the normal command. */
@@ -111,17 +123,30 @@ export async function launchAgentInNewTabWithWorkspaceLauncher(
     console.warn('Workspace agent launcher resolution failed; using the default command.', error)
   }
 
-  if (
-    !resolution ||
-    !isWorkspaceAgentLauncherTrusted({
-      store,
-      repo,
-      workspaceRoot: resolution.workspaceRoot,
-      connectionId: host.connectionId,
-      runtimeEnvironmentId: pairedRuntimeEnvironmentId
-    })
-  ) {
+  if (!resolution) {
     return launchAgentInNewTab({ ...args, launchPlatform })
+  }
+  const trustArgs = {
+    store,
+    repo,
+    workspaceRoot: resolution.workspaceRoot,
+    connectionId: host.connectionId,
+    runtimeEnvironmentId: pairedRuntimeEnvironmentId
+  }
+  const trustRepo = findWorkspaceAgentLauncherTrustRepo(trustArgs)
+  if (!trustRepo) {
+    return launchAgentInNewTab({ ...args, launchPlatform })
+  }
+  if (!isWorkspaceAgentLauncherTrusted(trustArgs)) {
+    const decision = await confirmWorkspaceAgentLauncher(
+      store,
+      trustRepo.id,
+      trustRepo.displayName,
+      resolution.launcherPath
+    )
+    if (decision !== 'run') {
+      return launchAgentInNewTab({ ...args, launchPlatform })
+    }
   }
   const queuedShell = resolveStartupShell(
     launchPlatform,

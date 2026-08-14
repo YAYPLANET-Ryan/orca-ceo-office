@@ -4,6 +4,7 @@ const mockQueueTabInitialCwd = vi.fn()
 const mockLaunchAgentInWebHostTab = vi.fn()
 const mockIsWebRuntimeSessionActive = vi.fn()
 const mockCallRuntimeRpc = vi.fn()
+const mockConfirmWorkspaceAgentLauncher = vi.fn()
 
 const store = {
   settings: {
@@ -61,6 +62,10 @@ vi.mock('@/runtime/runtime-rpc-client', () => ({
   callRuntimeRpc: mockCallRuntimeRpc
 }))
 
+vi.mock('@/lib/ensure-hooks-confirmed', () => ({
+  confirmWorkspaceAgentLauncher: mockConfirmWorkspaceAgentLauncher
+}))
+
 vi.mock('@/lib/worktree-runtime-owner', () => ({
   getRuntimeEnvironmentIdForWorktree: () => 'web-runtime'
 }))
@@ -96,6 +101,7 @@ describe('launchAgentInNewTab initial cwd', () => {
     store.folderWorkspaces = []
     store.projectGroups = []
     mockCallRuntimeRpc.mockReset()
+    mockConfirmWorkspaceAgentLauncher.mockReset().mockResolvedValue('skip')
   })
 
   it('falls back to the bare command when an older paired runtime lacks the resolver', async () => {
@@ -170,9 +176,40 @@ describe('launchAgentInNewTab initial cwd', () => {
     await launchAgentInNewTabWithWorkspaceLauncher({ agent: 'codex', worktreeId: 'wt-1' })
 
     expect(resolveWorkspaceAgentLauncher).toHaveBeenCalled()
+    expect(mockConfirmWorkspaceAgentLauncher).toHaveBeenCalledWith(
+      expect.anything(),
+      'repo-1',
+      undefined,
+      '/repo/scripts/start-orca-agent'
+    )
     expect(store.queueTabStartupCommand).toHaveBeenCalledWith(
       'tab-1',
       expect.objectContaining({ command: expect.not.stringContaining('start-orca-agent') })
+    )
+  })
+
+  it('uses a workspace launcher after the user approves its owning repository', async () => {
+    mockConfirmWorkspaceAgentLauncher.mockResolvedValue('run')
+    store.repos = [{ id: 'repo-1', path: '/repo' }]
+    store.allWorktrees.mockReturnValue([{ id: 'wt-1', repoId: 'repo-1', path: '/repo/project' }])
+    vi.stubGlobal('window', {
+      api: {
+        fs: {
+          resolveWorkspaceAgentLauncher: vi.fn().mockResolvedValue({
+            workspaceRoot: '/repo',
+            launcherPath: '/repo/scripts/start-orca-agent'
+          })
+        }
+      }
+    })
+    const { launchAgentInNewTabWithWorkspaceLauncher } =
+      await import('./launch-agent-with-workspace-launcher')
+
+    await launchAgentInNewTabWithWorkspaceLauncher({ agent: 'claude', worktreeId: 'wt-1' })
+
+    expect(store.queueTabStartupCommand).toHaveBeenCalledWith(
+      'tab-1',
+      expect.objectContaining({ command: expect.stringContaining('start-orca-agent') })
     )
   })
 

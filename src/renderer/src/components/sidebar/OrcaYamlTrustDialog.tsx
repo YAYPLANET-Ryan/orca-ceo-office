@@ -12,20 +12,22 @@ import { useAppStore } from '@/store'
 import type { OrcaHookScriptKind } from '@/lib/orca-hook-trust'
 import { translate } from '@/i18n/i18n'
 
-type ScriptKind = OrcaHookScriptKind
+type ScriptKind = OrcaHookScriptKind | 'agentLauncher'
 
 const SCRIPT_KIND_LABEL: Record<ScriptKind, string> = {
   setup: 'setup script',
   archive: 'archive script',
   issueCommand: 'issue command',
-  vmRecipe: 'VM recipe'
+  vmRecipe: 'VM recipe',
+  agentLauncher: 'workspace agent launcher'
 }
 
 const SCRIPT_KIND_TRIGGER: Record<ScriptKind, string> = {
   setup: 'when this workspace is created',
   archive: 'when this workspace is removed',
   issueCommand: 'when this workspace launches with a linked issue',
-  vmRecipe: 'before provisioning a VM'
+  vmRecipe: 'before provisioning a VM',
+  agentLauncher: 'when Codex or Claude starts'
 }
 
 const OrcaYamlTrustDialog = React.memo(function OrcaYamlTrustDialog() {
@@ -54,13 +56,15 @@ const OrcaYamlTrustDialog = React.memo(function OrcaYamlTrustDialog() {
   const repoId = typeof modalData.repoId === 'string' ? modalData.repoId : ''
   const repoName = typeof modalData.repoName === 'string' ? modalData.repoName : 'this repository'
   const scriptKind: ScriptKind =
-    modalData.scriptKind === 'archive'
-      ? 'archive'
-      : modalData.scriptKind === 'issueCommand'
-        ? 'issueCommand'
-        : modalData.scriptKind === 'vmRecipe'
-          ? 'vmRecipe'
-          : 'setup'
+    modalData.scriptKind === 'agentLauncher'
+      ? 'agentLauncher'
+      : modalData.scriptKind === 'archive'
+        ? 'archive'
+        : modalData.scriptKind === 'issueCommand'
+          ? 'issueCommand'
+          : modalData.scriptKind === 'vmRecipe'
+            ? 'vmRecipe'
+            : 'setup'
   const scriptContent = typeof modalData.scriptContent === 'string' ? modalData.scriptContent : ''
   const contentHash = typeof modalData.contentHash === 'string' ? modalData.contentHash : ''
   const previouslyApproved = modalData.previouslyApproved === true
@@ -74,7 +78,7 @@ const OrcaYamlTrustDialog = React.memo(function OrcaYamlTrustDialog() {
       if (decision === 'run' && repoId) {
         if (alwaysTrust) {
           markOrcaHookRepoAlwaysTrusted(repoId)
-        } else if (contentHash) {
+        } else if (scriptKind !== 'agentLauncher' && contentHash) {
           markOrcaHookScriptConfirmed(repoId, scriptKind, contentHash)
         }
       }
@@ -120,7 +124,12 @@ const OrcaYamlTrustDialog = React.memo(function OrcaYamlTrustDialog() {
                 )}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            {previouslyApproved ? (
+            {scriptKind === 'agentLauncher' ? (
+              <>
+                This repository provides a command that configures Codex or Claude for the selected
+                workspace. Only run it if you trust {repoName}.
+              </>
+            ) : previouslyApproved ? (
               <>
                 <code>
                   {translate('auto.components.sidebar.OrcaYamlTrustDialog.79afc6772b', 'orca.yaml')}
@@ -164,11 +173,13 @@ const OrcaYamlTrustDialog = React.memo(function OrcaYamlTrustDialog() {
                     'New {{value0}} script',
                     { value0: scriptKind }
                   )
-                : translate(
-                    'auto.components.sidebar.OrcaYamlTrustDialog.95bf974a1a',
-                    '{{value0}} script',
-                    { value0: scriptKind }
-                  )}
+                : scriptKind === 'agentLauncher'
+                  ? 'Workspace launcher path'
+                  : translate(
+                      'auto.components.sidebar.OrcaYamlTrustDialog.95bf974a1a',
+                      '{{value0}} script',
+                      { value0: scriptKind }
+                    )}
             </div>
             <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-foreground scrollbar-sleek">
               {scriptContent}
@@ -190,11 +201,21 @@ const OrcaYamlTrustDialog = React.memo(function OrcaYamlTrustDialog() {
             onChange={(event) => setAlwaysTrust(event.target.checked)}
           />
           <span className="text-xs font-medium text-foreground">
-            {translate('auto.components.sidebar.OrcaYamlTrustDialog.531689199b', 'Always trust')}{' '}
-            <code>
-              {translate('auto.components.sidebar.OrcaYamlTrustDialog.79afc6772b', 'orca.yaml')}
-            </code>{' '}
-            {translate('auto.components.sidebar.OrcaYamlTrustDialog.c494b3ccb1', 'in')} {repoName}
+            {scriptKind === 'agentLauncher' ? (
+              <>Always trust repository automation in {repoName}</>
+            ) : (
+              <>
+                {translate(
+                  'auto.components.sidebar.OrcaYamlTrustDialog.531689199b',
+                  'Always trust'
+                )}{' '}
+                <code>
+                  {translate('auto.components.sidebar.OrcaYamlTrustDialog.79afc6772b', 'orca.yaml')}
+                </code>{' '}
+                {translate('auto.components.sidebar.OrcaYamlTrustDialog.c494b3ccb1', 'in')}{' '}
+                {repoName}
+              </>
+            )}
           </span>
         </label>
 
@@ -203,7 +224,9 @@ const OrcaYamlTrustDialog = React.memo(function OrcaYamlTrustDialog() {
             {translate('auto.components.sidebar.OrcaYamlTrustDialog.43b7bec4cd', "Don't run")}
           </Button>
           <Button onClick={() => resolveAndClose('run')}>
-            {translate('auto.components.sidebar.OrcaYamlTrustDialog.f3e2b868fb', 'Run hooks')}
+            {scriptKind === 'agentLauncher'
+              ? 'Use launcher'
+              : translate('auto.components.sidebar.OrcaYamlTrustDialog.f3e2b868fb', 'Run hooks')}
           </Button>
         </DialogFooter>
       </DialogContent>
