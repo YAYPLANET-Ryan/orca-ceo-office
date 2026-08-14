@@ -332,4 +332,44 @@ describe('repo slice runtime folder fallback', () => {
     expect(added?.kind).toBe('folder')
     expect(added?.path).toBe('/local/non-git')
   })
+
+  it('routes a direct SSH folder through the owning connection', async () => {
+    const folderRepo: Repo = {
+      id: 'ssh-folder',
+      path: '/srv/non-git',
+      displayName: 'non-git',
+      badgeColor: '#000',
+      addedAt: 1,
+      kind: 'folder',
+      connectionId: 'ssh-1'
+    }
+    const reposAddRemote = vi.fn().mockResolvedValue({ repo: folderRepo })
+    vi.stubGlobal('window', {
+      api: {
+        repos: { addRemote: reposAddRemote },
+        runtimeEnvironments: { call: runtimeEnvironmentTransportCall }
+      }
+    })
+    const fetchWorktrees = vi.fn().mockResolvedValue(undefined)
+    const store = createTestStore()
+    store.setState({ fetchWorktrees: fetchWorktrees as never })
+
+    const added = await store
+      .getState()
+      .addNonGitFolder('/srv/non-git', { connectionId: 'ssh-1' } as never)
+
+    expect(reposAddRemote).toHaveBeenCalledWith({
+      connectionId: 'ssh-1',
+      remotePath: '/srv/non-git',
+      kind: 'folder'
+    })
+    expect(fetchWorktrees).toHaveBeenCalledWith('ssh-folder', {
+      executionHostId: 'ssh:ssh-1'
+    })
+    expect(added).toMatchObject({
+      id: 'ssh-folder',
+      connectionId: 'ssh-1',
+      executionHostId: 'ssh:ssh-1'
+    })
+  })
 })

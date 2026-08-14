@@ -1407,7 +1407,10 @@ function getRuntimeTargetCachePrefix(
 }
 
 type FolderWorkspacePathStatusRouteOptions = { runtimeEnvironmentId?: string | null }
-type AddRepoPathRouteOptions = { runtimeEnvironmentId?: string | null }
+type AddRepoPathRouteOptions = {
+  runtimeEnvironmentId?: string | null
+  connectionId?: string | null
+}
 type RuntimeCatalogFetchOptions = { runtimeEnvironmentId?: string | null }
 
 function getFolderWorkspacePathStatusRouteSettings(
@@ -2878,7 +2881,18 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       const target = getActiveRuntimeTarget(getAddRepoPathRouteSettings(options, get().settings))
       let repo: Repo
       try {
-        if (target.kind === 'local') {
+        const connectionId = options?.connectionId?.trim()
+        if (connectionId) {
+          const result = await window.api.repos.addRemote({
+            connectionId,
+            remotePath: path,
+            kind
+          })
+          if ('error' in result) {
+            throw new Error(result.error)
+          }
+          repo = result.repo
+        } else if (target.kind === 'local') {
           const result = await window.api.repos.add({ path, kind })
           if ('error' in result) {
             throw new Error(result.error)
@@ -3252,11 +3266,13 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       await markOnboardingProjectAdded('addedFolder')
       // Why: focus the new folder so the add is visible; lazy-import worktree-activation to avoid a circular module load (it imports the store root).
       const executionHostId =
-        options?.runtimeEnvironmentId === undefined
-          ? undefined
-          : options.runtimeEnvironmentId
-            ? toRuntimeExecutionHostId(options.runtimeEnvironmentId)
-            : LOCAL_EXECUTION_HOST_ID
+        options?.connectionId?.trim()
+          ? toSshExecutionHostId(options.connectionId.trim())
+          : options?.runtimeEnvironmentId === undefined
+            ? undefined
+            : options.runtimeEnvironmentId
+              ? toRuntimeExecutionHostId(options.runtimeEnvironmentId)
+              : LOCAL_EXECUTION_HOST_ID
       await get().fetchWorktrees(repo.id, executionHostId ? { executionHostId } : undefined)
       const folderWorktree = get().worktreesByRepo[repo.id]?.find(
         (worktree) => executionHostId === undefined || worktree.hostId === executionHostId
