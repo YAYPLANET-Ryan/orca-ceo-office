@@ -10,6 +10,12 @@ import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
 import { isWebRuntimeSessionActive } from '@/runtime/web-runtime-session'
 import { isWindowsAbsolutePathLike } from '../../../shared/cross-platform-path'
+import { normalizeRuntimePathForComparison } from '../../../shared/cross-platform-path'
+import {
+  getRepoExecutionHostId,
+  LOCAL_EXECUTION_HOST_ID,
+  parseExecutionHostId
+} from '../../../shared/execution-host'
 import { resolveLocalWindowsAgentStartupShell } from '../../../shared/windows-terminal-shell'
 import { resolveStartupShell } from '../../../shared/tui-agent-startup-shell'
 import {
@@ -17,6 +23,37 @@ import {
   isWorkspaceContractAgent,
   type WorkspaceAgentLauncherResolution
 } from '../../../shared/workspace-agent-launcher-contract'
+
+export function isWorkspaceAgentLauncherTrusted(args: {
+  store: ReturnType<typeof useAppStore.getState>
+  repo: ReturnType<typeof useAppStore.getState>['repos'][number] | null
+  workspaceRoot: string
+  connectionId: string | null
+  runtimeEnvironmentId: string | null
+}): boolean {
+  const candidates = (
+    args.store.repos?.length ? args.store.repos : args.repo ? [args.repo] : []
+  ).filter(
+    (repo) =>
+      normalizeRuntimePathForComparison(repo.path) ===
+      normalizeRuntimePathForComparison(args.workspaceRoot)
+  )
+  const hostCandidates = candidates.filter((repo) => {
+    if (args.connectionId) {
+      return repo.connectionId === args.connectionId
+    }
+    if (args.runtimeEnvironmentId) {
+      const host = parseExecutionHostId(getRepoExecutionHostId(repo))
+      return host?.kind === 'runtime' && host.environmentId === args.runtimeEnvironmentId
+    }
+    return getRepoExecutionHostId(repo) === LOCAL_EXECUTION_HOST_ID
+  })
+  const repoIds = new Set(hostCandidates.map((repo) => repo.id))
+  if (hostCandidates.length !== 1 || repoIds.size !== 1) {
+    return false
+  }
+  return Boolean(args.store.trustedOrcaHooks?.[hostCandidates[0].id]?.all)
+}
 
 /** Resolves a repository-owned launcher before creating the tab, then falls back to the normal command. */
 export async function launchAgentInNewTabWithWorkspaceLauncher(
@@ -74,7 +111,16 @@ export async function launchAgentInNewTabWithWorkspaceLauncher(
     console.warn('Workspace agent launcher resolution failed; using the default command.', error)
   }
 
-  if (!resolution) {
+  if (
+    !resolution ||
+    !isWorkspaceAgentLauncherTrusted({
+      store,
+      repo,
+      workspaceRoot: resolution.workspaceRoot,
+      connectionId: host.connectionId,
+      runtimeEnvironmentId: pairedRuntimeEnvironmentId
+    })
+  ) {
     return launchAgentInNewTab({ ...args, launchPlatform })
   }
   const queuedShell = resolveStartupShell(

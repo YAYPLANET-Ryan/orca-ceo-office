@@ -12,8 +12,22 @@ const store = {
     agentDefaultEnv: {},
     activeRuntimeEnvironmentId: null as string | null
   },
-  repos: [] as { id: string; path: string; connectionId?: string }[],
+  repos: [] as {
+    id: string
+    path: string
+    connectionId?: string
+    executionHostId?: string | null
+  }[],
   allWorktrees: vi.fn(() => [] as { id: string; repoId: string; path: string }[]),
+  trustedOrcaHooks: {} as Record<string, { all?: { approvedAt: number } }>,
+  folderWorkspaces: [] as {
+    id: string
+    projectGroupId: string
+    folderPath: string
+    connectionId?: string | null
+    executionHostId?: string | null
+  }[],
+  projectGroups: [] as { id: string; connectionId?: string | null }[],
   tabsByWorktree: { 'wt-1': [{ id: 'tab-1' }] },
   openFiles: [] as { id: string; worktreeId: string }[],
   browserTabsByWorktree: {} as Record<string, { id: string }[]>,
@@ -78,6 +92,9 @@ describe('launchAgentInNewTab initial cwd', () => {
     })
     store.repos = []
     store.allWorktrees.mockReturnValue([])
+    store.trustedOrcaHooks = {}
+    store.folderWorkspaces = []
+    store.projectGroups = []
     mockCallRuntimeRpc.mockReset()
   })
 
@@ -85,6 +102,7 @@ describe('launchAgentInNewTab initial cwd', () => {
     mockIsWebRuntimeSessionActive.mockReturnValue(true)
     mockCallRuntimeRpc.mockRejectedValue(new Error('Unknown method'))
     store.repos = [{ id: 'repo-1', path: '/repo' }]
+    store.trustedOrcaHooks = { 'repo-1': { all: { approvedAt: 1 } } }
     store.allWorktrees.mockReturnValue([{ id: 'wt-1', repoId: 'repo-1', path: '/repo/project' }])
     const { launchAgentInNewTabWithWorkspaceLauncher } =
       await import('./launch-agent-with-workspace-launcher')
@@ -109,6 +127,7 @@ describe('launchAgentInNewTab initial cwd', () => {
       finishResolution = resolve
     })
     store.repos = [{ id: 'repo-1', path: '/repo' }]
+    store.trustedOrcaHooks = { 'repo-1': { all: { approvedAt: 1 } } }
     store.allWorktrees.mockReturnValue([{ id: 'wt-1', repoId: 'repo-1', path: '/repo/project' }])
     const resolveWorkspaceAgentLauncher = vi.fn(() => resolution)
     vi.stubGlobal('window', { api: { fs: { resolveWorkspaceAgentLauncher } } })
@@ -133,6 +152,69 @@ describe('launchAgentInNewTab initial cwd', () => {
         command: expect.stringMatching(
           /^'\/repo\/scripts\/start-orca-agent' '--agent' 'codex'(?:\s|$)/
         )
+      })
+    )
+  })
+
+  it('falls back when a local workspace contract is present but untrusted', async () => {
+    store.repos = [{ id: 'repo-1', path: '/repo' }]
+    store.allWorktrees.mockReturnValue([{ id: 'wt-1', repoId: 'repo-1', path: '/repo/project' }])
+    const resolveWorkspaceAgentLauncher = vi.fn().mockResolvedValue({
+      workspaceRoot: '/repo',
+      launcherPath: '/repo/scripts/start-orca-agent'
+    })
+    vi.stubGlobal('window', { api: { fs: { resolveWorkspaceAgentLauncher } } })
+    const { launchAgentInNewTabWithWorkspaceLauncher } =
+      await import('./launch-agent-with-workspace-launcher')
+
+    await launchAgentInNewTabWithWorkspaceLauncher({ agent: 'codex', worktreeId: 'wt-1' })
+
+    expect(resolveWorkspaceAgentLauncher).toHaveBeenCalled()
+    expect(store.queueTabStartupCommand).toHaveBeenCalledWith(
+      'tab-1',
+      expect.objectContaining({ command: expect.not.stringContaining('start-orca-agent') })
+    )
+  })
+
+  it('uses the paired runtime folder selector for a trusted folder workspace', async () => {
+    mockIsWebRuntimeSessionActive.mockReturnValue(true)
+    mockCallRuntimeRpc.mockResolvedValue({
+      workspaceRoot: '/repo',
+      launcherPath: '/repo/scripts/start-orca-agent'
+    })
+    store.repos = [{ id: 'repo-1', path: '/repo', executionHostId: 'runtime:web-runtime' }]
+    store.trustedOrcaHooks = { 'repo-1': { all: { approvedAt: 1 } } }
+    store.folderWorkspaces = [
+      {
+        id: 'folder-1',
+        projectGroupId: 'group-1',
+        folderPath: '/repo/projects',
+        executionHostId: 'runtime:web-runtime'
+      }
+    ]
+    store.projectGroups = [{ id: 'group-1' }]
+    store.allWorktrees.mockReturnValue([
+      { id: 'folder:folder-1', repoId: 'folder:folder-1', path: '/repo/projects' }
+    ])
+    const { launchAgentInNewTabWithWorkspaceLauncher } =
+      await import('./launch-agent-with-workspace-launcher')
+
+    await launchAgentInNewTabWithWorkspaceLauncher({
+      agent: 'claude',
+      worktreeId: 'folder:folder-1'
+    })
+
+    expect(mockCallRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'web-runtime' },
+      'files.resolveWorkspaceAgentLauncher',
+      { worktree: 'id:folder:folder-1', platform: 'linux' },
+      { timeoutMs: 10_000 }
+    )
+    expect(mockLaunchAgentInWebHostTab).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startupPlan: expect.objectContaining({
+          launchCommand: expect.stringContaining("'/repo/scripts/start-orca-agent'")
+        })
       })
     )
   })

@@ -25,6 +25,17 @@ describe('buildWorkspaceAgentLauncherCommand', () => {
     ).toBe("'/c/CEO Office/scripts/Start-OrcaAgent.cmd' '--agent' 'claude'")
   })
 
+  it('quotes a Windows launcher for a cmd shell', () => {
+    expect(
+      buildWorkspaceAgentLauncherCommand({
+        launcherPath: 'C:\\CEO Office\\scripts\\Start-OrcaAgent.cmd',
+        agent: 'codex',
+        platform: 'win32',
+        shell: 'cmd'
+      })
+    ).toBe('"C:\\CEO Office\\scripts\\Start-OrcaAgent.cmd" "--agent" "codex"')
+  })
+
   it('uses the Linux path for a WSL-owned launch', () => {
     expect(
       buildWorkspaceAgentLauncherCommand({
