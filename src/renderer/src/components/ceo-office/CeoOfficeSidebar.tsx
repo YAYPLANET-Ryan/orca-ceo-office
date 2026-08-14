@@ -39,7 +39,11 @@ const DEFAULT_MANIFEST: CeoOfficeManifest = {
     {
       id: 'personal',
       label: 'Personal',
-      items: [{ id: 'personal-root', label: 'Personal Office', path: '02_PERSONAL', kind: 'folder' }]
+      items: [
+        { id: 'araon', label: 'ARAON', path: '02_PERSONAL/araon', kind: 'folder' },
+        { id: 'pc', label: 'PC', path: '02_PERSONAL/pc', kind: 'folder' },
+        { id: 'trading', label: 'Trading', path: '02_PERSONAL/trading', kind: 'folder' }
+      ]
     },
     {
       id: 'shared',
@@ -111,9 +115,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
       : activeWorktree.runtimeOwnerEnvironmentId
         ? { runtimeEnvironmentId: activeWorktree.runtimeOwnerEnvironmentId }
         : undefined
-    await (routeOptions
-      ? addNonGitFolder(itemPath, routeOptions)
-      : addNonGitFolder(itemPath))
+    await (routeOptions ? addNonGitFolder(itemPath, routeOptions) : addNonGitFolder(itemPath))
   }
 
   return (
