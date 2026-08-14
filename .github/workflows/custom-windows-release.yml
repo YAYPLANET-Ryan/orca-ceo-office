@@ -70,6 +70,16 @@ jobs:
           pnpm run ensure:electron-runtime
           pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish never
 
+      - name: Write Windows installer checksum
+        shell: pwsh
+        run: |
+          $installer = "dist/orca-windows-setup.exe"
+          if (-not (Test-Path -LiteralPath $installer)) {
+            throw "Missing Windows installer: $installer"
+          }
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  orca-windows-setup.exe" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
+
       - name: Publish Windows release
         shell: pwsh
         env:
@@ -78,6 +88,7 @@ jobs:
           $tag = "v$env:ORCA_RELEASE_VERSION"
           $assets = @(
             "dist/orca-windows-setup.exe",
+            "dist/orca-windows-setup.exe.sha256",
             "dist/orca-windows-setup.exe.blockmap",
             "dist/latest.yml"
           )

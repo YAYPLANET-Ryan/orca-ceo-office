@@ -27,6 +27,22 @@ git push -u custom ryan/ceo-office-sidebar
 - The workflow builds, tests, and publishes the Windows installer and update
   metadata to GitHub Releases.
 - Installed clients use the existing Orca updater to discover the Release.
+- The release also contains `orca-windows-setup.exe.sha256` so a manually
+  downloaded installer can be verified before it runs.
+
+## Endpoint distribution rule
+
+Build the Windows installer once in the release workflow. Paired laptops and
+other endpoint PCs must download the verified GitHub Release asset; they must
+not clone the repository, install a compiler toolchain, or rebuild Orca.
+
+For an unpublished hotfix, upload the verified installer to a draft release and
+download it with an authenticated GitHub CLI session. For a normal published
+release, let the built-in Orca updater install it. Use manual download only when
+the updater is unavailable.
+
+After a manual download, compare the installer SHA256 with the accompanying
+`.sha256` asset before starting the installer.
 
 Use workflow dispatch with an explicit version for the first release. The
 version must be higher than the installed version, for example:
