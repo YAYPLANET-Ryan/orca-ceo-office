@@ -29,6 +29,7 @@ describe('custom Windows release workflow', () => {
     const job = workflow.jobs['build-and-publish']
     const versionStep = job.steps.find((step) => step.name === 'Resolve release version')
 
+    expect(versionStep.env.GH_TOKEN).toBe('${{ secrets.GITHUB_TOKEN }}')
     expect(versionStep.run).toContain('gh release list')
     expect(versionStep.run).toContain('$candidate -gt $base')
     expect(versionStep.run).toContain('$core-ceo.$date.$env:RUN_NUMBER')
