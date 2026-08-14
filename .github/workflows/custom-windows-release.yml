@@ -52,10 +52,35 @@ jobs:
           if ($env:INPUT_VERSION) {
             $version = $env:INPUT_VERSION
           } else {
-            $base = node -p "require('./package.json').version.split('-')[0]"
-            $parts = $base.Split('.')
-            $parts[2] = ([int]$parts[2] + 1).ToString()
-            $version = "$($parts -join '.')-ceo.$((Get-Date).ToUniversalTime().ToString('yyyyMMdd')).$env:RUN_NUMBER"
+            $packageBase = node -p "require('./package.json').version.split('-')[0]"
+            $packageParts = $packageBase.Split('.')
+            $base = [version]::new(
+              [int]$packageParts[0],
+              [int]$packageParts[1],
+              ([int]$packageParts[2] + 1)
+            )
+
+            $releaseTags = gh release list `
+              --repo "$env:GITHUB_REPOSITORY" `
+              --limit 100 `
+              --json tagName `
+              --jq '.[].tagName'
+            foreach ($releaseTag in $releaseTags) {
+              if ($releaseTag -match '^v?(\d+)\.(\d+)\.(\d+)(?:-|$)') {
+                $candidate = [version]::new(
+                  [int]$Matches[1],
+                  [int]$Matches[2],
+                  [int]$Matches[3]
+                )
+                if ($candidate -gt $base) {
+                  $base = $candidate
+                }
+              }
+            }
+
+            $core = "$($base.Major).$($base.Minor).$($base.Build)"
+            $date = (Get-Date).ToUniversalTime().ToString('yyyyMMdd')
+            $version = "$core-ceo.$date.$env:RUN_NUMBER"
           }
           "ORCA_RELEASE_VERSION=$version" >> $env:GITHUB_ENV
           "Resolved release version: $version"

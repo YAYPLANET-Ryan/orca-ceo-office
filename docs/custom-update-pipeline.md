@@ -26,6 +26,9 @@ git push -u custom ryan/ceo-office-sidebar
 - The merge triggers `Custom Windows Release`.
 - The workflow builds, tests, and publishes the Windows installer and update
   metadata to GitHub Releases.
+- Automatic version selection considers existing custom releases, including
+  drafts, so a newly published build is not older than a manually distributed
+  hotfix.
 - Installed clients use the existing Orca updater to discover the Release.
 - The release also contains `orca-windows-setup.exe.sha256` so a manually
   downloaded installer can be verified before it runs.

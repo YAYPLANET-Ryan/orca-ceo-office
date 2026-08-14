@@ -24,4 +24,13 @@ describe('custom Windows release workflow', () => {
     expect(checksumStep.run).toContain('SHA256')
     expect(publishStep.run).toContain('dist/orca-windows-setup.exe.sha256')
   })
+
+  it('keeps automatic versions above existing custom release cores', () => {
+    const job = workflow.jobs['build-and-publish']
+    const versionStep = job.steps.find((step) => step.name === 'Resolve release version')
+
+    expect(versionStep.run).toContain('gh release list')
+    expect(versionStep.run).toContain('$candidate -gt $base')
+    expect(versionStep.run).toContain('$core-ceo.$date.$env:RUN_NUMBER')
+  })
 })
