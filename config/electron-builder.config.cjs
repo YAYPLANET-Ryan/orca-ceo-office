@@ -23,12 +23,36 @@ const isMacHourly = process.env.ORCA_MAC_HOURLY === '1'
 const isMacAdhoc = process.env.ORCA_MAC_ADHOC === '1'
 const isMacRelease = process.env.ORCA_MAC_RELEASE === '1' || isMacHourly || isMacAdhoc
 const isLinuxArm64Release = process.env.ORCA_LINUX_ARM64_RELEASE === '1'
-const localBuildVersion = isMacRelease ? undefined : process.env.ORCA_LOCAL_BUILD_VERSION
-const releaseBuildVersion = process.env.ORCA_RELEASE_VERSION
+const semverNumericIdentifier = '(?:0|[1-9]\\d*)'
+const semverNonNumericIdentifier = '(?:\\d*[A-Za-z-][0-9A-Za-z-]*)'
+const semverPrereleaseIdentifier = `(?:${semverNumericIdentifier}|${semverNonNumericIdentifier})`
+const semverPattern = new RegExp(
+  `^${semverNumericIdentifier}\\.${semverNumericIdentifier}\\.${semverNumericIdentifier}` +
+    `(?:-${semverPrereleaseIdentifier}(?:\\.${semverPrereleaseIdentifier})*)?` +
+    '(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$'
+)
+
+function validateBuildVersion(name, value) {
+  if (!value) {
+    return value
+  }
+  if (!semverPattern.test(value)) {
+    throw new Error(`${name} must be a valid SemVer version; received ${JSON.stringify(value)}`)
+  }
+  return value
+}
+
+const localBuildVersion = isMacRelease
+  ? undefined
+  : validateBuildVersion('ORCA_LOCAL_BUILD_VERSION', process.env.ORCA_LOCAL_BUILD_VERSION)
+const releaseBuildVersion = validateBuildVersion(
+  'ORCA_RELEASE_VERSION',
+  process.env.ORCA_RELEASE_VERSION
+)
 const devChannelBuildVersion = isMacHourly
-  ? process.env.ORCA_HOURLY_BUILD_VERSION
+  ? validateBuildVersion('ORCA_HOURLY_BUILD_VERSION', process.env.ORCA_HOURLY_BUILD_VERSION)
   : isMacAdhoc
-    ? process.env.ORCA_ADHOC_BUILD_VERSION
+    ? validateBuildVersion('ORCA_ADHOC_BUILD_VERSION', process.env.ORCA_ADHOC_BUILD_VERSION)
     : undefined
 // Why each dev channel gets its own repo rather than tagging into the main one:
 // the releases atom feed exposes only the 10 newest entries, so 24 hourly tags a

@@ -25,7 +25,8 @@ const MUTABLE_BUILD_ENV = [
   'ORCA_MAC_RELEASE',
   'ORCA_HOURLY_BUILD_VERSION',
   'ORCA_ADHOC_BUILD_VERSION',
-  'ORCA_LOCAL_BUILD_VERSION'
+  'ORCA_LOCAL_BUILD_VERSION',
+  'ORCA_RELEASE_VERSION'
 ]
 
 /** Re-requires the config under a temporary env, then restores env and module cache. */
@@ -276,6 +277,12 @@ describe('electron-builder config', () => {
       delete require.cache[configPath]
       require('../electron-builder.config.cjs')
     }
+  })
+
+  it('rejects a release version that electron-updater cannot parse as SemVer', () => {
+    expect(() => withEnv({ ORCA_RELEASE_VERSION: '1.4.182-ceo.20260814.01' }, () => {})).toThrow(
+      /valid SemVer/
+    )
   })
 
   it('never applies local semver to release packaging', () => {
