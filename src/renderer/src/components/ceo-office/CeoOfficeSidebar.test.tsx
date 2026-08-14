@@ -74,9 +74,8 @@ describe('CeoOfficeSidebar navigation', () => {
     for (const [label, folder] of entries) {
       fireEvent.click(screen.getByRole('button', { name: label }))
       await waitFor(() => {
-        expect(mocks.state.addNonGitFolder).toHaveBeenCalledWith(
-          expect.stringMatching(new RegExp(`02_PERSONAL[\\\\/]${folder}$`))
-        )
+        const lastCall = mocks.state.addNonGitFolder.mock.calls.at(-1)
+        expect(lastCall?.[0].replaceAll('\\\\', '/')).toBe(`E:/ORCA/02_PERSONAL/${folder}`)
       })
     }
   })

@@ -40,6 +40,7 @@ const DEFAULT_MANIFEST: CeoOfficeManifest = {
       id: 'personal',
       label: 'Personal',
       items: [
+        // Keep Personal entries project-scoped so clicks open the intended Orca folder workspace.
         { id: 'araon', label: 'ARAON', path: '02_PERSONAL/araon', kind: 'folder' },
         { id: 'pc', label: 'PC', path: '02_PERSONAL/pc', kind: 'folder' },
         { id: 'trading', label: 'Trading', path: '02_PERSONAL/trading', kind: 'folder' }
