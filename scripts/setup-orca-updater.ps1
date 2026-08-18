@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
   [string]$UpdaterPath,
-  [string]$TaskName = 'ORCA Weekly GitHub Release Install'
+  [string]$TaskName = 'ORCA Weekly GitHub Release Install',
+  [switch]$RegisterServeTask,
+  [int]$ServePort = 8765,
+  [string]$ServeTaskName = 'ORCA Pairing Serve'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,11 +25,25 @@ if (Test-Path -LiteralPath $UpdaterPath -PathType Leaf) {
   [IO.File]::WriteAllBytes($installedUpdater, [Convert]::FromBase64String(($payload.content -replace '\s', '')))
 }
 
-$action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$installedUpdater`""
+$action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$installedUpdater`" -DrainDeadlineMinutes 50"
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At '04:00'
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -WakeToRun -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description 'Install verified Orca GitHub releases every Saturday at 04:00.' -Force | Out-Null
+
+if ($RegisterServeTask) {
+  $serveCliCandidates = @(
+    (Join-Path $env:LOCALAPPDATA 'Programs\orca\resources\bin\orca.exe'),
+    (Join-Path $env:LOCALAPPDATA 'Programs\orca\resources\bin\orca.cmd')
+  )
+  $serveCli = $serveCliCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+  if (-not $serveCli) { throw 'Cannot register the serve task because Orca CLI was not found under the per-user installation.' }
+  $serveAction = New-ScheduledTaskAction -Execute $serveCli -Argument "serve --port $ServePort"
+  $serveTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+  $serveSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
+  Register-ScheduledTask -TaskName $ServeTaskName -Action $serveAction -Trigger $serveTrigger -Settings $serveSettings -Principal $principal -Description "Start Orca pairing serve on port $ServePort at logon." -Force | Out-Null
+  Write-Host "Registered serve task: $ServeTaskName ($serveCli serve --port $ServePort)"
+}
 
 $info = Get-ScheduledTaskInfo -TaskName $TaskName
 Write-Host "Registered: $TaskName"

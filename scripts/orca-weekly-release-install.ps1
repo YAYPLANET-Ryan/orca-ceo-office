@@ -3,6 +3,8 @@ param(
   [string]$Version,
   [int]$SmokeSeconds = 90,
   [int]$DaemonGraceSeconds = 120,
+  [int]$DrainDeadlineMinutes = 0,
+  [switch]$Force,
   [switch]$TestMode
 )
 
@@ -18,11 +20,24 @@ $fatalLog = Join-Path $env:APPDATA 'orca\bootstrap-fatal.log'
 $installStarted = $false
 $actual = ''
 $transcriptStarted = $false
+$drainAttempted = $false
+$drainForced = $false
+$resumedTerminals = -1
+$serveWasRunning = $false
+$serveRestarted = $false
+$serveListening = $false
+$serveState = $null
+$lastOrcaSessionIdleSummary = 'not checked'
 $mutex = New-Object System.Threading.Mutex($false, 'Local\OrcaWeeklyReleaseInstall')
 $mutexOwned = $false
 
+if ($Force -and -not $PSBoundParameters.ContainsKey('DrainDeadlineMinutes')) {
+  $DrainDeadlineMinutes = 5
+}
+
 function Notify([string]$Message) {
   Write-Host $Message
+  if ($TestMode) { return }
   try {
     if (Get-Module -ListAvailable -Name BurntToast) {
       Import-Module BurntToast -ErrorAction Stop
@@ -39,18 +54,35 @@ function Write-InstallState {
     [string]$StateVersion,
     [string]$Sha256,
     [int]$FileCount,
-    [string]$Reason
+    [string]$Reason,
+    [bool]$DrainForced = $false,
+    [int]$ResumedTerminals = -1,
+    [bool]$ServeWasRunning = $false,
+    [bool]$ServeRestarted = $false,
+    [bool]$ServeListening = $false
   )
   try {
+    $hostname = if (-not [string]::IsNullOrWhiteSpace($env:COMPUTERNAME)) {
+      $env:COMPUTERNAME
+    } else {
+      [Environment]::MachineName
+    }
     $payload = [ordered]@{
       version = $StateVersion
       sha256 = $Sha256
       installedAt = (Get-Date).ToUniversalTime().ToString('o')
-      hostname = $env:COMPUTERNAME
+      hostname = $hostname
       fileCount = $FileCount
       status = $State
+      drainForced = $DrainForced
     }
     if ($Reason) { $payload.reason = $Reason }
+    if ($ResumedTerminals -ge 0) { $payload.resumedTerminals = $ResumedTerminals }
+    if ($ServeWasRunning) {
+      $payload.serveWasRunning = $true
+      $payload.serveRestarted = $ServeRestarted
+      $payload.serveListening = $ServeListening
+    }
     $temp = "$statePath.tmp-$([guid]::NewGuid().ToString('N'))"
     $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temp -Encoding UTF8
     Move-Item -LiteralPath $temp -Destination $statePath -Force
@@ -98,15 +130,17 @@ function Get-ArchiveFileCount([string]$Path) {
 }
 
 function Get-ProcessSnapshot {
+  if ($TestMode) { throw 'TestMode process snapshot requires an explicit mock.' }
   @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
 }
 
 function Get-OrcaDaemonInfo([object[]]$AllProcesses) {
+  if ($null -eq $AllProcesses) { return @() }
   @($AllProcesses | Where-Object Name -ieq 'orca-terminal-daemon.exe' | ForEach-Object {
       [pscustomobject]@{
         ProcessId = [int]$_.ProcessId
         ParentProcessId = [int]$_.ParentProcessId
-        CommandLine = [string]$_.CommandLine
+        CommandLine = if ($null -ne $_.PSObject.Properties['CommandLine']) { [string]$_.CommandLine } else { '' }
       }
     })
 }
@@ -117,7 +151,41 @@ function Get-OrcaDaemonPtyCount([object[]]$AllProcesses) {
   @($AllProcesses | Where-Object { $daemonIds -contains [int]$_.ParentProcessId }).Count
 }
 
+function Get-OrcaProcessTree([object[]]$AllProcesses) {
+  if ($null -eq $AllProcesses) { return @() }
+  $roots = @($AllProcesses | Where-Object Name -ieq 'Orca.exe' | Select-Object -ExpandProperty ProcessId)
+  $roots += @(Get-OrcaDaemonInfo $AllProcesses | Select-Object -ExpandProperty ProcessId)
+  if ($roots.Count -eq 0) { return @() }
+  $frontier = New-Object 'System.Collections.Generic.HashSet[int]'
+  foreach ($id in $roots) { [void]$frontier.Add([int]$id) }
+  do {
+    $found = @($AllProcesses | Where-Object { $frontier.Contains([int]$_.ParentProcessId) -and -not $frontier.Contains([int]$_.ProcessId) })
+    foreach ($child in $found) { [void]$frontier.Add([int]$child.ProcessId) }
+  } while ($found.Count -gt 0)
+  @($AllProcesses | Where-Object { $frontier.Contains([int]$_.ProcessId) })
+}
+
+function Get-OrcaActivityProcesses([object[]]$AllProcesses) {
+  if ($null -eq $AllProcesses) { return @() }
+  $tree = @(Get-OrcaProcessTree $AllProcesses)
+  if ($tree.Count -eq 0) { return @() }
+  $rootIds = @(
+    $tree | Where-Object { $_.Name -ieq 'Orca.exe' -or $_.Name -ieq 'orca-terminal-daemon.exe' } |
+      Select-Object -ExpandProperty ProcessId
+  )
+  $infrastructure = @('conhost.exe', 'OpenConsole.exe', 'winpty-agent.exe')
+  $shells = @('powershell.exe', 'pwsh.exe', 'cmd.exe', 'bash.exe')
+  @($tree | Where-Object {
+      $processId = [int]$_.ProcessId
+      $name = [string]$_.Name
+      if ($rootIds -contains $processId -or $infrastructure -contains $name) { return $false }
+      if ($shells -contains $name) { return $false }
+      return $true
+    })
+}
+
 function Get-OrcaLockSummary {
+  if ($TestMode) { return 'test-mode (process access blocked)' }
   $items = @(Get-Process -Name Orca,orca-terminal-daemon -ErrorAction SilentlyContinue | ForEach-Object {
       "$($_.ProcessName)#$($_.Id)"
     })
@@ -127,16 +195,175 @@ function Get-OrcaLockSummary {
 
 function Test-OrcaBusy {
   $all = Get-ProcessSnapshot
-  $roots = @($all | Where-Object Name -ieq 'Orca.exe' | Select-Object -ExpandProperty ProcessId)
-  $roots += @(Get-OrcaDaemonInfo $all | Select-Object -ExpandProperty ProcessId)
-  if ($roots.Count -eq 0) { return $false }
-  $frontier = New-Object 'System.Collections.Generic.HashSet[int]'
-  foreach ($id in $roots) { [void]$frontier.Add([int]$id) }
-  do {
-    $found = @($all | Where-Object { $frontier.Contains([int]$_.ParentProcessId) -and -not $frontier.Contains([int]$_.ProcessId) })
-    foreach ($child in $found) { [void]$frontier.Add([int]$child.ProcessId) }
-  } while ($found.Count -gt 0)
-  @($all | Where-Object { $frontier.Contains([int]$_.ProcessId) -and $_.Name -match '^(claude|codex|hermes|node)(\.exe)?$' }).Count -gt 0
+  @(Get-OrcaActivityProcesses $all).Count -gt 0
+}
+
+function Get-OrcaCliPath {
+  foreach ($name in @('orca.exe', 'orca.cmd')) {
+    $candidate = Join-Path $installRoot "resources\bin\$name"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+  }
+  return $null
+}
+
+function Get-OrcaTerminalList {
+  $cli = Get-OrcaCliPath
+  if (-not $cli) { return $null }
+  try {
+    if ($cli -match '\.cmd$') {
+      $raw = & cmd.exe /d /c "`"$cli`" terminal list --json" 2>$null | Out-String
+    } else {
+      $raw = & $cli terminal list --json 2>$null | Out-String
+    }
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) { return $null }
+    $payload = $raw | ConvertFrom-Json
+    if (-not $payload.result -or $null -eq $payload.result.terminals) { return $null }
+    return ,([pscustomobject]@{ Terminals = @($payload.result.terminals) })
+  } catch {
+    Write-Warning "Orca terminal list unavailable; using CPU fallback: $($_.Exception.Message)"
+    return $null
+  }
+}
+
+function Get-OrcaAgentCpuSnapshot {
+  if ($TestMode) { throw 'TestMode CPU snapshot requires an explicit mock.' }
+  $snapshot = @{}
+  $all = Get-ProcessSnapshot
+  $activity = @(Get-OrcaActivityProcesses $all)
+  foreach ($agent in $activity) {
+    try {
+      $process = Get-Process -Id ([int]$agent.ProcessId) -ErrorAction Stop
+      $snapshot[[int]$agent.ProcessId] = [double]$process.TotalProcessorTime.TotalSeconds
+    } catch { }
+  }
+  return $snapshot
+}
+
+function Test-OrcaSessionsIdle {
+  param(
+    [int]$IdleMinutes = 5,
+    [int]$CpuSampleSeconds = 10,
+    [double]$CpuThresholdSeconds = 0.5
+  )
+  $terminalData = Get-OrcaTerminalList
+  if ($null -ne $terminalData) {
+    $terminals = @($terminalData.Terminals)
+    if ($terminals.Count -eq 0) {
+      $script:lastOrcaSessionIdleSummary = 'CLI terminals=0; idle=true'
+      return $true
+    }
+    $now = [DateTimeOffset]::UtcNow
+    $idle = $true
+    $latestOutput = $null
+    foreach ($terminal in $terminals) {
+      try {
+        $lastOutputAt = [int64]$terminal.lastOutputAt
+        $lastOutput = [DateTimeOffset]::FromUnixTimeMilliseconds($lastOutputAt)
+        if ($null -eq $latestOutput -or $lastOutput -gt $latestOutput) { $latestOutput = $lastOutput }
+        if (($now - $lastOutput).TotalMinutes -lt $IdleMinutes) { $idle = $false }
+      } catch {
+        $idle = $false
+      }
+    }
+    $latestLabel = if ($latestOutput) { $latestOutput.ToLocalTime().ToString('o') } else { 'unknown' }
+    $script:lastOrcaSessionIdleSummary = "CLI terminals=$($terminals.Count); latestOutputAt=$latestLabel; idle=$idle"
+    return $idle
+  }
+
+  $first = Get-OrcaAgentCpuSnapshot
+  if ($first.Count -eq 0) {
+    $script:lastOrcaSessionIdleSummary = 'CPU fallback agents=0; idle=true'
+    return $true
+  }
+  if ($CpuSampleSeconds -gt 0) { Start-Sleep -Seconds $CpuSampleSeconds }
+  $second = Get-OrcaAgentCpuSnapshot
+  $delta = 0.0
+  foreach ($id in $first.Keys) {
+    if ($second.ContainsKey($id)) {
+      $delta += [math]::Max(0, ([double]$second[$id] - [double]$first[$id]))
+    }
+  }
+  $idle = $delta -lt $CpuThresholdSeconds
+  $script:lastOrcaSessionIdleSummary = "CPU fallback agents=$($first.Count); cpuDeltaSeconds=$([math]::Round($delta, 3)); idle=$idle"
+  return $idle
+}
+
+function Get-OrcaTerminalCount {
+  $terminalData = Get-OrcaTerminalList
+  if ($null -eq $terminalData) { return $null }
+  @($terminalData.Terminals).Count
+}
+
+function Get-OrcaResumedTerminalCount {
+  param([int]$WaitSeconds = 60)
+  if ($WaitSeconds -gt 0) { Start-Sleep -Seconds $WaitSeconds }
+  $count = Get-OrcaTerminalCount
+  if ($null -eq $count) { return -1 }
+  return [int]$count
+}
+
+function Test-OrcaPortListening {
+  param([int]$Port = 8765)
+  try {
+    return (@(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop).Count -gt 0)
+  } catch {
+    try {
+      $lines = @(netstat.exe -ano -p tcp 2>$null | Where-Object { $_ -match ":$Port\s+\S+\s+LISTENING" })
+      return $lines.Count -gt 0
+    } catch {
+      return $false
+    }
+  }
+}
+
+function Get-OrcaServeState {
+  if ($TestMode) { throw 'TestMode serve detection requires an explicit mock.' }
+  if (-not (Test-OrcaPortListening -Port 8765)) {
+    return [pscustomobject]@{ Running = $false; Executable = $null; Arguments = $null; Port = 8765 }
+  }
+  $candidates = @(Get-ProcessSnapshot | Where-Object {
+      $_.Name -ieq 'Orca.exe' -and ([string]$_.CommandLine -match '(?i)(^|\s)(--serve|serve)(\s|$)')
+    })
+  if ($candidates.Count -eq 0) {
+    return [pscustomobject]@{ Running = $false; Executable = $null; Arguments = $null; Port = 8765 }
+  }
+  $candidate = $candidates | Select-Object -First 1
+  $commandLine = [string]$candidate.CommandLine
+  $match = [regex]::Match($commandLine, '^\s*"(?<exe>[^"]+)"\s*(?<args>.*)$')
+  if (-not $match.Success) { $match = [regex]::Match($commandLine, '^\s*(?<exe>\S+)\s*(?<args>.*)$') }
+  $executable = if ($match.Success) { $match.Groups['exe'].Value } else { $null }
+  $arguments = if ($match.Success) { $match.Groups['args'].Value.Trim() } else { $null }
+  if ([string]::IsNullOrWhiteSpace($executable)) {
+    return [pscustomobject]@{ Running = $false; Executable = $null; Arguments = $null; Port = 8765 }
+  }
+  if ([string]::IsNullOrWhiteSpace($arguments)) { $arguments = '--serve --serve-port 8765' }
+  [pscustomobject]@{ Running = $true; Executable = $executable; Arguments = $arguments; Port = 8765 }
+}
+
+function Invoke-RestartOrcaServe {
+  param(
+    [object]$State,
+    [int]$WaitSeconds = 30
+  )
+  if (-not $State -or -not $State.Running) {
+    return [pscustomobject]@{ Restarted = $false; Listening = $false }
+  }
+  if ($TestMode) { throw 'TestMode serve restart requires an explicit mock.' }
+  try {
+    $workingDirectory = Split-Path -Parent $State.Executable
+    Start-Process -FilePath $State.Executable -ArgumentList $State.Arguments -WorkingDirectory $workingDirectory | Out-Null
+    $deadline = (Get-Date).AddSeconds($WaitSeconds)
+    do {
+      if (Test-OrcaPortListening -Port ([int]$State.Port)) {
+        return [pscustomobject]@{ Restarted = $true; Listening = $true }
+      }
+      Start-Sleep -Seconds 1
+    } while ((Get-Date) -lt $deadline)
+    return [pscustomobject]@{ Restarted = $true; Listening = $false }
+  } catch {
+    Notify "Orca serve restart failed; installation remains successful: $($_.Exception.Message)"
+    return [pscustomobject]@{ Restarted = $false; Listening = $false }
+  }
 }
 
 function Send-DaemonIdleShutdown([object]$Daemon) {
@@ -183,18 +410,71 @@ function Send-DaemonIdleShutdown([object]$Daemon) {
   }
 }
 
-function Stop-OrcaAndDrainDaemon {
-  param([int]$GraceSeconds)
-  if (Test-OrcaBusy) {
-    Notify 'Orca has an active agent session; update deferred without closing the app.'
+function Invoke-ForceOrcaShutdown {
+  if ($TestMode) { throw 'TestMode forced shutdown requires an explicit mock.' }
+  $all = Get-ProcessSnapshot
+  $roots = @($all | Where-Object { $_.Name -ieq 'Orca.exe' -or $_.Name -ieq 'orca-terminal-daemon.exe' })
+  foreach ($root in $roots) {
+    try { & taskkill.exe /PID ([int]$root.ProcessId) /T /F | Out-Null } catch { }
+  }
+  Start-Sleep -Seconds 3
+  $remaining = @(Get-ProcessSnapshot | Where-Object { $_.Name -ieq 'Orca.exe' -or $_.Name -ieq 'orca-terminal-daemon.exe' })
+  if ($remaining.Count -gt 0) {
+    Notify "Orca drain deadline force-close could not stop the application tree; manual intervention required: $(Get-OrcaLockSummary)"
     return $false
   }
-  Get-Process -Name orca -ErrorAction SilentlyContinue | ForEach-Object { [void]$_.CloseMainWindow() }
-  Start-Sleep -Seconds 30
-  $running = Get-Process -Name orca -ErrorAction SilentlyContinue
-  if ($running) {
-    & taskkill.exe /IM Orca.exe /T /F | Out-Null
-    Start-Sleep -Seconds 3
+  return $true
+}
+
+function Stop-OrcaAndDrainDaemon {
+  param(
+    [int]$GraceSeconds,
+    [int]$DrainDeadlineMinutes = 0,
+    [int]$DrainPollSeconds = 120
+  )
+  if (Test-OrcaBusy) {
+    if ($DrainDeadlineMinutes -le 0) {
+      Notify 'Orca has an active agent session; update deferred without closing the app.'
+      return $false
+    }
+    $script:drainAttempted = $true
+    $drainDeadline = (Get-Date).AddMinutes($DrainDeadlineMinutes)
+    $drained = $false
+    while ((Get-Date) -lt $drainDeadline) {
+      if (-not (Test-OrcaBusy)) {
+        $drained = $true
+        break
+      }
+      if (Test-OrcaSessionsIdle) {
+        $drained = $true
+        Notify "Orca sessions are idle; continuing the scheduled installation. $script:lastOrcaSessionIdleSummary"
+        break
+      }
+      $all = Get-ProcessSnapshot
+      $activeCount = @(Get-OrcaActivityProcesses $all).Count
+      $remainingSeconds = [math]::Max(1, [int]($drainDeadline - (Get-Date)).TotalSeconds)
+      $sleepSeconds = [math]::Min($DrainPollSeconds, $remainingSeconds)
+      Notify "Orca drain waiting: $activeCount active session process(es); $script:lastOrcaSessionIdleSummary"
+      Start-Sleep -Seconds $sleepSeconds
+    }
+    if (-not $drained -and (Test-OrcaBusy)) {
+      $script:drainForced = $true
+      $activeCount = @(Get-OrcaActivityProcesses (Get-ProcessSnapshot)).Count
+      Notify "Orca drain deadline reached — forcing $activeCount session(s) to close and continuing the installation."
+      return (Invoke-ForceOrcaShutdown)
+    }
+  }
+
+  if ($TestMode) { return $true }
+
+  $running = @(Get-Process -Name orca -ErrorAction SilentlyContinue)
+  if ($running.Count -gt 0) {
+    $running | ForEach-Object { [void]$_.CloseMainWindow() }
+    Start-Sleep -Seconds 30
+    if (Get-Process -Name orca -ErrorAction SilentlyContinue) {
+      & taskkill.exe /IM Orca.exe /T /F | Out-Null
+      Start-Sleep -Seconds 3
+    }
   }
   if (Get-Process -Name orca -ErrorAction SilentlyContinue) {
     Notify "Orca remains running; update deferred. Locks: $(Get-OrcaLockSummary)"
@@ -219,7 +499,7 @@ function Stop-OrcaAndDrainDaemon {
     return $false
   }
   foreach ($daemon in $daemons) {
-    & taskkill.exe /PID $daemon.ProcessId /F | Out-Null
+    & taskkill.exe /PID $daemon.ProcessId /T /F | Out-Null
   }
   Start-Sleep -Seconds 3
   if (@(Get-OrcaDaemonInfo (Get-ProcessSnapshot)).Count -gt 0) {
@@ -345,13 +625,20 @@ try {
   $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToUpperInvariant()
   if ($expected -ne $actual) { throw 'SHA-256 mismatch; installation aborted.' }
   $archiveCount = Get-ArchiveFileCount $installer
+  $drainAttempted = $false
+  $drainForced = $false
+  $resumedTerminals = -1
+  $serveRestarted = $false
+  $serveListening = $false
+  $serveState = Get-OrcaServeState
+  $serveWasRunning = [bool]$serveState.Running
 
-  if (-not (Stop-OrcaAndDrainDaemon -GraceSeconds $DaemonGraceSeconds)) {
-    Write-InstallState -State 'deferred' -StateVersion $Version -Sha256 $actual -FileCount 0 -Reason 'active session, PTY, or daemon lock'
+  if (-not (Stop-OrcaAndDrainDaemon -GraceSeconds $DaemonGraceSeconds -DrainDeadlineMinutes $DrainDeadlineMinutes)) {
+    Write-InstallState -State 'deferred' -StateVersion $Version -Sha256 $actual -FileCount 0 -Reason 'active session, PTY, or daemon lock' -DrainForced:$drainForced -ServeWasRunning:$serveWasRunning
     return
   }
   if (-not (Invoke-RenameProbe)) {
-    Write-InstallState -State 'deferred' -StateVersion $Version -Sha256 $actual -FileCount 0 -Reason 'install tree rename probe failed'
+    Write-InstallState -State 'deferred' -StateVersion $Version -Sha256 $actual -FileCount 0 -Reason 'install tree rename probe failed' -DrainForced:$drainForced -ServeWasRunning:$serveWasRunning
     return
   }
 
@@ -366,19 +653,35 @@ try {
   }
 
   if (-not (Invoke-RenameProbe)) {
-    Write-InstallState -State 'deferred' -StateVersion $Version -Sha256 $actual -FileCount $backupCount -Reason 'final install-tree rename probe failed'
+    Write-InstallState -State 'deferred' -StateVersion $Version -Sha256 $actual -FileCount $backupCount -Reason 'final install-tree rename probe failed' -DrainForced:$drainForced -ServeWasRunning:$serveWasRunning
     return
   }
   $installStarted = $true
   $result = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
   if ($result.ExitCode -ne 0) { throw "Installer failed with exit code $($result.ExitCode)." }
   $installedCount = Assert-InstallTree -Path $installRoot -ExpectedVersion $Version -MinimumFileCount $archiveCount
+  Write-InstallState -State 'installed-pending-smoke' -StateVersion $Version -Sha256 $actual -FileCount $installedCount -Reason 'Installer completed; smoke test in progress.' -DrainForced:$drainForced -ServeWasRunning:$serveWasRunning
+  if ($serveWasRunning) {
+    $serveRestart = Invoke-RestartOrcaServe -State $serveState
+    $serveRestarted = [bool]$serveRestart.Restarted
+    $serveListening = [bool]$serveRestart.Listening
+    if (-not $serveListening) { Notify 'Orca serve was running before update but port 8765 did not recover.' }
+  }
   $fatalBefore = if (Test-Path $fatalLog) { (Get-Item $fatalLog).Length } else { 0 }
   Start-Process -FilePath (Join-Path $installRoot 'Orca.exe') | Out-Null
   Start-Sleep -Seconds $SmokeSeconds
   $fatalAfter = if (Test-Path $fatalLog) { (Get-Item $fatalLog).Length } else { 0 }
   if ($fatalAfter -gt $fatalBefore) { throw 'bootstrap-fatal.log grew during smoke test.' }
-  Write-InstallState -State 'installed' -StateVersion $Version -Sha256 $actual -FileCount $installedCount -Reason ''
+  if ($drainAttempted) {
+    try {
+      $resumedTerminals = Get-OrcaResumedTerminalCount -WaitSeconds 60
+      if ($resumedTerminals -lt 0) { Notify 'Orca session resume check was unavailable; installation remains successful.' }
+    } catch {
+      Notify "Orca session resume check failed; installation remains successful: $($_.Exception.Message)"
+      $resumedTerminals = -1
+    }
+  }
+  Write-InstallState -State 'installed' -StateVersion $Version -Sha256 $actual -FileCount $installedCount -Reason '' -DrainForced:$drainForced -ResumedTerminals $resumedTerminals -ServeWasRunning:$serveWasRunning -ServeRestarted:$serveRestarted -ServeListening:$serveListening
   Notify "Orca $Version installed successfully (SHA-256 $actual). APPDATA and .orca were untouched."
 } catch {
   $reason = $_.Exception.Message
@@ -387,7 +690,7 @@ try {
   $rollbackState = 'failed'
   if ($installStarted -and $latest) {
     try {
-      if (Stop-OrcaAndDrainDaemon -GraceSeconds $DaemonGraceSeconds) {
+      if (Stop-OrcaAndDrainDaemon -GraceSeconds $DaemonGraceSeconds -DrainDeadlineMinutes $DrainDeadlineMinutes) {
         $rollbackExpected = Read-AsarVersion (Join-Path $latest.FullName 'resources\app.asar')
         $rollbackCount = Get-InstallFileCount $latest.FullName
         if (Invoke-SafeRollback -Backup $latest -ExpectedVersion $rollbackExpected -MinimumFileCount $rollbackCount -SkipArtifactCheck) {
@@ -404,7 +707,7 @@ try {
       Notify "Rollback handling failed without deleting the install tree: $($_.Exception.Message)"
     }
   }
-  Write-InstallState -State $rollbackState -StateVersion $Version -Sha256 $actual -FileCount 0 -Reason $reason
+  Write-InstallState -State $rollbackState -StateVersion $Version -Sha256 $actual -FileCount 0 -Reason $reason -DrainForced:$drainForced -ServeWasRunning:$serveWasRunning -ServeRestarted:$serveRestarted -ServeListening:$serveListening
   throw
 } finally {
   if ($transcriptStarted) { try { Stop-Transcript | Out-Null } catch { } }
