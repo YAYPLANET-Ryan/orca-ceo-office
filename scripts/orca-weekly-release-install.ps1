@@ -256,19 +256,31 @@ function Copy-TreeContents([string]$Source, [string]$Destination) {
 }
 
 function Assert-InstallTree {
-  param([string]$Path, [string]$ExpectedVersion, [int]$MinimumFileCount)
+  param(
+    [string]$Path,
+    [string]$ExpectedVersion,
+    [int]$MinimumFileCount,
+    [switch]$SkipArtifactCheck
+  )
   $asar = Join-Path $Path 'resources\app.asar'
   $actualVersion = Read-AsarVersion $asar
   if ($actualVersion -ne $ExpectedVersion) { throw "Tree version $actualVersion does not match $ExpectedVersion." }
   $count = Get-InstallFileCount $Path
   if ($MinimumFileCount -gt 0 -and $count -lt $MinimumFileCount) { throw "Tree file count $count is below expected minimum $MinimumFileCount." }
-  $badFiles = @(Get-ChildItem -LiteralPath $Path -Recurse -File | Where-Object { $_.Extension -match '^\.(tlog|obj|pdb|ilk|exp|lib|iobj|ipdb|lastbuildstate|recipe)$' })
-  if ($badFiles.Count -gt 0) { throw 'Native build artifacts remain in the install tree.' }
+  if (-not $SkipArtifactCheck) {
+    $badFiles = @(Get-ChildItem -LiteralPath $Path -Recurse -File | Where-Object { $_.Extension -match '^\.(tlog|obj|pdb|ilk|exp|lib|iobj|ipdb|lastbuildstate|recipe)$' })
+    if ($badFiles.Count -gt 0) { throw 'Native build artifacts remain in the install tree.' }
+  }
   return $count
 }
 
 function Invoke-SafeRollback {
-  param([object]$Backup, [string]$ExpectedVersion, [int]$MinimumFileCount)
+  param(
+    [object]$Backup,
+    [string]$ExpectedVersion,
+    [int]$MinimumFileCount,
+    [switch]$SkipArtifactCheck
+  )
   $swap = "$installRoot-swap-$([guid]::NewGuid().ToString('N'))"
   $failed = "$installRoot-failed-$([datetime]::UtcNow.ToString('yyyyMMdd-HHmmss'))"
   $hadOriginal = Test-Path -LiteralPath $installRoot
@@ -283,7 +295,7 @@ function Invoke-SafeRollback {
   }
   try {
     Copy-TreeContents -Source $Backup.FullName -Destination $installRoot
-    [void](Assert-InstallTree -Path $installRoot -ExpectedVersion $ExpectedVersion -MinimumFileCount $MinimumFileCount)
+    [void](Assert-InstallTree -Path $installRoot -ExpectedVersion $ExpectedVersion -MinimumFileCount $MinimumFileCount -SkipArtifactCheck:$SkipArtifactCheck)
     if (-not $hadOriginal) {
       Notify "Rollback restored $ExpectedVersion; no previous install swap was present."
       return $true
@@ -346,8 +358,9 @@ try {
   $asar = Join-Path $installRoot 'resources\app.asar'
   $oldVersion = if (Test-Path -LiteralPath $asar) { Read-AsarVersion $asar } else { 'unknown' }
   $backup = Join-Path $backupRoot ("app-{0}-{1}" -f $oldVersion, (Get-Date -Format 'yyyyMMdd-HHmmss'))
+  $sourceCount = Get-InstallFileCount $installRoot
   if (Test-Path -LiteralPath $installRoot) { Copy-TreeContents -Source $installRoot -Destination $backup }
-  $backupCount = Assert-InstallTree -Path $backup -ExpectedVersion $oldVersion -MinimumFileCount $archiveCount
+  $backupCount = Assert-InstallTree -Path $backup -ExpectedVersion $oldVersion -MinimumFileCount $sourceCount -SkipArtifactCheck
   Get-ChildItem -LiteralPath $backupRoot -Directory -Filter 'app-*' | Sort-Object LastWriteTime -Descending | Select-Object -Skip 2 | ForEach-Object {
     try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop } catch { Write-Warning "Could not prune backup $($_.FullName): $($_.Exception.Message)" }
   }
@@ -377,7 +390,7 @@ try {
       if (Stop-OrcaAndDrainDaemon -GraceSeconds $DaemonGraceSeconds) {
         $rollbackExpected = Read-AsarVersion (Join-Path $latest.FullName 'resources\app.asar')
         $rollbackCount = Get-InstallFileCount $latest.FullName
-        if (Invoke-SafeRollback -Backup $latest -ExpectedVersion $rollbackExpected -MinimumFileCount $rollbackCount) {
+        if (Invoke-SafeRollback -Backup $latest -ExpectedVersion $rollbackExpected -MinimumFileCount $rollbackCount -SkipArtifactCheck) {
           $rollbackState = 'rolled-back'
         } else {
           $rollbackState = 'manual-intervention'

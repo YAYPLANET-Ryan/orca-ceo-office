@@ -28,28 +28,34 @@ try {
   $backup = Join-Path $backupRoot 'app-old'
   New-Item -ItemType Directory -Force -Path $old, $backup | Out-Null
   Set-Content (Join-Path $old 'version.txt') 'new-install'
+  New-Item -ItemType Directory -Force -Path (Join-Path $old 'resources') | Out-Null
+  Set-Content (Join-Path $old 'resources\app.asar') 'old'
   Set-Content (Join-Path $backup 'version.txt') 'old-install'
+  New-Item -ItemType Directory -Force -Path (Join-Path $backup 'resources'), (Join-Path $backup 'build\Release\obj') | Out-Null
+  Set-Content (Join-Path $backup 'resources\app.asar') 'old'
+  Set-Content (Join-Path $backup 'build\Release\obj\legacy.obj') 'legacy-build-artifact'
   Remove-Item $installRoot -Recurse -Force
   Move-Item $old $installRoot
-  function global:Assert-InstallTree {
-    param([string]$Path, [string]$ExpectedVersion, [int]$MinimumFileCount)
-    $count = @(Get-ChildItem -LiteralPath $Path -Recurse -File).Count
-    if ($count -lt $MinimumFileCount) { throw 'test tree too small' }
-    return $count
-  }
-  function global:Read-AsarVersion { param([string]$AsarPath) return 'old' }
+  function Read-AsarVersion { param([string]$AsarPath) return 'old' }
   $backupInfo = Get-Item $backup
-  Assert-True (Invoke-SafeRollback -Backup $backupInfo -ExpectedVersion 'old' -MinimumFileCount 1) 'swap rollback restores a verified backup'
+  $sourceCount = Get-InstallFileCount $installRoot
+  Assert-True ((Assert-InstallTree -Path $backup -ExpectedVersion 'old' -MinimumFileCount $sourceCount -SkipArtifactCheck) -ge $sourceCount) 'backup validation accepts legacy build artifacts'
+  $artifactRejected = $false
+  try { [void](Assert-InstallTree -Path $backup -ExpectedVersion 'old' -MinimumFileCount $sourceCount) } catch { $artifactRejected = $true }
+  Assert-True $artifactRejected 'new-install validation still rejects native build artifacts'
+  Assert-True (Invoke-SafeRollback -Backup $backupInfo -ExpectedVersion 'old' -MinimumFileCount 1 -SkipArtifactCheck) 'swap rollback restores a verified legacy backup'
   Assert-True ((Get-Content (Join-Path $installRoot 'version.txt')) -eq 'old-install') 'rollback restored the previous tree'
+  Assert-True (Test-Path (Join-Path $installRoot 'build\Release\obj\legacy.obj')) 'rollback preserves legacy build artifacts'
   Assert-True (@(Get-ChildItem "$installRoot-swap-*" -ErrorAction SilentlyContinue).Count -eq 0) 'validated swap is removed only after restore'
 
   Remove-Item $installRoot -Recurse -Force
   New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
   Set-Content (Join-Path $installRoot 'version.txt') 'new-install'
-  function global:Assert-InstallTree {
+  function Assert-InstallTree {
+    param([string]$Path, [string]$ExpectedVersion, [int]$MinimumFileCount, [switch]$SkipArtifactCheck)
     throw 'forced smoke verification failure'
   }
-  Assert-True (-not (Invoke-SafeRollback -Backup $backupInfo -ExpectedVersion 'old' -MinimumFileCount 1)) 'failed rollback verification returns manual intervention'
+  Assert-True (-not (Invoke-SafeRollback -Backup $backupInfo -ExpectedVersion 'old' -MinimumFileCount 1 -SkipArtifactCheck)) 'failed rollback verification returns manual intervention'
   Assert-True ((Get-Content (Join-Path $installRoot 'version.txt')) -eq 'new-install') 'failed rollback restores the original swap'
 
   function global:Test-OrcaBusy { return $true }
