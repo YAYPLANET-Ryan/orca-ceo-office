@@ -1111,6 +1111,35 @@ describe('registerFilesystemHandlers', () => {
     expect(provider.stat).toHaveBeenCalledWith('/remote/repo/untitled-7.md')
   })
 
+  it('resolves a project-scoped launcher through the direct SSH provider', async () => {
+    const entries = new Map([
+      ['/remote/CEO Office/.git', { type: 'directory' }],
+      ['/remote/CEO Office/scripts/start-orca-agent', { type: 'file' }]
+    ])
+    const provider = {
+      stat: vi.fn(async (candidate: string) => {
+        const entry = entries.get(candidate)
+        if (!entry) {
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+        }
+        return entry
+      })
+    }
+    getSshFilesystemProviderMock.mockReturnValue(provider)
+    registerFilesystemHandlers(store as never)
+
+    await expect(
+      handlers.get('fs:resolveWorkspaceAgentLauncher')!(null, {
+        workspacePath: '/remote/CEO Office/Businesses/OilDealer',
+        connectionId: 'ssh-1',
+        platform: 'linux'
+      })
+    ).resolves.toEqual({
+      workspaceRoot: '/remote/CEO Office',
+      launcherPath: '/remote/CEO Office/scripts/start-orca-agent'
+    })
+  })
+
   it('allows deletePath when a registered worktree parent resolves to a macOS canonical alias', async () => {
     const aliasWorktreePath = path.resolve('/var/folders/orca/worktrees/feature')
     const canonicalWorktreePath = path.resolve('/private/var/folders/orca/worktrees/feature')

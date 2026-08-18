@@ -17,11 +17,11 @@ const mocks = vi.hoisted(() => ({
   },
   state: {
     settings: {},
-    repos: [{ id: 'ceo-repo', path: 'E:/ORCA' }] as Array<{
+    repos: [{ id: 'ceo-repo', path: 'E:/ORCA' }] as {
       id: string
       path: string
       connectionId?: string
-    }>,
+    }[],
     addNonGitFolder: vi.fn()
   },
   readRuntimeFileContent: vi.fn()
@@ -60,6 +60,24 @@ describe('CeoOfficeSidebar navigation', () => {
         expect.stringMatching(/02_BUSINESSES[\\/]oildealer$/)
       )
     })
+  })
+
+  it('opens each Personal fallback entry at its project-scoped folder', async () => {
+    render(<CeoOfficeSidebar />)
+
+    const entries = [
+      ['ARAON', 'araon'],
+      ['PC', 'pc'],
+      ['Trading', 'trading']
+    ] as const
+
+    for (const [label, folder] of entries) {
+      fireEvent.click(screen.getByRole('button', { name: label }))
+      await waitFor(() => {
+        const lastCall = mocks.state.addNonGitFolder.mock.calls.at(-1)
+        expect(lastCall?.[0].replaceAll('\\\\', '/')).toBe(`E:/ORCA/02_PERSONAL/${folder}`)
+      })
+    }
   })
 
   it('opens an SSH CEO Office entry as a folder workspace on the owning host', async () => {

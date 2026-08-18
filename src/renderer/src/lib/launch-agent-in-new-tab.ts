@@ -50,6 +50,8 @@ export type LaunchAgentInNewTabArgs = {
   launchPlatform?: NodeJS.Platform
   /** Called after the prompt is actually delivered to the agent input path. */
   onPromptDelivered?: () => void
+  /** Per-launch command selected from the workspace contract; never persisted to settings. */
+  agentCommandOverride?: string | null
 }
 
 export type LaunchAgentInNewTabResult = {
@@ -81,7 +83,8 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     launchSource,
     quickCommandLabel,
     launchPlatform,
-    onPromptDelivered
+    onPromptDelivered,
+    agentCommandOverride
   } = args
   const store = useAppStore.getState()
   const worktree = store.allWorktrees?.().find((entry: { id: string }) => entry.id === worktreeId)
@@ -101,7 +104,9 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     isRemote,
     terminalWindowsShell: store.settings?.terminalWindowsShell
   })
-  const cmdOverrides = store.settings?.agentCmdOverrides ?? {}
+  const cmdOverrides = agentCommandOverride?.trim()
+    ? { ...store.settings?.agentCmdOverrides, [agent]: agentCommandOverride }
+    : (store.settings?.agentCmdOverrides ?? {})
   const effectiveAgentArgs =
     agentArgs !== undefined
       ? agentArgs

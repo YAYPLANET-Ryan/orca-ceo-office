@@ -90,8 +90,8 @@ vi.mock('sonner', () => ({
   }
 }))
 
-vi.mock('@/lib/launch-agent-in-new-tab', () => ({
-  launchAgentInNewTab: vi.fn()
+vi.mock('@/lib/launch-agent-with-workspace-launcher', () => ({
+  launchAgentInNewTabWithWorkspaceLauncher: vi.fn()
 }))
 
 function renderAgentMenuItems(): string {

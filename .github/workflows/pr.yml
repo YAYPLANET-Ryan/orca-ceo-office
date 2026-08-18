@@ -257,6 +257,8 @@ jobs:
       # A path filter that matches nothing exits 1 ("No test files found"), so this
       # lane cannot report success while running zero tests.
       - name: Old/new client and server terminal journey
+        env:
+          ORCA_CROSS_VERSION_BASELINE_REF: v1.4.183-ceo.20260814.13
         run: pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts
 
   managed_hook_node18:

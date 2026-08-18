@@ -34,6 +34,7 @@ import type {
 import type { ReadClipboardTextOptions } from '../shared/clipboard-text'
 import type { AppIdentity } from '../shared/app-identity'
 import type { ReleaseChannel } from '../shared/release-channel'
+import type { WorkspaceAgentLauncherResolution } from '../shared/workspace-agent-launcher-contract'
 import type {
   ForgetRemovedWorktreesForExecutionHostArgs,
   ForgetRemovedWorktreesForExecutionHostResult,
@@ -2850,6 +2851,11 @@ export type PreloadApi = {
       connectionId?: string
     }) => Promise<{ size: number; isDirectory: boolean; mtime: number }>
     pathExists: (args: { filePath: string; connectionId?: string }) => Promise<boolean>
+    resolveWorkspaceAgentLauncher: (args: {
+      workspacePath: string
+      connectionId?: string
+      platform: NodeJS.Platform
+    }) => Promise<WorkspaceAgentLauncherResolution | null>
     listFiles: (args: {
       rootPath: string
       connectionId?: string

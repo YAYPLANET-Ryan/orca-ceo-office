@@ -7,7 +7,7 @@ import { useAppStore } from '@/store'
 import { useAgentDetectionTargetForWorktree } from '@/hooks/useAgentDetectionTarget'
 import { useDetectedAgents } from '@/hooks/useDetectedAgents'
 import { useOptionalShortcutLabel } from '@/hooks/useShortcutLabel'
-import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
+import { launchAgentInNewTabWithWorkspaceLauncher } from '@/lib/launch-agent-with-workspace-launcher'
 import type { TuiAgent } from '../../../../shared/types'
 import type { LaunchSource } from '../../../../shared/telemetry-events'
 import {
@@ -123,10 +123,10 @@ function QuickLaunchAgentMenuItemsInner({
   }, [openSettingsPage, openSettingsTarget])
 
   const runLaunch = useCallback(
-    (agent: TuiAgent) => {
+    async (agent: TuiAgent) => {
       const entry = getCatalogEntry(agent)
       const label = entry?.label ?? agent
-      const result = launchAgentInNewTab({
+      const result = await launchAgentInNewTabWithWorkspaceLauncher({
         agent,
         worktreeId,
         groupId,

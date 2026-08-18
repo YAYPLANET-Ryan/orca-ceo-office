@@ -1916,6 +1916,13 @@ function createFileApi(): NonNullable<Partial<PreloadApi>['fs']> {
         throw error
       }
     },
+    resolveWorkspaceAgentLauncher: async ({ workspacePath, platform }) => {
+      const file = await resolveRuntimeFilePath(workspacePath)
+      return callRuntimeResult('files.resolveWorkspaceAgentLauncher', {
+        worktree: toRuntimeWorktreeSelector(file.worktree.id),
+        platform
+      })
+    },
     listFiles: async ({ rootPath, excludePaths }) => {
       const file = await resolveRuntimeFilePath(rootPath)
       const result = await callRuntimeResult<{ files: { relativePath: string }[] }>(

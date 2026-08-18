@@ -139,6 +139,8 @@ import { sanitizeLocalDownloadFilename } from '../local-download-filename'
 import { registerFilesystemDownloadFolderHandlers } from './filesystem-download-folder'
 import { getWorktreeSharedLinkPaths } from '../git/worktree-shared-directories'
 import { createSenderScopedRequestCancellations } from './sender-scoped-request-cancellation'
+import { resolveWorkspaceAgentLauncher } from '../workspace-agent-launcher-resolution'
+import type { WorkspaceAgentLauncherResolution } from '../../shared/workspace-agent-launcher-contract'
 import {
   applyGitStatusUpstreamRefWatchRequest,
   type GitStatusUpstreamRefWatchRequest
@@ -958,6 +960,43 @@ export function registerFilesystemHandlers(
         }
         throw error
       }
+    }
+  )
+
+  // ─── Workspace agent launcher ─────────────────────────
+  ipcMain.handle(
+    'fs:resolveWorkspaceAgentLauncher',
+    async (
+      _event,
+      args: { workspacePath: string; connectionId?: string; platform: NodeJS.Platform }
+    ): Promise<WorkspaceAgentLauncherResolution | null> => {
+      const provider = args.connectionId ? requireSshFilesystemProvider(args.connectionId) : null
+      const workspacePath = provider
+        ? args.workspacePath
+        : await resolveAuthorizedPath(args.workspacePath, store)
+      return resolveWorkspaceAgentLauncher({
+        workspacePath,
+        platform: args.platform,
+        statPath: async (candidate) => {
+          try {
+            if (provider) {
+              const entry = await provider.stat(candidate)
+              return entry.type === 'file'
+                ? 'file'
+                : entry.type === 'directory'
+                  ? 'directory'
+                  : 'other'
+            }
+            const entry = await stat(candidate)
+            return entry.isFile() ? 'file' : entry.isDirectory() ? 'directory' : 'other'
+          } catch (error) {
+            if (isENOENT(error)) {
+              return null
+            }
+            throw error
+          }
+        }
+      })
     }
   )
 

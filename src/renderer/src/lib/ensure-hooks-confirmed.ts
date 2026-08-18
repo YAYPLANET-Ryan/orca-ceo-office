@@ -31,6 +31,32 @@ export function __resetTrustPromptChainForTests(): void {
   trustPromptChain = Promise.resolve()
 }
 
+export function confirmWorkspaceAgentLauncher(
+  state: AppState,
+  repoId: string,
+  repoName: string,
+  launcherPath: string,
+  isCancelled: () => boolean = NEVER_CANCEL_TRUST_CHECK
+): Promise<'run' | 'skip'> {
+  return enqueueTrustPrompt(async () => {
+    if (isCancelled() || !launcherPath.trim()) {
+      return 'skip'
+    }
+    if (canUseRepoWideTrust(state, repoId)) {
+      return 'run'
+    }
+    return new Promise<'run' | 'skip'>((resolve) => {
+      state.openModal('confirm-orca-yaml-hooks', {
+        repoId,
+        repoName,
+        scriptKind: 'agentLauncher',
+        scriptContent: launcherPath,
+        onResolve: (decision: 'run' | 'skip') => resolve(decision)
+      })
+    })
+  })
+}
+
 function getSetupTrustContent(yamlHooks: OrcaHooks | null): string {
   const defaultTabCommands = (yamlHooks?.defaultTabs ?? [])
     .map((tab, index) => {

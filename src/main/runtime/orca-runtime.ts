@@ -9080,6 +9080,8 @@ export class OrcaRuntimeService {
   statRuntimeFile: RuntimeFileCommands['statRuntimeFile'] = this.fileCommands.statRuntimeFile.bind(
     this.fileCommands
   )
+  resolveRuntimeWorkspaceAgentLauncher: RuntimeFileCommands['resolveRuntimeWorkspaceAgentLauncher'] =
+    this.fileCommands.resolveRuntimeWorkspaceAgentLauncher.bind(this.fileCommands)
 
   private readonly gitCommands = new RuntimeGitCommands({
     resolveRuntimeGitTarget: (selector) => this.resolveRuntimeGitTarget(selector),

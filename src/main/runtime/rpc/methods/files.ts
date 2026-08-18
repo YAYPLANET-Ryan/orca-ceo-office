@@ -47,6 +47,10 @@ const FilePathSearch = WorktreeSelector.extend({
   limit: z.number().int().positive().max(32).default(16)
 })
 
+const WorkspaceAgentLauncher = WorktreeSelector.extend({
+  platform: z.enum(['aix', 'android', 'darwin', 'freebsd', 'linux', 'openbsd', 'sunos', 'win32'])
+})
+
 const FileOpen = WorktreeSelector.extend({
   relativePath: z
     .unknown()
@@ -460,6 +464,12 @@ export const FILE_METHODS: RpcAnyMethod[] = [
     params: FileTreePath,
     handler: async (params, { runtime }) =>
       runtime.statRuntimeFile(params.worktree, params.relativePath)
+  }),
+  defineMethod({
+    name: 'files.resolveWorkspaceAgentLauncher',
+    params: WorkspaceAgentLauncher,
+    handler: async (params, { runtime }) =>
+      runtime.resolveRuntimeWorkspaceAgentLauncher(params.worktree, params.platform)
   }),
   defineStreamingMethod({
     name: 'files.watch',
