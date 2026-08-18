@@ -2187,8 +2187,12 @@ export function setupAutoUpdater(
   }
   // Why: supervised serve installs require an explicit handoff; ordinary service quits must never install implicitly.
   // Root Linux packages also opt out: an implicit quit-time escalation would fail after the UI is gone, leaving no recovery surface.
+  // Windows installs are owned by the verified weekly updater; never let an
+  // app quit race NSIS while the terminal daemon still serves sessions.
   autoUpdater.autoInstallOnAppQuit =
-    updateInstallMode === 'interactive' && getLinuxRootPackageType() === null
+    process.platform !== 'win32' &&
+    updateInstallMode === 'interactive' &&
+    getLinuxRootPackageType() === null
   // Why: MacUpdater ignores quitAndInstall arguments; the surviving CLI supervisor must be the only serve relaunch owner.
   autoUpdater.autoRunAppAfterInstall = updateInstallMode === 'interactive'
 

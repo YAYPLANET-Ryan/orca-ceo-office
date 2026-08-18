@@ -3983,7 +3983,7 @@ describe('updater', () => {
       }
     })
 
-    it('keeps interactive install-on-quit when no root-package marker is present', async () => {
+    it('keeps interactive install-on-quit only on platforms with a safe native installer', async () => {
       autoUpdaterMock.autoInstallOnAppQuit = false
       const { setupAutoUpdater } = await import('./updater')
 
@@ -3992,7 +3992,7 @@ describe('updater', () => {
         installMode: 'interactive'
       })
 
-      expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(true)
+      expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(process.platform !== 'win32')
     })
 
     it('leaves headless serve installs supervisor-controlled', async () => {

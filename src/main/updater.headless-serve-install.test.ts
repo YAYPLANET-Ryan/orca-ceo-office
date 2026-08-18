@@ -490,7 +490,7 @@ describe('headless serve update install handoff', () => {
     await vi.advanceTimersByTimeAsync(0)
     downloadUpdate()
 
-    expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(true)
+    expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(process.platform !== 'win32')
     expect(autoUpdaterMock.autoRunAppAfterInstall).toBe(true)
     expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(1)
     expect(getRemoteServerUpdateSupport()).toEqual({
