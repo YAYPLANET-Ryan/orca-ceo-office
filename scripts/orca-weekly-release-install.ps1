@@ -140,7 +140,10 @@ function Test-OrcaBusy {
 }
 
 function Send-DaemonIdleShutdown([object]$Daemon) {
-  $match = [regex]::Match($Daemon.CommandLine, '--socket\s+(?<socket>\S+)\s+--token\s+(?<token>\S+)')
+  $match = [regex]::Match(
+    $Daemon.CommandLine,
+    '--socket\s+(?:"(?<socket>[^"]+)"|(?<socket>\S+))\s+--token\s+(?:"(?<token>[^"]+)"|(?<token>\S+))'
+  )
   if (-not $match.Success) { return $false }
   $socketPath = $match.Groups['socket'].Value
   $tokenPath = $match.Groups['token'].Value
