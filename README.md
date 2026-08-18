@@ -22,6 +22,10 @@
 
 <h3 align="center"><a href="https://onorca.dev/download"><ins>Download Orca</ins></a></h3>
 
+For the private two-PC Windows channel, releases are verified by GitHub SHA-256
+and installed by the weekly rollback-aware updater. Code signing is intentionally
+out of scope until Orca is distributed outside the private repository.
+
 <p align="center">
   <img src="docs/assets/readme-hero.jpg" alt="Orca desktop app running agents in parallel worktrees, with the Orca mobile companion app in the corner" width="960" />
 </p>
