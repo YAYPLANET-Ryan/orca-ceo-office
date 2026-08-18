@@ -164,7 +164,12 @@ module.exports = {
     // app.asar too lets asarUnpack:['resources/**'] extract a second copy at
     // app.asar.unpacked/resources/win32/bin/orca.cmd with no adjacent orca.exe,
     // which fails to launch the CLI (#7351).
-    '!resources/win32{,/**/*}'
+    '!resources/win32{,/**/*}',
+    // Native build logs/objects are never runtime inputs and trigger endpoint
+    // heuristics when NSIS expands the installer into its temp directory.
+    '!**/node_modules/**/build/Release/obj/**',
+    '!**/node_modules/**/build/Release/**/*.{tlog,obj,pdb,ilk,exp,lib,iobj,ipdb,lastbuildstate,recipe}',
+    '!**/node_modules/**/{test,tests,example,examples,docs,.github}/**'
   ],
   // Why: the CLI entry-point lives in out/cli/ but imports shared modules
   // from out/shared/ and local hook mutators from out/main/. These paths must be

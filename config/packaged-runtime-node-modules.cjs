@@ -54,6 +54,9 @@ const ELECTRON_ARCHITECTURE_BY_ENUM = {
 const PACKAGED_NATIVE_ARCHITECTURES = new Set(['ia32', 'x64', 'arm', 'arm64'])
 const TYPE_DECLARATION_ARTIFACT_RE = /\.d\.(?:c|m)?ts(?:\.map)?$/
 const VERSIONED_ONNXRUNTIME_DYLIB_RE = /^libonnxruntime\.\d[\d.]*\.dylib$/
+const PACKAGED_BUILD_ARTIFACT_RE =
+  /\.(?:tlog|obj|pdb|ilk|exp|lib|iobj|ipdb|lastbuildstate|recipe)$/i
+const PACKAGED_AUTHORING_DIRS = new Set(['test', 'tests', 'example', 'examples', 'docs', '.github'])
 
 const NODE_BUILTINS = new Set([
   ...builtinModules,
@@ -413,6 +416,16 @@ function prunePackagedRuntimeTypeDeclarations(resourcesDir) {
   pruneMatchingFiles(nodeModulesDir, (filename) => TYPE_DECLARATION_ARTIFACT_RE.test(filename))
 }
 
+function prunePackagedBuildArtifacts(resourcesDir) {
+  const nodeModulesDir = join(resourcesDir, 'node_modules')
+  if (!existsSync(nodeModulesDir)) {
+    return
+  }
+  pruneMatchingFiles(nodeModulesDir, (filename) => PACKAGED_BUILD_ARTIFACT_RE.test(filename), {
+    pruneDirectories: PACKAGED_AUTHORING_DIRS
+  })
+}
+
 function prunePackagedSherpaOnnx(resourcesDir, electronPlatformName) {
   if (electronPlatformName !== 'darwin') {
     return
@@ -449,15 +462,20 @@ function prunePackagedRuntimeNodeModules(resourcesDir, electronPlatformName, ele
   prunePackagedNodePty(resourcesDir, electronPlatformName, architecture)
   prunePackagedParcelWatcher(resourcesDir, electronPlatformName, architecture)
   prunePackagedRuntimeTypeDeclarations(resourcesDir)
+  prunePackagedBuildArtifacts(resourcesDir)
   prunePackagedSherpaOnnx(resourcesDir, electronPlatformName)
   prunePackagedZodSources(resourcesDir)
 }
 
-function pruneMatchingFiles(directory, shouldPrune) {
+function pruneMatchingFiles(directory, shouldPrune, options = {}) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const entryPath = join(directory, entry.name)
     if (entry.isDirectory()) {
-      pruneMatchingFiles(entryPath, shouldPrune)
+      if (options.pruneDirectories?.has(entry.name)) {
+        rmSync(entryPath, { recursive: true, force: true })
+        continue
+      }
+      pruneMatchingFiles(entryPath, shouldPrune, options)
     } else if (entry.isFile() && shouldPrune(entry.name)) {
       rmSync(entryPath, { force: true })
     }
@@ -470,6 +488,7 @@ module.exports = {
   findAsarEntry,
   isPackagedExternalSpecifier,
   packageNameFromSpecifier,
+  prunePackagedBuildArtifacts,
   prunePackagedNodePty,
   prunePackagedParcelWatcher,
   prunePackagedRuntimeNodeModules,

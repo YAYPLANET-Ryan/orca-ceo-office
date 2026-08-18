@@ -96,6 +96,15 @@ jobs:
           pnpm run ensure:electron-runtime
           pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish never
 
+      - name: Verify installer contains no native build artifacts
+        shell: pwsh
+        run: |
+          $sevenZip = (Get-Command 7z.exe, 7za.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+          if (-not $sevenZip) { throw '7z.exe or 7za.exe is required for installer inspection.' }
+          $entries = & $sevenZip l '-slt' 'dist/orca-windows-setup.exe' 2>$null
+          $bad = @($entries | Where-Object { $_ -match '(?i)(\.tlog|\.obj|/obj/|\\obj\\|\.pdb|\.ilk|\.iobj|\.ipdb|\.lastbuildstate|\.recipe)$' })
+          if ($bad.Count -gt 0) { $bad | Write-Host; throw 'Installer contains native build artifacts.' }
+
       - name: Write Windows installer checksum
         shell: pwsh
         run: |
