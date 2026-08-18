@@ -65,6 +65,7 @@ function Get-ArchiveFileCount([string]$Path) {
 
 function Test-OrcaBusy {
   $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+  if (@($all | Where-Object Name -ieq 'orca-terminal-daemon.exe').Count -gt 0) { return $true }
   $orcaIds = @($all | Where-Object Name -ieq 'Orca.exe' | Select-Object -ExpandProperty ProcessId)
   if ($orcaIds.Count -eq 0) { return $false }
   $frontier = [System.Collections.Generic.HashSet[int]]::new()
