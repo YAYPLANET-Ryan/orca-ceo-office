@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import CeoOfficeSidebar from './CeoOfficeSidebar'
+import CeoOfficeSidebar, { resolveCeoOfficeRoot } from './CeoOfficeSidebar'
 
 const mocks = vi.hoisted(() => ({
   activeWorktree: {
@@ -49,6 +49,26 @@ describe('CeoOfficeSidebar navigation', () => {
   })
 
   afterEach(() => cleanup())
+
+  it('resolves CEO entries from the ORCA root when a child folder is active', () => {
+    expect(resolveCeoOfficeRoot('E:/ORCA/02_PERSONAL')).toBe('E:/ORCA')
+    expect(resolveCeoOfficeRoot('/srv/orca/03_SHARED')).toBe('/srv/orca')
+    expect(resolveCeoOfficeRoot('E:/ORCA')).toBe('E:/ORCA')
+  })
+
+  it('does not duplicate the ORCA root for a Personal workspace', async () => {
+    mocks.activeWorktree.path = 'E:/ORCA/02_PERSONAL'
+    mocks.state.repos = [{ id: 'ceo-repo', path: 'E:/ORCA/02_PERSONAL' }]
+    render(<CeoOfficeSidebar />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'GasStation' }))
+
+    await waitFor(() => {
+      expect(mocks.state.addNonGitFolder).toHaveBeenCalledWith(
+        expect.stringMatching(/^E:[\\/]ORCA[\\/]02_BUSINESSES[\\/]gasstation$/)
+      )
+    })
+  })
 
   it('opens a local CEO Office entry as an Orca folder workspace', async () => {
     render(<CeoOfficeSidebar />)

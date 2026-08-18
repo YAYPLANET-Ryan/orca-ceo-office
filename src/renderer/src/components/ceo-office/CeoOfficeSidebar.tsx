@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { useActiveWorktree } from '@/store/selectors'
-import { joinPath } from '@/lib/path'
+import { basename, dirname, joinPath } from '@/lib/path'
 import { readRuntimeFileContent } from '@/runtime/runtime-file-client'
 import { cn } from '@/lib/utils'
 import { parseCeoOfficeManifest, type CeoOfficeManifest } from './ceo-office-manifest'
@@ -17,6 +17,21 @@ import { parseCeoOfficeManifest, type CeoOfficeManifest } from './ceo-office-man
 const MANIFEST_PATH = '.orca/ceo-office.json'
 
 const GROUP_ICONS = [BriefcaseBusiness, CircleUserRound, FolderKanban, ShieldCheck]
+
+const CEO_OFFICE_CHILD_ROOTS = new Set([
+  '01_CEO_OFFICE',
+  '02_PERSONAL',
+  '03_SHARED',
+  '05_REVIEW',
+  '05_APPROVED'
+])
+
+/** Resolve CEO manifest paths from the ORCA root, even when Personal/Shared is active. */
+export function resolveCeoOfficeRoot(workspaceRoot: string): string {
+  return CEO_OFFICE_CHILD_ROOTS.has(basename(workspaceRoot).toUpperCase())
+    ? dirname(workspaceRoot)
+    : workspaceRoot
+}
 
 // Keep the CEO navigation visible while an SSH-backed manifest is loading. The
 // remote manifest remains the source of truth and replaces this once available.
@@ -67,6 +82,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
       ? (s.repos.find((repo) => repo.id === activeWorktree.repoId)?.connectionId ?? undefined)
       : undefined
   )
+  const ceoOfficeRoot = workspaceRoot ? resolveCeoOfficeRoot(workspaceRoot) : undefined
   const [manifest, setManifest] = React.useState<CeoOfficeManifest | null>(DEFAULT_MANIFEST)
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({})
 
@@ -81,7 +97,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
     setManifest(DEFAULT_MANIFEST)
     void readRuntimeFileContent({
       settings,
-      filePath: joinPath(workspaceRoot ?? activeWorktree.path, MANIFEST_PATH),
+      filePath: joinPath(ceoOfficeRoot ?? activeWorktree.path, MANIFEST_PATH),
       relativePath: MANIFEST_PATH,
       worktreeId: activeWorktree.id,
       connectionId,
@@ -99,13 +115,13 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
     return () => {
       canceled = true
     }
-  }, [activeWorktree, connectionId, settings, workspaceRoot])
+  }, [activeWorktree, ceoOfficeRoot, connectionId, settings, workspaceRoot])
 
   if (!manifest || !activeWorktree) {
     return null
   }
   const openManifestItem = async (item: CeoOfficeManifest['groups'][number]['items'][number]) => {
-    const itemPath = joinPath(workspaceRoot ?? activeWorktree.path, item.path)
+    const itemPath = joinPath(ceoOfficeRoot ?? activeWorktree.path, item.path)
     const routeOptions = connectionId
       ? { connectionId }
       : activeWorktree.runtimeOwnerEnvironmentId
