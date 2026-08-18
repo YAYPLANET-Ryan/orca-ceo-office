@@ -170,6 +170,9 @@ export function attachMainWindowServices(
           await options?.onBeforeUpdateQuit?.()
         } finally {
           await store.flushPendingAsync()
+          // Keep a profile-scoped recovery copy before the installer replaces
+          // the app; direct installers and updater restarts share this guard.
+          await store.createUpdateRecoverySnapshot?.()
         }
       },
       setLastUpdateCheckAt: (timestamp) => {

@@ -11069,6 +11069,17 @@ describe('Store', () => {
       expect(readBackup(0).repos.map((r) => r.id)).toEqual(['r1'])
     })
 
+    it('creates an explicit preflight snapshot after the final update flush', async () => {
+      const s = await createStore()
+      s.addRepo(makeRepo())
+      await s.createUpdateRecoverySnapshot()
+      const snapshot = `${dataFile()}.update-preflight.json`
+      expect(existsSync(snapshot)).toBe(true)
+      expect(JSON.parse(readFileSync(snapshot, 'utf-8')).repos.map((r: Repo) => r.id)).toEqual([
+        'r1'
+      ])
+    })
+
     it('rotates older .bak.0 to .bak.1 when the interval elapses', async () => {
       vi.useFakeTimers()
       try {
@@ -11303,6 +11314,16 @@ describe('Store', () => {
 
       const store = await createStore()
       expect(store.getRepos().map((r) => r.id)).toEqual(['rescued'])
+    })
+
+    it('prefers the update preflight snapshot when the primary file is missing', async () => {
+      const store = await createStore()
+      store.addRepo(makeRepo({ id: 'preflight' }))
+      await store.createUpdateRecoverySnapshot()
+      rmSync(dataFile())
+
+      const reloaded = await createStore()
+      expect(reloaded.getRepos().map((r) => r.id)).toEqual(['preflight'])
     })
 
     it('still recovers repos/worktrees from a backup with corrupt workspaceSession', async () => {

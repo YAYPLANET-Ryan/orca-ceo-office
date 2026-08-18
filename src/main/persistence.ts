@@ -2763,6 +2763,8 @@ export type StoreOptions = {
   dataFile?: string
 }
 
+const UPDATE_RECOVERY_SNAPSHOT_SUFFIX = '.update-preflight.json'
+
 export class Store {
   private state: PersistedState
   private readonly dataFile: string
@@ -3011,8 +3013,11 @@ export class Store {
   }
 
   private restoreFromBackup(dataFile: string): boolean {
-    for (let i = 0; i < BACKUP_COUNT; i++) {
-      const path = backupPath(dataFile, i)
+    const candidates = [
+      `${dataFile}${UPDATE_RECOVERY_SNAPSHOT_SUFFIX}`,
+      ...Array.from({ length: BACKUP_COUNT }, (_, index) => backupPath(dataFile, index))
+    ]
+    for (const path of candidates) {
       if (!existsSync(path)) {
         continue
       }
@@ -3021,10 +3026,10 @@ export class Store {
         JSON.parse(raw)
         mkdirSync(dirname(dataFile), { recursive: true })
         writeFileSync(dataFile, raw, 'utf-8')
-        console.warn(`[persistence] Recovered state from backup slot ${i}: ${path}`)
+        console.warn(`[persistence] Recovered state from continuity snapshot: ${path}`)
         return true
       } catch (err) {
-        console.error(`[persistence] Backup slot ${i} unusable, trying next:`, err)
+        console.error(`[persistence] Recovery snapshot unusable, trying next:`, err)
       }
     }
     return false
@@ -3704,13 +3709,11 @@ export class Store {
 
     // Corrupt-file and no-file paths converge here; a corrupted install counts as existing, so it sees the opt-in banner.
     if (result === null && allowBackupRecovery) {
-      let hasBackup = false
-      for (let i = 0; i < BACKUP_COUNT; i++) {
-        if (existsSync(backupPath(dataFile, i))) {
-          hasBackup = true
-          break
-        }
-      }
+      const hasBackup =
+        existsSync(`${dataFile}${UPDATE_RECOVERY_SNAPSHOT_SUFFIX}`) ||
+        Array.from({ length: BACKUP_COUNT }, (_, index) => backupPath(dataFile, index)).some(
+          (path) => existsSync(path)
+        )
       if (fileExistedOnLoad || hasBackup) {
         if (this.restoreFromBackup(dataFile)) {
           return this.load(false)
@@ -7435,6 +7438,20 @@ export class Store {
       return Promise.reject(new Error('Cannot flush while persistence is finalized'))
     }
     return this.flushCurrentStateAsync(false, options.signal, options.drainToStableGeneration, true)
+  }
+
+  /**
+   * Capture the fully flushed profile before an updater tears down the process.
+   * The installer must never be the first recovery boundary: a normal quit can
+   * still leave the primary file valid while the renderer checkpoint was lost.
+   */
+  async createUpdateRecoverySnapshot(): Promise<void> {
+    await this.flushPendingOrThrowAsync()
+    const snapshotPath = `${this.dataFile}${UPDATE_RECOVERY_SNAPSHOT_SUFFIX}`
+    const tempPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`
+    await mkdir(dirname(snapshotPath), { recursive: true })
+    await copyFile(this.dataFile, tempPath)
+    await rename(tempPath, snapshotPath)
   }
 
   // Async twin of flushOrThrow: durable state only. Active-view and GitHub sidecars are
