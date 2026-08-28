@@ -2,60 +2,149 @@ name: Sync Orca Upstream
 
 on:
   schedule:
-    - cron: '17 2 * * *'
+    # Saturday 01:00 KST (Friday 16:00 UTC), three hours before installation.
+    - cron: '0 16 * * 5'
   workflow_dispatch:
+    inputs:
+      force_release:
+        description: 'Build a fresh custom release even if this upstream version was already published'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
+  actions: write
   contents: write
-  pull-requests: write
+  issues: write
 
 concurrency:
   group: sync-orca-upstream
   cancel-in-progress: false
 
 jobs:
-  open-sync-pr:
+  sync-and-release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout custom branch
         uses: actions/checkout@v4
         with:
-          ref: ryan/ceo-office-sidebar
+          ref: ryan/ceo-office-sidebar-latest
           fetch-depth: 0
 
-      - name: Compare upstream
-        id: compare
-        shell: bash
+      - name: Resolve latest upstream release
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git remote add upstream https://github.com/stablyai/orca.git
-          git fetch upstream main --quiet
-          if git diff --quiet HEAD upstream/main; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          set -euo pipefail
+          tag=$(gh api repos/stablyai/orca/releases/latest --jq .tag_name)
+          if ! printf '%s' "$tag" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+            echo "::error::Refusing an invalid upstream release tag: $tag"
+            exit 1
           fi
-          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Merge upstream into sync branch
-        if: steps.compare.outputs.changed == 'true'
-        shell: bash
+      - name: Fetch upstream release tag
+        env:
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
         run: |
-          branch="automation/upstream-sync-${GITHUB_RUN_ID}"
-          git checkout -b "$branch"
+          set -euo pipefail
+          git remote add upstream https://github.com/stablyai/orca.git
+          git fetch upstream --quiet --force \
+            "+refs/tags/${UPSTREAM_TAG}:refs/tags/upstream-${UPSTREAM_TAG}"
+
+      - name: Decide whether a sync is needed
+        id: compare
+        env:
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse "upstream-${UPSTREAM_TAG}^{commit}")
+          if git merge-base --is-ancestor "$sha" HEAD; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Branch already contains ${UPSTREAM_TAG}."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Need to merge ${UPSTREAM_TAG}."
+          fi
+
+      - name: Merge upstream release
+        id: merge
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
           git config user.name "orca-upstream-sync[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git merge --no-edit upstream/main
+          if git merge --no-ff -m "chore: sync ${UPSTREAM_TAG} [skip ci]" "upstream-${UPSTREAM_TAG}"; then
+            echo "merge_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort || true
+            echo "merge_ok=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Open sync pull request
-        if: steps.compare.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          base: ryan/ceo-office-sidebar
-          branch: automation/upstream-sync-${{ github.run_id }}
-          title: 'chore: sync Orca upstream changes'
-          commit-message: 'chore: sync Orca upstream changes'
-          body: |
-            Automated upstream sync from `stablyai/orca`.
+      - name: Push merged custom branch
+        if: steps.compare.outputs.changed == 'true' && steps.merge.outputs.merge_ok == 'true'
+        run: git push origin HEAD:ryan/ceo-office-sidebar-latest
 
-            Review the diff before merging. Merging this PR triggers the custom Windows release workflow.
-          labels: upstream-sync
+      - name: Check for an existing custom release
+        id: release
+        if: steps.compare.outputs.changed == 'false' || steps.merge.outputs.merge_ok == 'true'
+        env:
+          FORCE_RELEASE: ${{ inputs.force_release }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$FORCE_RELEASE" = "true" ]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          prefix="v${UPSTREAM_VERSION}-ceo."
+          found=false
+          while IFS= read -r tag; do
+            case "$tag" in
+              "$prefix"*) found=true; break ;;
+            esac
+          done < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName')
+
+          if [ "$found" = "true" ]; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "A custom release for ${UPSTREAM_VERSION} already exists."
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            echo "No custom release for ${UPSTREAM_VERSION}; a build is required."
+          fi
+
+      - name: Start the custom Windows release
+        if: steps.release.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_NUMBER: ${{ github.run_number }}
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
+        run: |
+          set -euo pipefail
+          version="${UPSTREAM_VERSION}-ceo.$(date -u +%Y%m%d).${RUN_NUMBER}"
+          gh workflow run custom-windows-release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref ryan/ceo-office-sidebar-latest \
+            -f version="$version"
+
+      - name: Report merge conflict
+        if: steps.compare.outputs.changed == 'true' && steps.merge.outputs.merge_ok != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          set -euo pipefail
+          title="Upstream sync conflict: ${UPSTREAM_TAG}"
+          echo "::warning::${title}; no custom release was started."
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -z "$existing" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body \
+              "Merging \`${UPSTREAM_TAG}\` into \`ryan/ceo-office-sidebar-latest\` conflicted, so no release was built. Run: ${RUN_URL}"
+          fi
