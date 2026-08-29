@@ -5,6 +5,8 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import type { RpcTransport } from './transport'
 import { createStaticWebClientHandler } from './static-web-client-handler'
 import { RemoteRuntimeServerHeartbeat } from './remote-runtime-server-heartbeat'
+import { isPortListenFallbackError, listenOnPreservedPort } from './ws-port-listen'
+import type { PreservedPortOptions } from './ws-port-listen'
 
 const MAX_WS_MESSAGE_BYTES = 1024 * 1024
 // Why: one desktop remote-host client can hold many concurrent streams, so keep the cap high enough that stale streams don't starve control RPCs.
@@ -24,7 +26,7 @@ type WebSocketMessageHandler = {
 // Why: mobile clients background-suspend sockets with no TCP FIN, leaving half-opens that otherwise only the OS keepalive (~2h) reaps; a 15s ping/pong sweep bounds that to ~60s (clients auto-pong per RFC 6455), since a reap needs consecutive unanswered probes rather than one (STA-3320).
 const HEARTBEAT_INTERVAL_MS = 15_000
 
-export type WebSocketTransportOptions = {
+export type WebSocketTransportOptions = PreservedPortOptions & {
   host: string
   port: number
   tlsCert?: string
@@ -53,6 +55,9 @@ export class WebSocketTransport implements RpcTransport {
   private readonly staticRoot: string | undefined
   private readonly fallbackPort: number | undefined
   private readonly preferPinnedPort: boolean
+  private readonly preservePort: boolean
+  private readonly preservedPortRetryTimeoutMs: number | undefined
+  private readonly preservedPortRetryIntervalMs: number | undefined
   private httpServer: HttpsServer | HttpServer | null = null
   private wss: WebSocketServer | null = null
   private messageHandler: WebSocketMessageHandler | null = null
@@ -74,7 +79,10 @@ export class WebSocketTransport implements RpcTransport {
     preAuthTimeoutMs,
     staticRoot,
     fallbackPort,
-    preferPinnedPort
+    preferPinnedPort,
+    preservePort,
+    preservedPortRetryTimeoutMs,
+    preservedPortRetryIntervalMs
   }: WebSocketTransportOptions) {
     this.host = host
     this.port = port
@@ -89,6 +97,9 @@ export class WebSocketTransport implements RpcTransport {
     this.staticRoot = staticRoot
     this.fallbackPort = fallbackPort
     this.preferPinnedPort = preferPinnedPort === true
+    this.preservePort = preservePort === true
+    this.preservedPortRetryTimeoutMs = preservedPortRetryTimeoutMs
+    this.preservedPortRetryIntervalMs = preservedPortRetryIntervalMs
   }
 
   onMessage(handler: WebSocketMessageHandler): void {
@@ -135,6 +146,16 @@ export class WebSocketTransport implements RpcTransport {
 
   async start(): Promise<void> {
     if (this.wss) {
+      return
+    }
+
+    if (this.preservePort && this.port !== 0) {
+      await listenOnPreservedPort({
+        port: this.port,
+        retryTimeoutMs: this.preservedPortRetryTimeoutMs,
+        retryIntervalMs: this.preservedPortRetryIntervalMs,
+        tryListen: (port) => this.tryListen(port)
+      })
       return
     }
 
@@ -334,20 +355,4 @@ export class WebSocketTransport implements RpcTransport {
       this.preAuthTimers.delete(ws)
     }
   }
-}
-
-function isPortListenFallbackError(error: unknown, port: number): boolean {
-  if (!(error instanceof Error) || !('code' in error)) {
-    return false
-  }
-  if (error.code === 'EADDRINUSE') {
-    return true
-  }
-  return (
-    error.code === 'EACCES' &&
-    'syscall' in error &&
-    error.syscall === 'listen' &&
-    'port' in error &&
-    error.port === port
-  )
 }

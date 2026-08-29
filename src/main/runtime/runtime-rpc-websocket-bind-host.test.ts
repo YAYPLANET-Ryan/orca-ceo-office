@@ -9,6 +9,7 @@ import { OrcaRuntimeRpcServer } from './runtime-rpc'
 import { WebSocketTransport } from './rpc/ws-transport'
 import { DeviceRegistry } from './device-registry'
 import { DEVICE_REGISTRY_FILENAME } from './mobile-pairing-files'
+import { readWsFallbackPort } from './rpc/ws-fallback-port-store'
 
 vi.mock('../git/worktree', () => {
   const worktrees = [
@@ -97,6 +98,47 @@ describe('OrcaRuntimeRpcServer WebSocket bind host (STA-2370)', () => {
       expect(new URL(server.getWebSocketEndpoint()!).hostname).toBe('0.0.0.0')
     } finally {
       await server.stop()
+    }
+  })
+
+  it('persists the normal listener port and reclaims it across a restart overlap', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
+    const scratch = new WebSocketTransport({ host: '127.0.0.1', port: 0 })
+    await scratch.start()
+    const stablePort = scratch.resolvedPort
+    await scratch.stop()
+
+    const first = new OrcaRuntimeRpcServer({
+      runtime: new OrcaRuntimeService(),
+      userDataPath,
+      enableWebSocket: true,
+      wsPort: stablePort
+    })
+    await first.start()
+    expect(wsTransportOf(first)?.resolvedPort).toBe(stablePort)
+    await first.stop()
+    expect(readWsFallbackPort(userDataPath)).toBe(stablePort)
+
+    const oldProcess = new WebSocketTransport({ host: '127.0.0.1', port: stablePort })
+    await oldProcess.start()
+    const relaunched = new OrcaRuntimeRpcServer({
+      runtime: new OrcaRuntimeService(),
+      userDataPath,
+      enableWebSocket: true,
+      wsPort: stablePort
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const startPromise = relaunched.start()
+    setTimeout(() => void oldProcess.stop(), 50)
+
+    try {
+      await startPromise
+      expect(wsTransportOf(relaunched)?.resolvedPort).toBe(stablePort)
+      expect(readWsFallbackPort(userDataPath)).toBe(stablePort)
+    } finally {
+      warnSpy.mockRestore()
+      await relaunched.stop().catch(() => {})
+      await oldProcess.stop().catch(() => {})
     }
   })
 

@@ -514,6 +514,62 @@ describe('WebSocketTransport', () => {
     ws.close()
   })
 
+  it('fails closed instead of changing a preserved pairing port', async () => {
+    const holder = new WebSocketTransport({ host: '127.0.0.1', port: 0 })
+    transports.push(holder)
+    await holder.start()
+    const preservedPort = holder.resolvedPort
+    const transport = new WebSocketTransport({
+      host: '127.0.0.1',
+      port: preservedPort,
+      preservePort: true,
+      preservedPortRetryTimeoutMs: 30,
+      preservedPortRetryIntervalMs: 5
+    })
+    transports.push(transport)
+    const privateTransport = transport as unknown as {
+      tryListen: (port: number) => Promise<void>
+    }
+    const tryListenSpy = vi.spyOn(privateTransport, 'tryListen')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      await expect(transport.start()).rejects.toMatchObject({ code: 'EADDRINUSE' })
+    } finally {
+      warnSpy.mockRestore()
+    }
+
+    expect(tryListenSpy.mock.calls.length).toBeGreaterThan(1)
+    expect(tryListenSpy.mock.calls.every(([port]) => port === preservedPort)).toBe(true)
+    expect(transport.resolvedHost).toBeNull()
+  })
+
+  it('reclaims a preserved pairing port after update-process overlap', async () => {
+    const holder = new WebSocketTransport({ host: '127.0.0.1', port: 0 })
+    transports.push(holder)
+    await holder.start()
+    const preservedPort = holder.resolvedPort
+    const transport = new WebSocketTransport({
+      host: '127.0.0.1',
+      port: preservedPort,
+      preservePort: true,
+      preservedPortRetryTimeoutMs: 1_000,
+      preservedPortRetryIntervalMs: 10
+    })
+    transports.push(transport)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const startPromise = transport.start()
+    setTimeout(() => void holder.stop(), 30)
+
+    try {
+      await startPromise
+    } finally {
+      warnSpy.mockRestore()
+    }
+
+    expect(transport.resolvedPort).toBe(preservedPort)
+  })
+
   it('falls back to OS-assigned port when preferred port is reserved', async () => {
     const tls = makeTls()
     const transport = new WebSocketTransport({
