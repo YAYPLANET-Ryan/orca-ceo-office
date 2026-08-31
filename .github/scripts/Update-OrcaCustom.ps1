@@ -1,9 +1,13 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('Check', 'Install', 'RegisterTask', 'UnregisterTask')]
+  [ValidateSet('Check', 'Install', 'Restore', 'RegisterTask', 'UnregisterTask')]
   [string]$Mode = 'Check',
 
-  [switch]$AllowRestart
+  [switch]$AllowRestart,
+
+  [string]$BackupPath,
+
+  [switch]$ConfirmRestore
 )
 
 Set-StrictMode -Version 2.0
@@ -23,8 +27,10 @@ $BackupRoot = Join-Path $UpdaterRoot 'backups'
 $LogRoot = Join-Path $UpdaterRoot 'logs'
 $StableScriptRoot = Join-Path $UpdaterRoot 'scripts'
 $LogPath = Join-Path $LogRoot 'Update-OrcaCustom.log'
+$StateBackupSchemaVersion = 1
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Add-Type -AssemblyName System.Security
 
 function Initialize-UpdaterDirectories {
   foreach ($path in @($UpdaterRoot, $CacheRoot, $BackupRoot, $LogRoot, $StableScriptRoot)) {
@@ -239,24 +245,393 @@ function Compare-CustomVersion {
   return 0
 }
 
+function Get-ByteSha256 {
+  param([Parameter(Mandatory = $true)][byte[]]$Bytes)
+
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $hash = $sha256.ComputeHash($Bytes)
+    return -join @($hash | ForEach-Object { $_.ToString('x2') })
+  } finally {
+    $sha256.Dispose()
+  }
+}
+
+function Get-FileSha256 {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Get-OrcaStateItemDefinitions {
+  $userDataRoot = Join-Path $env:APPDATA 'Orca'
+  $items = @(
+    [pscustomobject]@{
+      Id = 'profile-data'
+      Path = Join-Path $env:APPDATA 'Orca\profiles\local-default\orca-data.json'
+      Sensitive = $true
+      PreserveAcrossInstall = $true
+    },
+    [pscustomobject]@{
+      Id = 'pairing-port'
+      Path = Join-Path $userDataRoot 'mobile-ws-fallback-port.json'
+      Sensitive = $false
+      PreserveAcrossInstall = $true
+    },
+    [pscustomobject]@{
+      Id = 'pairing-devices'
+      Path = Join-Path $userDataRoot 'orca-devices.json'
+      Sensitive = $true
+      PreserveAcrossInstall = $true
+    },
+    [pscustomobject]@{
+      Id = 'pairing-keypair'
+      Path = Join-Path $userDataRoot 'orca-e2ee-keypair.json'
+      Sensitive = $true
+      PreserveAcrossInstall = $true
+    }
+  )
+
+  $installedState = Get-InstalledOrcaState
+  if ($installedState.FeedPath) {
+    $items += [pscustomobject]@{
+      Id = 'update-feed'
+      Path = [string]$installedState.FeedPath
+      Sensitive = $false
+      PreserveAcrossInstall = $false
+    }
+  }
+  return $items
+}
+
+function Protect-OrcaBackupDirectory {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $acl = New-Object System.Security.AccessControl.DirectorySecurity
+  $acl.SetAccessRuleProtection($true, $false)
+  $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    $identity,
+    [System.Security.AccessControl.FileSystemRights]::FullControl,
+    [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+    [System.Security.AccessControl.PropagationFlags]::None,
+    [System.Security.AccessControl.AccessControlType]::Allow
+  )
+  $acl.AddAccessRule($rule)
+  Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+function Protect-OrcaStateFile {
+  param(
+    [Parameter(Mandatory = $true)][string]$Source,
+    [Parameter(Mandatory = $true)][string]$Destination
+  )
+
+  [byte[]]$plainBytes = [IO.File]::ReadAllBytes($Source)
+  try {
+    [byte[]]$protectedBytes = [System.Security.Cryptography.ProtectedData]::Protect(
+      $plainBytes,
+      $null,
+      [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+    )
+    [IO.File]::WriteAllBytes($Destination, $protectedBytes)
+  } finally {
+    if ($plainBytes.Length -gt 0) {
+      [Array]::Clear($plainBytes, 0, $plainBytes.Length)
+    }
+  }
+}
+
+function Write-OrcaStateBytesAtomically {
+  param(
+    [Parameter(Mandatory = $true)][string]$Target,
+    [Parameter(Mandatory = $true)][byte[]]$Bytes
+  )
+
+  $parent = Split-Path -Parent $Target
+  if (-not (Test-Path -LiteralPath $parent)) {
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+  }
+  $temporary = Join-Path $parent ('.orca-restore-{0}.tmp' -f [Guid]::NewGuid().ToString('N'))
+  $replacementBackup = "$temporary.previous"
+  try {
+    [IO.File]::WriteAllBytes($temporary, $Bytes)
+    if (Test-Path -LiteralPath $Target) {
+      [IO.File]::Replace($temporary, $Target, $replacementBackup)
+    } else {
+      [IO.File]::Move($temporary, $Target)
+    }
+  } finally {
+    if (Test-Path -LiteralPath $temporary) {
+      Remove-Item -LiteralPath $temporary -Force
+    }
+    if (Test-Path -LiteralPath $replacementBackup) {
+      Remove-Item -LiteralPath $replacementBackup -Force
+    }
+  }
+}
+
+function Get-ValidatedOrcaStateBackup {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $root = [IO.Path]::GetFullPath($BackupRoot).TrimEnd('\') + '\'
+  $resolved = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+  if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Backup path must stay under '$BackupRoot'."
+  }
+  if (-not (Test-Path -LiteralPath $resolved -PathType Container)) {
+    throw "Backup directory does not exist: $resolved"
+  }
+  $backupItem = Get-Item -LiteralPath $resolved
+  if (($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    throw 'Backup directory must not be a reparse point.'
+  }
+
+  $manifestPath = Join-Path $resolved 'manifest.json'
+  if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw 'Backup manifest is missing.'
+  }
+  $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ([int]$manifest.SchemaVersion -ne $StateBackupSchemaVersion) {
+    throw "Unsupported backup schema version '$($manifest.SchemaVersion)'."
+  }
+
+  $definitions = @{}
+  foreach ($definition in @(Get-OrcaStateItemDefinitions)) {
+    $definitions[[string]$definition.Id] = $definition
+  }
+  $seen = @{}
+  foreach ($entry in @($manifest.Items)) {
+    $id = [string]$entry.Id
+    if (-not $definitions.ContainsKey($id) -or $seen.ContainsKey($id)) {
+      throw "Backup manifest contains an unknown or duplicate item '$id'."
+    }
+    $seen[$id] = $true
+    $definition = $definitions[$id]
+    if (
+      [bool]$entry.Sensitive -ne [bool]$definition.Sensitive -or
+      [bool]$entry.PreserveAcrossInstall -ne [bool]$definition.PreserveAcrossInstall
+    ) {
+      throw "Backup item '$id' does not match the current recovery policy."
+    }
+    $expectedStoredName = if ([bool]$entry.Sensitive) { "$id.dpapi" } else { "$id.copy" }
+    if ([string]$entry.StoredName -ne $expectedStoredName) {
+      throw "Backup item '$id' has an invalid stored name."
+    }
+    if ([string]$entry.StoredSha256 -notmatch '^[0-9a-f]{64}$' -or [string]$entry.OriginalSha256 -notmatch '^[0-9a-f]{64}$') {
+      throw "Backup item '$id' has an invalid SHA-256 value."
+    }
+    $storedPath = Join-Path $resolved $expectedStoredName
+    if (-not (Test-Path -LiteralPath $storedPath -PathType Leaf)) {
+      throw "Backup item '$id' is missing."
+    }
+    $storedItem = Get-Item -LiteralPath $storedPath
+    if (($storedItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+      throw "Backup item '$id' must not be a reparse point."
+    }
+    if ((Get-FileSha256 -Path $storedPath) -ne [string]$entry.StoredSha256) {
+      throw "Backup item '$id' failed SHA-256 verification."
+    }
+  }
+
+  return [pscustomobject]@{
+    Path = $resolved
+    Manifest = $manifest
+    Definitions = $definitions
+  }
+}
+
 function Backup-OrcaState {
   param([Parameter(Mandatory = $true)][string]$TargetVersion)
 
   Initialize-UpdaterDirectories
-  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-  $dataPath = Join-Path $env:APPDATA 'orca\profiles\local-default\orca-data.json'
-  if (Test-Path -LiteralPath $dataPath) {
-    $dataBackup = Join-Path $BackupRoot "orca-data.json.pre-$TargetVersion-$stamp.bak"
-    Copy-Item -LiteralPath $dataPath -Destination $dataBackup
-    Write-UpdateLog "Backed up ORCA state to $dataBackup."
+  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-ffff'
+  $backupDirectory = Join-Path $BackupRoot "pre-$TargetVersion-$stamp"
+  New-Item -ItemType Directory -Path $backupDirectory | Out-Null
+  Protect-OrcaBackupDirectory -Path $backupDirectory
+
+  $entries = @()
+  foreach ($definition in @(Get-OrcaStateItemDefinitions)) {
+    if (-not (Test-Path -LiteralPath $definition.Path -PathType Leaf)) {
+      continue
+    }
+    $storedName = if ($definition.Sensitive) { "$($definition.Id).dpapi" } else { "$($definition.Id).copy" }
+    $storedPath = Join-Path $backupDirectory $storedName
+    if ($definition.Sensitive) {
+      Protect-OrcaStateFile -Source $definition.Path -Destination $storedPath
+    } else {
+      Copy-Item -LiteralPath $definition.Path -Destination $storedPath
+    }
+    $entries += [pscustomobject]@{
+      Id = $definition.Id
+      StoredName = $storedName
+      Sensitive = [bool]$definition.Sensitive
+      PreserveAcrossInstall = [bool]$definition.PreserveAcrossInstall
+      OriginalLength = (Get-Item -LiteralPath $definition.Path).Length
+      OriginalSha256 = Get-FileSha256 -Path $definition.Path
+      StoredSha256 = Get-FileSha256 -Path $storedPath
+    }
   }
 
-  $installedState = Get-InstalledOrcaState
-  if ($installedState.FeedPath -and (Test-Path -LiteralPath $installedState.FeedPath)) {
-    $feedBackup = Join-Path $BackupRoot "app-update.yml.pre-$TargetVersion-$stamp.bak"
-    Copy-Item -LiteralPath $installedState.FeedPath -Destination $feedBackup
-    Write-UpdateLog "Backed up update feed to $feedBackup."
+  $manifest = [ordered]@{
+    SchemaVersion = $StateBackupSchemaVersion
+    CreatedAt = (Get-Date).ToString('o')
+    TargetVersion = $TargetVersion
+    Items = $entries
   }
+  $manifestPath = Join-Path $backupDirectory 'manifest.json'
+  $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+  [void](Get-ValidatedOrcaStateBackup -Path $backupDirectory)
+  Write-UpdateLog "Created and verified protected ORCA recovery backup at $backupDirectory."
+  return $backupDirectory
+}
+
+function Assert-OrcaStateMatchesBackup {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $backup = Get-ValidatedOrcaStateBackup -Path $Path
+  foreach ($entry in @($backup.Manifest.Items | Where-Object { [bool]$_.PreserveAcrossInstall })) {
+    $definition = $backup.Definitions[[string]$entry.Id]
+    if (-not (Test-Path -LiteralPath $definition.Path -PathType Leaf)) {
+      throw "ORCA state item '$($entry.Id)' disappeared during the update."
+    }
+    if ((Get-FileSha256 -Path $definition.Path) -ne [string]$entry.OriginalSha256) {
+      throw "ORCA state item '$($entry.Id)' changed during the update."
+    }
+  }
+}
+
+function Restore-OrcaStateFiles {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [switch]$PreservedOnly
+  )
+
+  $backup = Get-ValidatedOrcaStateBackup -Path $Path
+  $entries = @($backup.Manifest.Items)
+  if ($PreservedOnly) {
+    $entries = @($entries | Where-Object { [bool]$_.PreserveAcrossInstall })
+  }
+  foreach ($entry in $entries) {
+    $definition = $backup.Definitions[[string]$entry.Id]
+    $storedPath = Join-Path $backup.Path ([string]$entry.StoredName)
+    [byte[]]$bytes = if ([bool]$entry.Sensitive) {
+      $protectedBytes = [IO.File]::ReadAllBytes($storedPath)
+      [System.Security.Cryptography.ProtectedData]::Unprotect(
+        $protectedBytes,
+        $null,
+        [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+      )
+    } else {
+      [IO.File]::ReadAllBytes($storedPath)
+    }
+    try {
+      if ((Get-ByteSha256 -Bytes $bytes) -ne [string]$entry.OriginalSha256) {
+        throw "Backup item '$($entry.Id)' failed decrypted SHA-256 verification."
+      }
+      Write-OrcaStateBytesAtomically -Target $definition.Path -Bytes $bytes
+    } finally {
+      if ($bytes.Length -gt 0) {
+        [Array]::Clear($bytes, 0, $bytes.Length)
+      }
+    }
+  }
+}
+
+function Read-PreservedPairingPort {
+  $path = Join-Path $env:APPDATA 'Orca\mobile-ws-fallback-port.json'
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    return $null
+  }
+  $document = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+  $port = 0
+  if (-not [int]::TryParse([string]$document.port, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+    throw 'The saved ORCA pairing port file is invalid.'
+  }
+  return $port
+}
+
+function ConvertFrom-ExcludedTcpPortOutput {
+  param([Parameter(Mandatory = $true)][string[]]$Lines)
+
+  $ranges = @()
+  foreach ($line in $Lines) {
+    $match = [regex]::Match($line, '^\s*(\d+)\s+(\d+)(?:\s+\*)?\s*$')
+    if ($match.Success) {
+      $ranges += [pscustomobject]@{
+        Start = [int]$match.Groups[1].Value
+        End = [int]$match.Groups[2].Value
+      }
+    }
+  }
+  return $ranges
+}
+
+function Get-WindowsExcludedTcpPortRanges {
+  $netshPath = Join-Path $env:SystemRoot 'System32\netsh.exe'
+  if (-not (Test-Path -LiteralPath $netshPath -PathType Leaf)) {
+    throw 'Windows netsh.exe is unavailable for the pairing-port preflight.'
+  }
+  $output = @(& $netshPath interface ipv4 show excludedportrange protocol=tcp 2>&1)
+  if ($LASTEXITCODE -ne 0) {
+    throw "Windows excluded-port preflight failed with exit code $LASTEXITCODE."
+  }
+  return @(ConvertFrom-ExcludedTcpPortOutput -Lines @($output | ForEach-Object { [string]$_ }))
+}
+
+function Assert-PairingPortNotExcluded {
+  param([AllowNull()][Nullable[int]]$Port)
+
+  $port = $Port
+  if ($null -eq $port) {
+    return
+  }
+  foreach ($range in @(Get-WindowsExcludedTcpPortRanges)) {
+    if ($port -ge $range.Start -and $port -le $range.End) {
+      throw "Saved ORCA pairing port $port is reserved by Windows (excluded range $($range.Start)-$($range.End)). The update was stopped before ORCA shutdown."
+    }
+  }
+}
+
+function Assert-PreservedPairingPortAvailable {
+  Assert-PairingPortNotExcluded -Port (Read-PreservedPairingPort)
+}
+
+function Read-BackupPairingPort {
+  param([Parameter(Mandatory = $true)]$Backup)
+
+  $entry = @($Backup.Manifest.Items | Where-Object { [string]$_.Id -eq 'pairing-port' } | Select-Object -First 1)
+  if ($entry.Count -eq 0) {
+    return $null
+  }
+  $portPath = Join-Path $Backup.Path ([string]$entry[0].StoredName)
+  $document = Get-Content -LiteralPath $portPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  $port = 0
+  if (-not [int]::TryParse([string]$document.port, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+    throw 'The backup contains an invalid ORCA pairing port.'
+  }
+  return $port
+}
+
+function Wait-OrcaPairingPort {
+  param([int]$TimeoutSeconds = 30)
+
+  $port = Read-PreservedPairingPort
+  if ($null -eq $port) {
+    return
+  }
+  for ($attempt = 0; $attempt -lt $TimeoutSeconds; $attempt++) {
+    $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
+    foreach ($listener in $listeners) {
+      $owner = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
+      if ($owner -and $owner.ProcessName -eq 'Orca') {
+        Write-UpdateLog "Verified ORCA pairing listener on preserved port $port."
+        return
+      }
+    }
+    Start-Sleep -Seconds 1
+  }
+  throw "ORCA did not reclaim preserved pairing port $port within $TimeoutSeconds seconds."
 }
 
 function Stop-OrcaForUpdate {
@@ -302,36 +677,114 @@ function Install-CanonicalRelease {
     exit 10
   }
 
-  Backup-OrcaState -TargetVersion $Package.Version
+  Assert-PreservedPairingPortAvailable
   $wasRunning = $false
   if ($running) {
     $wasRunning = Stop-OrcaForUpdate
   }
 
-  Write-UpdateLog "Starting silent installation of ORCA $($Package.Version)."
-  $installerProcess = Start-Process -FilePath $Package.InstallerPath -ArgumentList '/S' -Wait -PassThru
-  if ($installerProcess.ExitCode -ne 0) {
-    throw "Installer failed with exit code $($installerProcess.ExitCode)."
-  }
-
-  $verifiedState = $null
-  for ($attempt = 0; $attempt -lt 90; $attempt++) {
-    $candidateState = Get-InstalledOrcaState
-    if ($candidateState.Version -eq $Package.Version -and $candidateState.FeedCanonical) {
-      $verifiedState = $candidateState
-      break
+  try {
+    # Why: pairing identity files must be snapshotted after the writer exits or the set can be internally inconsistent.
+    $stateBackup = Backup-OrcaState -TargetVersion $Package.Version
+    Write-UpdateLog "Starting silent installation of ORCA $($Package.Version)."
+    $installerProcess = Start-Process -FilePath $Package.InstallerPath -ArgumentList '/S' -Wait -PassThru
+    if ($installerProcess.ExitCode -ne 0) {
+      throw "Installer failed with exit code $($installerProcess.ExitCode)."
     }
-    Start-Sleep -Seconds 1
-  }
-  if (-not $verifiedState) {
-    $failedState = Get-InstalledOrcaState
-    throw "Post-install verification failed. Version='$($failedState.Version)' FeedCanonical='$($failedState.FeedCanonical)'."
+
+    $verifiedState = $null
+    for ($attempt = 0; $attempt -lt 90; $attempt++) {
+      $candidateState = Get-InstalledOrcaState
+      if ($candidateState.Version -eq $Package.Version -and $candidateState.FeedCanonical) {
+        $verifiedState = $candidateState
+        break
+      }
+      Start-Sleep -Seconds 1
+    }
+    if (-not $verifiedState) {
+      $failedState = Get-InstalledOrcaState
+      throw "Post-install verification failed. Version='$($failedState.Version)' FeedCanonical='$($failedState.FeedCanonical)'."
+    }
+
+    Assert-PreservedPairingPortAvailable
+    try {
+      Assert-OrcaStateMatchesBackup -Path $stateBackup
+    } catch {
+      Write-UpdateLog 'ORCA user state changed during installation; restoring the protected pre-update copy.'
+      Restore-OrcaStateFiles -Path $stateBackup -PreservedOnly
+      Assert-OrcaStateMatchesBackup -Path $stateBackup
+    }
+  } catch {
+    if ($wasRunning) {
+      $recoveryState = Get-InstalledOrcaState
+      if ($recoveryState.ExecutablePath) {
+        Start-Process -FilePath $recoveryState.ExecutablePath | Out-Null
+        Write-UpdateLog 'Restarted ORCA after a failed update attempt.'
+      }
+    }
+    throw
   }
 
   Write-UpdateLog "Installed ORCA $($Package.Version) with canonical feed $RepositorySlug."
   if ($wasRunning -and $verifiedState.ExecutablePath) {
     Start-Process -FilePath $verifiedState.ExecutablePath | Out-Null
     Write-UpdateLog 'Restarted ORCA after update.'
+    Wait-OrcaPairingPort
+  }
+}
+
+function Restore-OrcaState {
+  if (-not $BackupPath) {
+    throw 'Restore mode requires -BackupPath.'
+  }
+  $backup = Get-ValidatedOrcaStateBackup -Path $BackupPath
+  Assert-PairingPortNotExcluded -Port (Read-BackupPairingPort -Backup $backup)
+  $itemIds = @($backup.Manifest.Items | ForEach-Object { [string]$_.Id })
+  if (-not $ConfirmRestore) {
+    [pscustomobject]@{
+      Status = 'DRY_RUN_PASS'
+      BackupPath = $backup.Path
+      TargetVersion = [string]$backup.Manifest.TargetVersion
+      ItemIds = $itemIds -join ', '
+      NextStep = 'Re-run with -ConfirmRestore and -AllowRestart if ORCA is running.'
+    } | Format-List
+    return
+  }
+
+  $installed = Get-InstalledOrcaState
+  $running = @(Get-Process -Name 'Orca' -ErrorAction SilentlyContinue).Count -gt 0
+  if ($running -and -not $AllowRestart) {
+    Write-UpdateLog 'Restore is verified but ORCA is running. Re-run with -AllowRestart.'
+    exit 10
+  }
+
+  $wasRunning = $false
+  if ($running) {
+    $wasRunning = Stop-OrcaForUpdate
+  }
+  $rollbackBackup = $null
+  try {
+    # Why: rollback must capture one stopped-writer state, not files sampled across concurrent registry writes.
+    $rollbackBackup = Backup-OrcaState -TargetVersion 'pre-restore'
+    Restore-OrcaStateFiles -Path $backup.Path
+    Assert-OrcaStateMatchesBackup -Path $backup.Path
+    Assert-PreservedPairingPortAvailable
+  } catch {
+    if ($rollbackBackup) {
+      Restore-OrcaStateFiles -Path $rollbackBackup
+    }
+    if ($wasRunning -and $installed.ExecutablePath) {
+      Start-Process -FilePath $installed.ExecutablePath | Out-Null
+      Write-UpdateLog 'Restarted ORCA after a failed state restore.'
+    }
+    throw
+  }
+
+  Write-UpdateLog "Restored ORCA state from $($backup.Path). Rollback backup: $rollbackBackup."
+  if ($wasRunning -and $installed.ExecutablePath) {
+    Start-Process -FilePath $installed.ExecutablePath | Out-Null
+    Write-UpdateLog 'Restarted ORCA after state restore.'
+    Wait-OrcaPairingPort
   }
 }
 
@@ -379,35 +832,44 @@ function Unregister-OrcaUpdateTask {
   }
 }
 
-try {
-  switch ($Mode) {
-    'Check' {
-      $package = Get-CanonicalPackage
-      $installed = Get-InstalledOrcaState
-      [pscustomobject]@{
-        Status = 'PASS'
-        CanonicalRepository = $RepositorySlug
-        LatestVersion = $package.Version
-        ReleaseCommit = $package.Commit
-        InstallerSha256 = $package.InstallerSha256
-        InstalledVersion = $installed.Version
-        CanonicalFeedInstalled = $installed.FeedCanonical
-        ReleaseUrl = $package.ReleaseUrl
-        CachePath = $package.InstallerPath
-      } | Format-List
+function Invoke-OrcaCustomUpdater {
+  try {
+    switch ($Mode) {
+      'Check' {
+        $package = Get-CanonicalPackage
+        $installed = Get-InstalledOrcaState
+        [pscustomobject]@{
+          Status = 'PASS'
+          CanonicalRepository = $RepositorySlug
+          LatestVersion = $package.Version
+          ReleaseCommit = $package.Commit
+          InstallerSha256 = $package.InstallerSha256
+          InstalledVersion = $installed.Version
+          CanonicalFeedInstalled = $installed.FeedCanonical
+          ReleaseUrl = $package.ReleaseUrl
+          CachePath = $package.InstallerPath
+        } | Format-List
+      }
+      'Install' {
+        $package = Get-CanonicalPackage
+        Install-CanonicalRelease -Package $package
+      }
+      'Restore' {
+        Restore-OrcaState
+      }
+      'RegisterTask' {
+        Register-OrcaUpdateTask
+      }
+      'UnregisterTask' {
+        Unregister-OrcaUpdateTask
+      }
     }
-    'Install' {
-      $package = Get-CanonicalPackage
-      Install-CanonicalRelease -Package $package
-    }
-    'RegisterTask' {
-      Register-OrcaUpdateTask
-    }
-    'UnregisterTask' {
-      Unregister-OrcaUpdateTask
-    }
+  } catch {
+    Write-UpdateLog "FAIL: $($_.Exception.Message)"
+    throw
   }
-} catch {
-  Write-UpdateLog "FAIL: $($_.Exception.Message)"
-  throw
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+  Invoke-OrcaCustomUpdater
 }
