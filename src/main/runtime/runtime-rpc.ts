@@ -1183,14 +1183,20 @@ export class OrcaRuntimeRpcServer {
         this.pairingInitializationFailure = null
         try {
           const host = this.resolveInitialWebSocketBindHost()
+          const persistedPort =
+            this.wsPort !== 0 ? readWsFallbackPort(this.userDataPath) : undefined
+          // Why: once a listener has advertised a port, updates and relaunches must reclaim that exact
+          // endpoint. A short-lived old process may still own it during handoff; moving immediately would
+          // strand every paired remote client. Explicit serve pins override stale persisted values.
+          const preservedPort = this.preferPinnedWsPort ? this.wsPort : persistedPort
           const { transport, endpoint } = await this.startWebSocketTransport({
             host,
-            port: this.wsPort,
+            port: preservedPort ?? this.wsPort,
             preferPinnedPort: this.preferPinnedWsPort,
-            // Why: stable fallback port across restarts keeps paired devices' endpoints valid (STA-1511); wsPort 0 = random (E2E).
-            ...(this.wsPort !== 0 ? { fallbackPort: readWsFallbackPort(this.userDataPath) } : {})
+            preservePort:
+              this.wsPort !== 0 && (this.preferPinnedWsPort || persistedPort !== undefined)
           })
-          if (this.wsPort !== 0 && transport.resolvedPort !== this.wsPort) {
+          if (this.wsPort !== 0) {
             writeWsFallbackPort(this.userDataPath, transport.resolvedPort)
           }
           activeTransports.push(transport)
@@ -1258,6 +1264,7 @@ export class OrcaRuntimeRpcServer {
     host: string
     port: number
     preferPinnedPort: boolean
+    preservePort?: boolean
     fallbackPort?: number
   }): Promise<{ transport: WebSocketTransport; endpoint: string }> {
     const deviceRegistry = this.deviceRegistry
@@ -1270,7 +1277,8 @@ export class OrcaRuntimeRpcServer {
       port: options.port,
       staticRoot: this.webClientRoot,
       ...(options.fallbackPort !== undefined ? { fallbackPort: options.fallbackPort } : {}),
-      ...(options.preferPinnedPort ? { preferPinnedPort: true } : {})
+      ...(options.preferPinnedPort ? { preferPinnedPort: true } : {}),
+      ...(options.preservePort ? { preservePort: true } : {})
     })
     const mobileSocketWiring = this.ensureMobileSocketWiring(deviceRegistry, e2eeKeypair)
     this.detachWebSocketWiring = mobileSocketWiring.attachTransport(wsTransport)
@@ -1395,7 +1403,8 @@ export class OrcaRuntimeRpcServer {
       widened = await this.startWebSocketTransport({
         host: WS_BIND_HOST_ALL_INTERFACES,
         port: previousPort,
-        preferPinnedPort: true
+        preferPinnedPort: true,
+        preservePort: true
       })
     } catch (error) {
       // Why: the wide bind failed after the loopback listener was already stopped. Restore a serving
@@ -1415,7 +1424,7 @@ export class OrcaRuntimeRpcServer {
     try {
       // Why: a rebind that lands on a different port (same-port bind refused) must be persisted so a
       // later reconnect from a device paired to this port matches on the next launch (STA-1511).
-      if (this.wsPort !== 0 && widened.transport.resolvedPort !== this.wsPort) {
+      if (this.wsPort !== 0) {
         writeWsFallbackPort(this.userDataPath, widened.transport.resolvedPort)
       }
       this.writeMetadata()
@@ -1440,7 +1449,8 @@ export class OrcaRuntimeRpcServer {
       restored = await this.startWebSocketTransport({
         host: WS_BIND_HOST_LOOPBACK,
         port: previousPort,
-        preferPinnedPort: true
+        preferPinnedPort: true,
+        preservePort: true
       })
     } catch (recoveryError) {
       // Why: even the loopback restore failed — drop the dead WebSocket transport so we never advertise an
