@@ -552,7 +552,7 @@ function Read-PreservedPairingPort {
 }
 
 function ConvertFrom-ExcludedTcpPortOutput {
-  param([Parameter(Mandatory = $true)][string[]]$Lines)
+  param([Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$Lines)
 
   $ranges = @()
   foreach ($line in $Lines) {
