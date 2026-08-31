@@ -17,10 +17,7 @@ import { resolveCeoOfficeNavigation } from './ceo-office-navigation'
 import { getResolvedExecutionHostIdForWorktree } from '@/lib/resolved-worktree-execution-host'
 import { settingsForRuntimeOwner } from '@/runtime/runtime-rpc-client'
 import { parseExecutionHostId } from '../../../../shared/execution-host'
-import {
-  ceoOfficeManifestRootCandidates,
-  isFolderAlreadyRegistered
-} from './ceo-office-roots'
+import { ceoOfficeManifestRootCandidates, isFolderAlreadyRegistered } from './ceo-office-roots'
 
 const MANIFEST_PATH = '.orca/ceo-office.json'
 
@@ -54,7 +51,9 @@ const DEFAULT_MANIFEST: CeoOfficeManifest = {
     {
       id: 'personal',
       label: 'Personal',
-      items: [{ id: 'personal-root', label: 'Personal Office', path: '02_PERSONAL', kind: 'folder' }]
+      items: [
+        { id: 'personal-root', label: 'Personal Office', path: '02_PERSONAL', kind: 'folder' }
+      ]
     },
     {
       id: 'shared',
@@ -169,8 +168,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
         // not the ORCA root, so this is a warning rather than an error — but it has
         // to be visible, because the fallback silently substitutes a stale catalog.
         console.warn(
-          `[ceo-office] no readable ${MANIFEST_PATH}; showing the built-in catalog. Tried:\n` +
-            attempts.join('\n')
+          `[ceo-office] no readable ${MANIFEST_PATH}; showing the built-in catalog. Tried:\n${attempts.join('\n')}`
         )
       }
     })()
