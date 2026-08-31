@@ -13,6 +13,20 @@ export type PreservedPortOptions = {
   preservedPortRetryIntervalMs?: number
 }
 
+export class PreservedPairingPortDeniedError extends Error {
+  readonly code = 'ORCA_PAIRING_PORT_DENIED'
+  readonly port: number
+
+  constructor(port: number, cause: unknown) {
+    super(
+      `The operating system denied ORCA access to preserved pairing port ${port}. On Windows, confirm that the port is not in an excluded TCP range; ORCA will not silently change an existing pairing endpoint.`,
+      { cause }
+    )
+    this.name = 'PreservedPairingPortDeniedError'
+    this.port = port
+  }
+}
+
 export async function listenOnPreservedPort({
   port,
   retryTimeoutMs,
@@ -26,6 +40,9 @@ export async function listenOnPreservedPort({
       await tryListen(port)
       return
     } catch (error: unknown) {
+      if (isAccessDeniedListenError(error, port)) {
+        throw new PreservedPairingPortDeniedError(port, error)
+      }
       if (!isAddressInUseError(error)) {
         throw error
       }
@@ -64,6 +81,18 @@ export function isPortListenFallbackError(error: unknown, port: number): boolean
 
 function isAddressInUseError(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'EADDRINUSE'
+}
+
+function isAccessDeniedListenError(error: unknown, port: number): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    error.code === 'EACCES' &&
+    'syscall' in error &&
+    error.syscall === 'listen' &&
+    'port' in error &&
+    error.port === port
+  )
 }
 
 function delay(milliseconds: number): Promise<void> {
