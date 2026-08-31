@@ -88,10 +88,13 @@ try {
   [IO.File]::WriteAllBytes($portCopy, $originalPortCopy)
 
   $ranges = @(ConvertFrom-ExcludedTcpPortOutput -Lines @(
+      '',
       'Start Port    End Port',
       '----------    --------',
+      '',
       '      6990        7089',
-      '     50000       50059     *'
+      '     50000       50059     *',
+      ''
     ))
   Assert-True -Condition ($ranges.Count -eq 2) -Message 'Excluded TCP port ranges were not parsed.'
   Assert-True -Condition ($ranges[0].Start -eq 6990 -and $ranges[0].End -eq 7089) -Message 'First excluded range was parsed incorrectly.'
