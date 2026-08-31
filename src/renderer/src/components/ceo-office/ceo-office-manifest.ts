@@ -18,7 +18,9 @@ export type CeoOfficeManifest = {
 }
 
 function isSafeRelativePath(value: unknown): value is string {
-  if (typeof value !== 'string' || value.trim() === '') return false
+  if (typeof value !== 'string' || value.trim() === '') {
+    return false
+  }
   const normalized = value.replaceAll('\\', '/')
   return (
     !normalized.startsWith('/') &&
@@ -28,7 +30,9 @@ function isSafeRelativePath(value: unknown): value is string {
 }
 
 function parseItem(value: unknown): CeoOfficeManifestItem | null {
-  if (!value || typeof value !== 'object') return null
+  if (!value || typeof value !== 'object') {
+    return null
+  }
   const item = value as Record<string, unknown>
   if (
     typeof item.id !== 'string' ||
@@ -47,14 +51,18 @@ function parseItem(value: unknown): CeoOfficeManifestItem | null {
 }
 
 export function parseCeoOfficeManifest(value: unknown): CeoOfficeManifest | null {
-  if (!value || typeof value !== 'object') return null
+  if (!value || typeof value !== 'object') {
+    return null
+  }
   const root = value as Record<string, unknown>
   if (root.version !== 1 || typeof root.title !== 'string' || !Array.isArray(root.groups)) {
     return null
   }
   const groups: CeoOfficeManifestGroup[] = []
   for (const rawGroup of root.groups) {
-    if (!rawGroup || typeof rawGroup !== 'object') return null
+    if (!rawGroup || typeof rawGroup !== 'object') {
+      return null
+    }
     const group = rawGroup as Record<string, unknown>
     if (
       typeof group.id !== 'string' ||
@@ -64,7 +72,9 @@ export function parseCeoOfficeManifest(value: unknown): CeoOfficeManifest | null
       return null
     }
     const items = group.items.map(parseItem)
-    if (items.some((item): item is null => item === null)) return null
+    if (items.some((item): item is null => item === null)) {
+      return null
+    }
     groups.push({ id: group.id, label: group.label, items: items as CeoOfficeManifestItem[] })
   }
   return { version: 1, title: root.title, groups }
