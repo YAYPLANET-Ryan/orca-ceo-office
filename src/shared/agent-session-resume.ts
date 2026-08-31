@@ -1,6 +1,6 @@
 import type { AgentHookSource } from './agent-hook-relay'
 import type { AgentStatusState } from './agent-status-types'
-import type { TuiAgent } from './types'
+import type { TuiAgent } from './tui-agent'
 
 export const RESUMABLE_TUI_AGENTS = [
   'claude',
@@ -13,7 +13,10 @@ export const RESUMABLE_TUI_AGENTS = [
   'droid',
   'grok',
   'devin',
-  'omp'
+  'omp',
+  'prime-agent',
+  'copilot',
+  'kimi'
 ] as const satisfies readonly TuiAgent[]
 
 export type ResumableTuiAgent = (typeof RESUMABLE_TUI_AGENTS)[number]
@@ -162,7 +165,7 @@ export function normalizeAgentProviderSession(raw: unknown): AgentProviderSessio
 }
 
 /** Compare the provider-owned values that identify the CLI resume target.
- *  Pi's file path is identity; other agents resume by their provider id. */
+ *  Pi-family transcript resumes use file identity; other agents use provider ids. */
 export function agentProviderSessionsEqual(
   agent: string | undefined,
   left: AgentProviderSessionMetadata | undefined,
@@ -174,7 +177,7 @@ export function agentProviderSessionsEqual(
   return (
     left.key === right.key &&
     left.id === right.id &&
-    (agent !== 'pi' || left.transcriptPath === right.transcriptPath)
+    ((agent !== 'pi' && agent !== 'prime-agent') || left.transcriptPath === right.transcriptPath)
   )
 }
 
@@ -208,7 +211,8 @@ export function extractAgentProviderSession(
       const id = readSessionId(payload, ['sessionID'])
       return id ? { key: 'session_id', id } : null
     }
-    case 'pi': {
+    case 'pi':
+    case 'prime-agent': {
       const id = readSessionId(payload, ['session_id'])
       const providerSession = id
         ? withTranscriptPath({ key: 'session_id', id }, payload, ['session_file'])
@@ -228,10 +232,15 @@ export function extractAgentProviderSession(
       const id = readSessionId(payload, ['session_id'])
       return id ? { key: 'session_id', id } : null
     }
+    // Why: Copilot's hook `session_id` is also its `~/.copilot/session-state/<id>/`
+    // directory name, so the same id is the CLI's resume locator.
+    case 'copilot': {
+      const id = readSessionId(payload, ['session_id', 'sessionId'])
+      return id ? { key: 'session_id', id } : null
+    }
     case 'amp':
     case 'cursor':
     case 'command-code':
-    case 'copilot':
     case 'hermes':
       return null
   }
@@ -258,6 +267,10 @@ export function getAgentResumeArgv(
       return providerSession.key === 'session_id' && providerSession.transcriptPath
         ? ['pi', '--session', providerSession.transcriptPath]
         : null
+    case 'prime-agent':
+      return providerSession.key === 'session_id' && providerSession.transcriptPath
+        ? ['prime-agent', '--resume', providerSession.transcriptPath]
+        : null
     case 'mimo-code':
       return providerSession.key === 'session_id' ? ['mimo', '--session', id] : null
     case 'droid':
@@ -270,5 +283,13 @@ export function getAgentResumeArgv(
       return providerSession.key === 'session_id'
         ? ['omp', '--resume', ompResumeFilePath?.trim() || id]
         : null
+    // Why: the joined form is the only one Copilot documents, and it matches the
+    // flag spelling buildAgentResumeInvocation bakes into persisted AI Vault
+    // resume commands, so local and remote resumes agree on one spelling.
+    case 'copilot':
+      return providerSession.key === 'session_id' ? ['copilot', `--resume=${id}`] : null
+    // Why: Kimi resumes by id with --session; sessions are work-dir-scoped (enforced by callers).
+    case 'kimi':
+      return providerSession.key === 'session_id' ? ['kimi', '--session', id] : null
   }
 }

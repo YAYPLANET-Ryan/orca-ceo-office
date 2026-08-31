@@ -3,7 +3,9 @@ import { defineMethod, type RpcMethod } from '../core'
 import { OptionalBoolean } from '../schemas'
 import { restampAiVaultListResult } from '../../../ai-vault/session-list-results'
 import { AI_VAULT_AGENTS, AI_VAULT_SCOPE_PATHS_MAX_COUNT } from '../../../../shared/ai-vault-types'
+import { AI_VAULT_SESSION_TITLE_REQUEST_MAX_COUNT } from '../../../../shared/ai-vault-session-title'
 import { LOCAL_EXECUTION_HOST_ID, parseExecutionHostId } from '../../../../shared/execution-host'
+import { describeAiVaultScanError } from '../../../../shared/ai-vault-scan-error-message'
 
 // Why: bound limit + scopePaths so a client cannot force an unbounded scan.
 // Each scopePath is a host-local match prefix (validated/capped, never used for
@@ -59,17 +61,44 @@ export const AiVaultPrepareSessionResumeParams = z.object({
   executionHostId: z.string().optional()
 })
 
+export const AiVaultSessionTitlesParams = z.object({
+  requests: z
+    .array(
+      z.object({
+        agent: z.enum(['claude', 'codex']),
+        sessionId: z.string().min(1).max(512),
+        transcriptPath: z.string().min(1).max(32_768).optional()
+      })
+    )
+    .max(AI_VAULT_SESSION_TITLE_REQUEST_MAX_COUNT)
+})
+
 export const AI_VAULT_METHODS: RpcMethod[] = [
+  defineMethod({
+    name: 'aiVault.resolveSessionTitles',
+    params: AiVaultSessionTitlesParams,
+    handler: (params, { runtime, signal }) =>
+      runtime.resolveAiVaultSessionTitles(params.requests, signal)
+  }),
   defineMethod({
     name: 'aiVault.listSessions',
     params: AiVaultListSessionsParams,
     handler: async (params, { runtime }) => {
-      const result = await runtime.listAiVaultSessions({
-        limit: params.unlimited ? undefined : params.limit,
-        unlimited: params.unlimited,
-        force: params.force,
-        scopePaths: params.scopePaths
-      })
+      let result
+      try {
+        result = await runtime.listAiVaultSessions({
+          limit: params.unlimited ? undefined : params.limit,
+          unlimited: params.unlimited,
+          force: params.force,
+          scopePaths: params.scopePaths
+        })
+      } catch (error) {
+        if (error instanceof Error) {
+          error.message = describeAiVaultScanError(error.message)
+          throw error
+        }
+        throw new Error(describeAiVaultScanError(String(error)))
+      }
       // Why: web clients consume this response directly (no parent-side retag),
       // so sessions must come back stamped as the runtime host they addressed.
       return params.executionHostId

@@ -9,6 +9,8 @@ import { join } from 'node:path'
 // preferred port, so pairings survive even when the preferred port is free
 // again.
 
+// The legacy filename remains for update compatibility; the value now records every resolved
+// production listener port, including the default, so later launches can preserve it strictly.
 const FALLBACK_PORT_FILE = 'mobile-ws-fallback-port.json'
 
 function isValidPort(value: unknown): value is number {

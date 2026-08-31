@@ -23,7 +23,10 @@ export class OffscreenBrowserBackend implements BrowserBackend {
   constructor(private readonly browserManager: BrowserManager) {}
 
   async createTab(params: BrowserBackendCreateTab): Promise<{ browserPageId: string }> {
-    const browserPageId = randomUUID()
+    const browserPageId = params.browserPageId ?? randomUUID()
+    if (this.windowsByPageId.has(browserPageId)) {
+      throw new Error(`Browser page ${browserPageId} already exists`)
+    }
     // Why: profiles map to Electron partitions; using the profile's partition
     // makes cookies/storage persist in the same SQLite DB the desktop path uses.
     const profile = params.profileId
@@ -48,25 +51,36 @@ export class OffscreenBrowserBackend implements BrowserBackend {
 
     this.windowsByPageId.set(browserPageId, win)
 
-    // Why: if the offscreen window is destroyed out from under us (crash, app
-    // teardown), drop the registry entry so commands fail cleanly instead of
-    // resolving a dead WebContents.
-    win.webContents.once('destroyed', () => {
-      this.windowsByPageId.delete(browserPageId)
-      this.browserManager.unregisterGuest(browserPageId)
-    })
-
     // Why: register the guest and return immediately so the new tab appears
     // without waiting for the page to finish loading. Previously createTab
     // awaited the full navigation, so clicking "New Browser Tab" did nothing for
     // up to a second on real URLs. The page loads asynchronously and streams
     // once it paints; a failed load leaves the (usable) tab open, matching how a
     // normal browser tab survives a failed navigation.
-    this.browserManager.registerOffscreenGuest({
+    const registered = this.browserManager.registerOffscreenGuest({
       browserPageId,
       worktreeId: params.worktreeId,
       sessionProfileId: profile?.id ?? null,
+      userAgentMode: profile?.userAgentMode,
       webContentsId: win.webContents.id
+    })
+    if (!registered) {
+      // Why destroy rather than carry on: the window already exists but carries none of the guest
+      // policies registration installs, so leaving it would navigate an unvalidated URL with no
+      // policy on it and hand back a page id nothing can drive. The renderer door aborts its mount
+      // the same way; this is that abort.
+      this.windowsByPageId.delete(browserPageId)
+      win.destroy()
+      throw new Error(`Browser page ${browserPageId} was refused`)
+    }
+
+    // Why only once registration took: this teardown unregisters the page id, and a refused id is
+    // one the other authority may own — cancelling its work would be the confusion we just refused.
+    // Why at all: if the window dies out from under us (crash, app teardown), drop the registry
+    // entry so commands fail cleanly instead of resolving a dead WebContents.
+    win.webContents.once('destroyed', () => {
+      this.windowsByPageId.delete(browserPageId)
+      this.browserManager.unregisterGuest(browserPageId)
     })
 
     const url = params.url || 'about:blank'
@@ -153,14 +167,24 @@ export class OffscreenBrowserBackend implements BrowserBackend {
         }
         reject(new Error(`${errorDescription} (${errorCode})`))
       }
+      const onDestroyed = (): void => {
+        if (settled) {
+          return
+        }
+        settled = true
+        cleanup()
+        resolve()
+      }
       const cleanup = (): void => {
         clearTimeout(timer)
         wc.removeListener('did-finish-load', onFinish)
         wc.removeListener('did-fail-load', onFail)
+        wc.removeListener('destroyed', onDestroyed)
       }
 
       wc.on('did-finish-load', onFinish)
       wc.on('did-fail-load', onFail)
+      wc.once('destroyed', onDestroyed)
       void wc.loadURL(url).catch(() => {
         // loadURL rejects on aborted navigations; did-fail-load handles the rest.
       })

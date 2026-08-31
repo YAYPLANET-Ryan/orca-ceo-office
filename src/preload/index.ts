@@ -3,8 +3,29 @@ import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { preloadE2EConfig } from './e2e-config'
 import { glApi } from './gitlab'
+import type {
+  SkillDeletePlan,
+  SkillDeleteRequest,
+  SkillDeleteResult
+} from '../shared/skill-delete-contract'
+import {
+  DOC_PREVIEW_EXTERNAL_LINK_CHANNEL,
+  DOC_PREVIEW_LOAD_FAILURE_CHANNEL,
+  DOC_PREVIEW_AUTHORIZE_DIRECTORY_CHANNEL,
+  DOC_PREVIEW_MINT_GRANT_CHANNEL,
+  DOC_PREVIEW_REVOKE_GRANT_CHANNEL,
+  type DocPreviewFailure
+} from '../shared/doc-preview-scheme'
+import type { DocPreviewGrantRequest } from './api/doc-preview-api'
 import type { AppIdentity } from '../shared/app-identity'
-import type { DashboardSnapshot, DashboardRevealAgentArgs } from '../shared/dashboard-snapshot'
+import type { MacCapturedDigitRowChord } from '../shared/macos-symbolic-hotkeys'
+import type { ComputerAwakeStatus } from '../shared/computer-awake-mode'
+import type {
+  DashboardRevealAgentArgs,
+  DashboardSleepWorkspaceArgs,
+  DashboardSnapshot,
+  DashboardSpawnAgentArgs
+} from '../shared/dashboard-snapshot'
 import type {
   TerminalPreviewConnectResult,
   TerminalPreviewDataPayload
@@ -33,7 +54,9 @@ import type {
   SshConfigHostResolution,
   SshConfigImportResult,
   SshTargetAddResult,
+  SshTargetCreateInput,
   SshTarget,
+  SshTargetUpdateInput,
   PortForwardEntry,
   EnrichedDetectedPort
 } from '../shared/ssh-types'
@@ -55,53 +78,59 @@ import type {
 } from '../shared/plugins/plugin-panel-bridge'
 import type { PluginConsentRequest } from '../shared/plugins/plugin-consent-request'
 import type { PluginChangeEvent } from '../shared/plugins/plugin-change-event'
+import type { BrowserViewportOverride } from '../shared/browser-workspace-types'
 import type {
-  BaseRefSearchResult,
-  BaseRefDefaultResult,
-  BrowserViewportOverride,
-  CustomPet,
-  FsChangedPayload,
+  BrowserWebAuthnAccountRequest,
+  BrowserWebAuthnAccountResponse
+} from '../shared/browser-webauthn-account'
+import type { SearchResult } from '../shared/code-search-types'
+import type {
   FilesystemPathFlavor,
-  GetRateLimitResult,
+  FsChangedPayload,
+  MarkdownDocument
+} from '../shared/filesystem-entry-types'
+import type { GitForkSyncExpectedUpstream, GitForkSyncResult } from '../shared/git-fork-sync'
+import type { GitStagingArea, GitUpstreamStatus } from '../shared/git-status-types'
+import type { GitHubCommentResult, GitHubReactionContent } from '../shared/github/comment-types'
+import type {
   GitHubPRRefreshCandidate,
   GitHubPRRefreshEvent,
-  GitHubPRRefreshReason,
-  GitHubAssignableUser,
-  GitHubCommentResult,
-  GitHubCreateIssueResult,
-  GitHubOwnerRepo,
-  GitHubWorkItem,
-  JiraProjectStatusOrder,
-  GitPushTarget,
-  GitStagingArea,
-  GitForkSyncExpectedUpstream,
-  GitForkSyncResult,
-  GitUpstreamStatus,
-  GhosttyImportPreview,
-  ListWorkItemsResult,
-  LinearProjectDetail,
-  MemorySnapshot,
+  GitHubPRRefreshReason
+} from '../shared/github/pull-request-refresh-types'
+import type { GitHubAssignableUser, GitHubOwnerRepo } from '../shared/github/pull-request-types'
+import type { GetRateLimitResult } from '../shared/github/rate-limit-types'
+import type { GitHubWorkItem, ListWorkItemsResult } from '../shared/github/work-item-types'
+import type { GhosttyImportPreview } from '../shared/global-settings-types'
+import type { GitHubCreateIssueResult } from '../shared/issue-mutation-types'
+import type { JiraProjectStatusOrder } from '../shared/jira-types'
+import type { LinearProjectDetail } from '../shared/linear/project-types'
+import type {
+  NotificationDeliveryProbeResult,
   NotificationDismissResult,
   NotificationDispatchResult,
-  NotificationDeliveryProbeResult,
   NotificationPermissionStatusResult,
   NotificationSoundDataResult,
   NotificationSoundPathResult,
-  NotificationSoundResult,
-  NestedRepoScanResult,
-  OnboardingState,
-  PersistedUIState,
-  FloatingTerminalCwdRequest,
-  MarkdownDocument,
-  SearchResult,
-  TuiAgent,
-  UpdateStatus,
+  NotificationSoundResult
+} from '../shared/notification-settings-types'
+import type { OnboardingState } from '../shared/onboarding-state-types'
+import type { PersistedUIState } from '../shared/persisted-ui-state-types'
+import type { CustomPet } from '../shared/pet-types'
+import type { MemorySnapshot } from '../shared/process-stats-types'
+import type { NestedRepoScanResult } from '../shared/project-group-types'
+import type { BaseRefDefaultResult, BaseRefSearchResult } from '../shared/repo-types'
+import type { TuiAgent } from '../shared/tui-agent'
+import type { FloatingTerminalCwdRequest } from '../shared/ui-chrome-types'
+import type { UpdateStatus } from '../shared/update-status-types'
+import type {
   WorktreeBaseStatusEvent,
+  WorktreeRemoteBranchConflictEvent
+} from '../shared/worktree/base-ref-drift-types'
+import type {
   WorktreeDefaultTabsLaunch,
-  WorktreeHeadIdentity,
-  WorktreeRemoteBranchConflictEvent,
   WorktreeSetupLaunch
-} from '../shared/types'
+} from '../shared/worktree/launch-types'
+import type { GitPushTarget, WorktreeHeadIdentity } from '../shared/worktree/types'
 import type { PtyModelRestoreNeededEvent } from '../shared/pty-model-restore-marker'
 import type { PtyListedSession } from '../shared/pty-listed-session'
 import type {
@@ -123,16 +152,44 @@ import type {
 } from '../shared/shell-open-types'
 import type { SkillDiscoveryResult, SkillDiscoveryTarget } from '../shared/skills'
 import type {
+  SkillCloudOwnedShare,
+  SkillCloudOperation,
+  SkillCloudPackageDetails
+} from '../shared/skill-cloud-contract'
+import type {
+  SkillBundleInstallPreviewInput,
+  SkillBundleInstallPreviewOperation,
+  SkillBundlePackageVersionInstallInput,
+  SkillBundleShareInstallInput,
+  SkillBundleShareInstallOperation,
+  SkillInstallPreviewInput,
+  SkillInstallPreviewOperation,
+  ManagedSkillInstallListOperation,
+  SkillPackageVersionInstallInput,
+  SkillRemoveInput,
+  SkillRemoveOperation,
+  SkillShareInstallInput,
+  SkillShareInstallOperation,
+  SkillInstallCancelInput,
+  SkillInstallProgress,
+  SkillSharePreview,
+  SkillShareProgress,
+  SkillSharePublishInput,
+  SkillSharePublishOperation,
+  SkillShareResolvedOperation
+} from '../shared/skill-sharing-contract'
+import type {
   SkillFreshnessInventory,
   SkillUpdateRun,
   SkillUpdateStartResult
 } from '../shared/skill-freshness'
+import type { ClientHostedBrowserRowsEvent } from '../shared/client-hosted-browser-rows'
 import type {
   RuntimeBrowserDriverState,
   RuntimeMobileSessionTabMove,
+  RuntimeRendererSyncWindowGraph,
   RuntimeStatus,
   RuntimeSyncWindowGraphResult,
-  RuntimeSyncWindowGraph,
   RuntimeTerminalCreateRequestPayload,
   RuntimeTerminalDriverState,
   RuntimeTerminalPresentation
@@ -153,39 +210,43 @@ import type {
 import type { WorkspaceSpaceScanProgress } from '../shared/workspace-space-types'
 import type { WorkspaceCleanupScanProgress } from '../shared/workspace-cleanup'
 import type { WorkspacePortAdvertisedUrlChangedEvent } from '../shared/workspace-ports'
-import type { GhAuthDiagnostic } from '../shared/github-auth-types'
+import type { GhAuthDiagnostic } from '../shared/github/auth-types'
 import type { TaskSourceContext } from '../shared/task-source-context'
+import type {
+  GetProjectViewTableResult,
+  GitHubProjectCommentMutationResult,
+  GitHubProjectMutationResult,
+  ListAccessibleProjectsResult,
+  ListAssignableUsersBySlugResult,
+  ListIssueTypesBySlugResult,
+  ListLabelsBySlugResult,
+  ListProjectViewsResult,
+  ProjectWorkItemDetailsBySlugResult,
+  ResolveProjectRefResult
+} from '../shared/github/project-result-types'
 import type {
   AddIssueCommentBySlugArgs,
   ClearProjectItemFieldArgs,
   DeleteIssueCommentBySlugArgs,
   GetProjectViewTableArgs,
-  GetProjectViewTableResult,
-  GitHubProjectCommentMutationResult,
-  GitHubProjectMutationResult,
   ListAccessibleProjectsArgs,
-  ListAccessibleProjectsResult,
   ListAssignableUsersBySlugArgs,
-  ListAssignableUsersBySlugResult,
   ListIssueTypesBySlugArgs,
-  ListIssueTypesBySlugResult,
   ListLabelsBySlugArgs,
-  ListLabelsBySlugResult,
   ListProjectViewsArgs,
-  ListProjectViewsResult,
   ProjectWorkItemDetailsBySlugArgs,
-  ProjectWorkItemDetailsBySlugResult,
   ResolveProjectRefArgs,
-  ResolveProjectRefResult,
   UpdateIssueBySlugArgs,
   UpdateIssueCommentBySlugArgs,
   UpdateIssueTypeBySlugArgs,
   UpdatePullRequestBySlugArgs,
   UpdateProjectItemFieldArgs
-} from '../shared/github-project-types'
+} from '../shared/github/project-request-types'
 import {
   richMarkdownContextMenuCommandChannel,
-  type RichMarkdownContextMenuCommandPayload
+  richMarkdownContextMenuTargetChannel,
+  type RichMarkdownContextMenuCommandPayload,
+  type RichMarkdownContextMenuTableTarget
 } from '../shared/rich-markdown-context-menu'
 import type {
   AgentStatusClearIpcPayload,
@@ -213,33 +274,47 @@ import type {
   PluginHostInstallSource,
   PluginHostListEntry,
   PluginHostLogLine,
+  ExternalAutomationManagerResult,
   PreloadApi
 } from './api-types'
 import type { AgentKind, LaunchSource, RequestKind } from '../shared/telemetry-events'
+import {
+  KEYBOARD_LAYOUT_CHANGED_CHANNEL,
+  type KeyboardLayoutChangeEvent
+} from '../shared/keyboard-layout-events'
 import { createBrowserFindSubscriptions } from './browser-find-subscriptions'
+import { createBrowserClientPageRendererRequests } from './browser-client-page-renderer-requests'
+import { readBrowserClientHostIdArgument } from '../shared/browser-client-host-id-argument'
+import { createUsageProviderApi } from './usage-provider-api'
 import type { AppStarSource } from '../shared/gh-star-source'
 import type { ExecutionHostId } from '../shared/execution-host'
 import type {
-  Automation,
-  AutomationCreateInput,
   AutomationDispatchRequest,
   AutomationDispatchResult,
-  ExternalAutomationCreateInput,
-  ExternalAutomationActionInput,
-  ExternalAutomationManager,
-  ExternalAutomationRunsInput,
   ExternalAutomationRunsPage,
-  ExternalAutomationUpdateInput,
   AutomationRun,
-  AutomationPrecheckResult,
-  AutomationUpdateInput
+  AutomationPrecheckResult
 } from '../shared/automations-types'
+import type { AutomationOwnerRef } from '../shared/automation-owner-ref'
+import type {
+  ScopedExternalManagerActionRequest,
+  ScopedExternalManagerCreateRequest,
+  ScopedExternalManagerListRequest,
+  ScopedExternalManagerRunsRequest,
+  ScopedExternalManagerUpdateRequest
+} from '../shared/external-automation-scope'
+import type { AutomationsChangedPayload } from '../shared/runtime-client-events'
 import type { KeybindingActionId, KeybindingFileSnapshot } from '../shared/keybindings'
+import type {
+  AiVaultDeleteSessionArgs,
+  AiVaultDeleteSessionResult
+} from '../shared/ai-vault-session-deletion'
 import type {
   AiVaultFirstUserPromptArgs,
   AiVaultListArgs,
   AiVaultSubagentListArgs
 } from '../shared/ai-vault-types'
+import type { AiVaultSessionTitlesArgs } from '../shared/ai-vault-session-title'
 import type { AiVaultPrepareSessionResumeArgs } from '../shared/ai-vault-resume-preparation'
 import type { AgentType } from '../shared/native-chat-types'
 import { ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT } from '../shared/updater-renderer-events'
@@ -277,7 +352,9 @@ import type {
   ReactErrorBoundaryReportResult
 } from '../shared/crash-reporting'
 import type { RendererHeapStatistics } from '../shared/renderer-heap-statistics'
+import type { RendererProcessMemory } from '../shared/renderer-process-memory'
 import { readRendererHeapStatistics } from './renderer-heap-statistics-reader'
+import { readRendererProcessMemory } from './renderer-process-memory-reader'
 import { createUpdaterQuitAbortRelay } from '../shared/renderer-restart-preparation'
 import {
   prepareAndInvokeAppRestart,
@@ -470,6 +547,10 @@ document.addEventListener(
 
 const startupDiagnosticsEnabled = process.env.ORCA_STARTUP_DIAGNOSTICS === '1'
 const browserFindSubscriptions = createBrowserFindSubscriptions()
+const browserClientPageRendererRequests = createBrowserClientPageRendererRequests({
+  ipc: ipcRenderer,
+  isTopFrame: () => window.top === window
+})
 
 ipcRenderer.on('ui:findInBrowserPage', (_event, source: unknown) => {
   browserFindSubscriptions.dispatch(source)
@@ -518,6 +599,19 @@ const api = {
     // Why: macOS input mode (or layout ID) so keyboard workarounds can tell CJK/compose layouts from US QWERTY (issue #1205); null on non-Darwin or read failure.
     getKeyboardInputSourceId: (): Promise<string | null> =>
       ipcRenderer.invoke('app:getKeyboardInputSourceId'),
+    getMacCapturedDigitRowChords: (): Promise<MacCapturedDigitRowChord[]> =>
+      ipcRenderer.invoke('app:getMacCapturedDigitRowChords'),
+    getKeyboardLayoutSnapshot: () => ipcRenderer.invoke('app:getKeyboardLayoutSnapshot'),
+    onKeyboardLayoutChanged: (
+      callback: (event: KeyboardLayoutChangeEvent) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        event: KeyboardLayoutChangeEvent
+      ): void => callback(event)
+      ipcRenderer.on(KEYBOARD_LAYOUT_CHANGED_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(KEYBOARD_LAYOUT_CHANGED_CHANNEL, listener)
+    },
     setUnreadDockBadgeCount: (count: number): Promise<void> =>
       ipcRenderer.invoke('app:setUnreadDockBadgeCount', count),
     getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest): Promise<string> =>
@@ -554,9 +648,15 @@ const api = {
   platform: {
     get: () => ({
       platform: process.platform,
+      // Why: sandboxed preload cannot require node:os; Electron exposes the OS
+      // version on process.getSystemVersion when available.
       osRelease:
         (process as NodeJS.Process & { getSystemVersion?: () => string }).getSystemVersion?.() ??
         '',
+      arch: process.arch,
+      // Why: these identify the default shell without probing user config files.
+      // process.env is available in the sandboxed preload; node:os is not.
+      shell: process.env.SHELL?.trim() || process.env.ComSpec?.trim() || '',
       displayServer: getLinuxDisplayServer()
     })
   } satisfies PreloadApi['platform'],
@@ -761,14 +861,23 @@ const api = {
 
   worktrees: {
     list: (args) => ipcRenderer.invoke('worktrees:list', args),
+    listRetiredNames: (args) => ipcRenderer.invoke('worktrees:listRetiredNames', args),
 
     listDetected: (args) => ipcRenderer.invoke('worktrees:listDetected', args),
+
+    listKnownForExecutionHost: (args) =>
+      ipcRenderer.invoke('worktrees:listKnownForExecutionHost', args),
+
+    forgetRemovedForExecutionHost: (args) =>
+      ipcRenderer.invoke('worktrees:forgetRemovedForExecutionHost', args),
 
     cancelListDetected: (args) => ipcRenderer.invoke('worktrees:cancelListDetected', args),
 
     listAll: () => ipcRenderer.invoke('worktrees:listAll'),
 
     create: (args) => ipcRenderer.invoke('worktrees:create', args),
+
+    adoptProvisionedRoot: (args) => ipcRenderer.invoke('worktrees:adoptProvisionedRoot', args),
 
     onCreateProgress: (
       callback: (data: { creationId?: string; phase: 'fetching' | 'creating' }) => void
@@ -878,14 +987,23 @@ const api = {
         .invoke('workspaceCleanup:scan', { ...args, scanId })
         .finally(() => ipcRenderer.removeListener('workspaceCleanup:scanProgress', listener))
     },
+    cancelScan: (scanId) => ipcRenderer.invoke('workspaceCleanup:cancelScan', scanId),
+    getCachedScan: () => ipcRenderer.invoke('workspaceCleanup:getCachedScan'),
     dismiss: (args) => ipcRenderer.invoke('workspaceCleanup:dismiss', args),
     clearDismissals: () => ipcRenderer.invoke('workspaceCleanup:clearDismissals'),
     hasKillableLocalProcesses: (args) =>
-      ipcRenderer.invoke('workspaceCleanup:hasKillableLocalProcesses', args)
+      ipcRenderer.invoke('workspaceCleanup:hasKillableLocalProcesses', args),
+    beginRemovalSnapshotPruneBatch: (args) =>
+      ipcRenderer.invoke('workspaceCleanup:beginRemovalSnapshotPruneBatch', args),
+    recordRemovalSnapshotPrune: (args) =>
+      ipcRenderer.invoke('workspaceCleanup:recordRemovalSnapshotPrune', args),
+    finishRemovalSnapshotPruneBatch: (args) =>
+      ipcRenderer.invoke('workspaceCleanup:finishRemovalSnapshotPruneBatch', args)
   } satisfies PreloadApi['workspaceCleanup'],
 
   workspaceSpace: {
     analyze: () => ipcRenderer.invoke('workspaceSpace:analyze'),
+    getCachedAnalysis: () => ipcRenderer.invoke('workspaceSpace:getCachedAnalysis'),
     cancel: () => ipcRenderer.invoke('workspaceSpace:cancel'),
     onProgress: (callback) => {
       const listener = (
@@ -919,6 +1037,7 @@ const api = {
       env?: Record<string, string>
       envToDelete?: string[]
       command?: string
+      commandDelivery?: 'renderer' | 'provider'
       launchConfig?: SleepingAgentLaunchConfig
       resumeProviderSession?: AgentProviderSessionMetadata
       launchToken?: string
@@ -943,6 +1062,11 @@ const api = {
       snapshot?: string
       snapshotCols?: number
       snapshotRows?: number
+      snapshotPrefixAnsi?: string
+      snapshotFrameAnsi?: string
+      snapshotFrameRestoreAnsi?: string
+      snapshotKittyKeyboardFlags?: number
+      snapshotSeq?: number
       isReattach?: boolean
       isAlternateScreen?: boolean
       replay?: string
@@ -1053,6 +1177,7 @@ const api = {
       opts?: { scrollbackRows?: number }
     ): Promise<{
       data: string
+      frameRestoreAnsi?: string
       cols: number
       rows: number
       cwd?: string | null
@@ -1062,6 +1187,7 @@ const api = {
       alternateScreen?: boolean
       scrollbackAnsi?: string
       pendingEscapeTailAnsi?: string
+      kittyKeyboardFlags?: number
     } | null> => ipcRenderer.invoke('pty:getMainBufferSnapshot', { id, opts }),
 
     getRendererDeliveryDebugSnapshot: (): Promise<{
@@ -1224,6 +1350,7 @@ const api = {
         rows: number
         seq?: number
         lastTitle?: string
+        kittyKeyboardFlags?: number
       } | null
     ): void => {
       ipcRenderer.send('pty:serializeBuffer:response', { requestId, snapshot })
@@ -1246,7 +1373,8 @@ const api = {
       listSessions: () => ipcRenderer.invoke('pty:management:listSessions'),
       killAll: () => ipcRenderer.invoke('pty:management:killAll'),
       killOne: (args: { sessionId: string }) => ipcRenderer.invoke('pty:management:killOne', args),
-      restart: () => ipcRenderer.invoke('pty:management:restart')
+      restart: () => ipcRenderer.invoke('pty:management:restart'),
+      macTccAttribution: () => ipcRenderer.invoke('pty:management:macTccAttribution')
     }
   },
 
@@ -1276,7 +1404,8 @@ const api = {
       ipcRenderer.invoke('crashReports:submit', args),
     copyLatestDiagnostics: (args?: CrashReportCopyDiagnosticsArgs) =>
       ipcRenderer.invoke('crashReports:copyLatestDiagnostics', args),
-    readHeapStatistics: (): RendererHeapStatistics | null => readRendererHeapStatistics()
+    readHeapStatistics: (): RendererHeapStatistics | null => readRendererHeapStatistics(),
+    readProcessMemory: (): Promise<RendererProcessMemory | null> => readRendererProcessMemory()
   },
 
   export: {
@@ -1429,7 +1558,7 @@ const api = {
       checkName?: string
       url?: string | null
       prRepo?: GitHubOwnerRepo | null
-    }): Promise<unknown | null> => ipcRenderer.invoke('gh:prCheckDetails', args),
+    }): Promise<unknown> => ipcRenderer.invoke('gh:prCheckDetails', args),
 
     rerunPRChecks: (args: {
       repoPath: string
@@ -1450,6 +1579,16 @@ const api = {
       prRepo?: GitHubOwnerRepo | null
       noCache?: boolean
     }): Promise<unknown[]> => ipcRenderer.invoke('gh:prComments', args),
+
+    setPRCommentReaction: (args: {
+      repoPath: string
+      repoId?: string
+      sourceContext?: TaskSourceContext | null
+      reactionSubjectId: string
+      content: GitHubReactionContent
+      reacted: boolean
+      prRepo?: GitHubOwnerRepo | null
+    }): Promise<boolean> => ipcRenderer.invoke('gh:setPRCommentReaction', args),
 
     resolveReviewThread: (args: {
       repoPath: string
@@ -1673,11 +1812,28 @@ const api = {
       ipcRenderer.invoke('hostedReview:forBranch', args),
     getCreationEligibility: (args: unknown): Promise<unknown> =>
       ipcRenderer.invoke('hostedReview:getCreationEligibility', args),
-    create: (args: unknown): Promise<unknown> => ipcRenderer.invoke('hostedReview:create', args)
+    create: (args: unknown): Promise<unknown> => ipcRenderer.invoke('hostedReview:create', args),
+    createStacked: (args: unknown): Promise<unknown> =>
+      ipcRenderer.invoke('hostedReview:createStacked', args)
   },
 
   // Why: GitLab bindings live in `./gitlab` so `gl.*` changes don't conflict on every upstream sync of this central file.
   gl: glApi,
+
+  bitbucket: {
+    connect: (args: {
+      authMode: 'token' | 'basic'
+      accessToken?: string | null
+      email?: string | null
+      apiToken?: string | null
+      baseUrl?: string | null
+    }): Promise<{ ok: true; account: string | null } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('bitbucket:connect', args),
+
+    disconnect: (): Promise<void> => ipcRenderer.invoke('bitbucket:disconnect'),
+
+    status: (): Promise<unknown> => ipcRenderer.invoke('bitbucket:status')
+  },
 
   linear: {
     connect: (args: {
@@ -2017,6 +2173,16 @@ const api = {
     }
   },
 
+  agentAwake: {
+    getStatus: (): Promise<ComputerAwakeStatus> => ipcRenderer.invoke('agentAwake:getStatus'),
+    onChanged: (callback: (status: ComputerAwakeStatus) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: ComputerAwakeStatus): void =>
+        callback(status)
+      ipcRenderer.on('agentAwake:changed', listener)
+      return () => ipcRenderer.removeListener('agentAwake:changed', listener)
+    }
+  } satisfies PreloadApi['agentAwake'],
+
   localhostWorktreeLabels: {
     register: (args: LocalhostWorktreeLabelRoute): Promise<LocalhostWorktreeLabelResult> =>
       ipcRenderer.invoke('localhostWorktreeLabels:register', args)
@@ -2046,8 +2212,10 @@ const api = {
     list: (): Promise<unknown> => ipcRenderer.invoke('codexAccounts:list'),
     add: (args?: { runtime?: 'host' | 'wsl'; wslDistro?: string | null }): Promise<unknown> =>
       ipcRenderer.invoke('codexAccounts:add', args),
-    reauthenticate: (args: { accountId: string }): Promise<unknown> =>
-      ipcRenderer.invoke('codexAccounts:reauthenticate', args),
+    reauthenticate: (args: {
+      accountId: string
+      activateIfSelectionWasEmpty?: boolean
+    }): Promise<unknown> => ipcRenderer.invoke('codexAccounts:reauthenticate', args),
     remove: (args: { accountId: string }): Promise<unknown> =>
       ipcRenderer.invoke('codexAccounts:remove', args),
     select: (args: {
@@ -2275,7 +2443,8 @@ const api = {
 
   dashboard: {
     // Open the pop-out dashboard window, or focus it if already open.
-    openPopout: (): Promise<void> => ipcRenderer.invoke('dashboardPopout:open'),
+    openPopout: (view?: 'board' | 'map'): Promise<void> =>
+      ipcRenderer.invoke('dashboardPopout:open', view),
 
     // ── Producer side (main window) ──────────────────────────────────────
     publishSnapshot: (snapshot: DashboardSnapshot): Promise<void> =>
@@ -2303,6 +2472,20 @@ const api = {
       ipcRenderer.on('ui:ackDashboardAgent', listener)
       return () => ipcRenderer.removeListener('ui:ackDashboardAgent', listener)
     },
+    onSpawnAgent: (callback: (args: DashboardSpawnAgentArgs) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, args: DashboardSpawnAgentArgs): void =>
+        callback(args)
+      ipcRenderer.on('ui:spawnDashboardAgent', listener)
+      return () => ipcRenderer.removeListener('ui:spawnDashboardAgent', listener)
+    },
+    onSleepWorkspace: (callback: (args: DashboardSleepWorkspaceArgs) => void): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        args: DashboardSleepWorkspaceArgs
+      ): void => callback(args)
+      ipcRenderer.on('ui:sleepDashboardWorkspace', listener)
+      return () => ipcRenderer.removeListener('ui:sleepDashboardWorkspace', listener)
+    },
 
     // ── Consumer side (pop-out window) ───────────────────────────────────
     requestSnapshot: (): Promise<void> => ipcRenderer.invoke('dashboard:requestSnapshot'),
@@ -2312,10 +2495,20 @@ const api = {
       ipcRenderer.on('dashboard:snapshot', listener)
       return () => ipcRenderer.removeListener('dashboard:snapshot', listener)
     },
+    onViewRequested: (callback: (view: 'board' | 'map') => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, view: 'board' | 'map'): void =>
+        callback(view)
+      ipcRenderer.on('dashboard:viewRequested', listener)
+      return () => ipcRenderer.removeListener('dashboard:viewRequested', listener)
+    },
     revealAgent: (args: DashboardRevealAgentArgs): Promise<void> =>
       ipcRenderer.invoke('dashboardPopout:revealAgent', args),
     ackAgent: (paneKey: string): Promise<void> =>
-      ipcRenderer.invoke('dashboardPopout:ackAgent', { paneKey })
+      ipcRenderer.invoke('dashboardPopout:ackAgent', { paneKey }),
+    spawnAgent: (args: DashboardSpawnAgentArgs): Promise<void> =>
+      ipcRenderer.invoke('dashboardPopout:spawnAgent', args),
+    sleepWorkspace: (args: DashboardSleepWorkspaceArgs): Promise<void> =>
+      ipcRenderer.invoke('dashboardPopout:sleepWorkspace', args)
   },
 
   terminalPreview: {
@@ -2367,7 +2560,9 @@ const api = {
     request: (args: { id: string }): Promise<unknown> =>
       ipcRenderer.invoke('developerPermissions:request', args),
     openSettings: (args: { id: string }): Promise<void> =>
-      ipcRenderer.invoke('developerPermissions:openSettings', args)
+      ipcRenderer.invoke('developerPermissions:openSettings', args),
+    testLocalNetworkConnection: (args: { host: string; port: number }): Promise<unknown> =>
+      ipcRenderer.invoke('developerPermissions:testLocalNetworkConnection', args)
   },
 
   computerUsePermissions: {
@@ -2423,6 +2618,79 @@ const api = {
     cancelUpdateRun: (): Promise<void> => ipcRenderer.invoke('skills:cancelUpdateRun'),
     acknowledgeUpdateRun: (): Promise<void> => ipcRenderer.invoke('skills:acknowledgeUpdateRun'),
     getUpdateRun: (): Promise<SkillUpdateRun> => ipcRenderer.invoke('skills:getUpdateRun'),
+    prepareShare: (input: {
+      skillIds: string[]
+      bundleName: string
+      target?: SkillDiscoveryTarget
+      packageId?: string
+    }): Promise<SkillSharePreview> => ipcRenderer.invoke('skills:prepareShare', input),
+    publishShare: (input: SkillSharePublishInput): Promise<SkillSharePublishOperation> =>
+      ipcRenderer.invoke('skills:publishShare', input),
+    cancelShare: (preparationId: string): Promise<void> =>
+      ipcRenderer.invoke('skills:cancelShare', preparationId),
+    releaseShare: (preparationId: string): Promise<void> =>
+      ipcRenderer.invoke('skills:releaseShare', preparationId),
+    resolveShare: (shareId: string): Promise<SkillShareResolvedOperation> =>
+      ipcRenderer.invoke('skills:resolveShare', shareId),
+    installShare: (input: SkillShareInstallInput): Promise<SkillShareInstallOperation> =>
+      ipcRenderer.invoke('skills:installShare', input),
+    installBundleShare: (
+      input: SkillBundleShareInstallInput
+    ): Promise<SkillBundleShareInstallOperation> =>
+      ipcRenderer.invoke('skills:installBundleShare', input),
+    installBundlePackageVersion: (
+      input: SkillBundlePackageVersionInstallInput
+    ): Promise<SkillBundleShareInstallOperation> =>
+      ipcRenderer.invoke('skills:installBundlePackageVersion', input),
+    installPackageVersion: (
+      input: SkillPackageVersionInstallInput
+    ): Promise<SkillShareInstallOperation> =>
+      ipcRenderer.invoke('skills:installPackageVersion', input),
+    cancelInstall: (input: SkillInstallCancelInput): Promise<{ cancelled: boolean }> =>
+      ipcRenderer.invoke('skills:cancelInstall', input),
+    previewInstall: (input: SkillInstallPreviewInput): Promise<SkillInstallPreviewOperation> =>
+      ipcRenderer.invoke('skills:previewInstall', input),
+    previewBundleInstall: (
+      input: SkillBundleInstallPreviewInput
+    ): Promise<SkillBundleInstallPreviewOperation> =>
+      ipcRenderer.invoke('skills:previewBundleInstall', input),
+    removeInstall: (input: SkillRemoveInput): Promise<SkillRemoveOperation> =>
+      ipcRenderer.invoke('skills:removeInstall', input),
+    // Desktop always registers the delete IPC handlers in its own main process.
+    deleteSupported: (): Promise<boolean> => Promise.resolve(true),
+    previewDelete: (request: SkillDeleteRequest): Promise<SkillDeletePlan> =>
+      ipcRenderer.invoke('skills:previewDelete', request),
+    delete: (request: SkillDeleteRequest): Promise<SkillDeleteResult> =>
+      ipcRenderer.invoke('skills:delete', request),
+    listManagedInstalls: (environmentId?: string): Promise<ManagedSkillInstallListOperation> =>
+      ipcRenderer.invoke('skills:listManagedInstalls', environmentId),
+    getPackage: (packageId: string): Promise<SkillCloudOperation<SkillCloudPackageDetails>> =>
+      ipcRenderer.invoke('skills:getPackage', packageId),
+    listOwnedShares: (): Promise<SkillCloudOperation<SkillCloudOwnedShare[]>> =>
+      ipcRenderer.invoke('skills:listOwnedShares'),
+    revokeShare: (shareId: string): Promise<SkillCloudOperation<void>> =>
+      ipcRenderer.invoke('skills:revokeShare', shareId),
+    deletePackageVersion: (input: {
+      packageId: string
+      versionId: string
+    }): Promise<SkillCloudOperation<void>> =>
+      ipcRenderer.invoke('skills:deletePackageVersion', input),
+    deletePackage: (packageId: string): Promise<SkillCloudOperation<void>> =>
+      ipcRenderer.invoke('skills:deletePackage', packageId),
+    listWslDistros: (environmentId?: string): Promise<string[]> =>
+      ipcRenderer.invoke('skills:listWslDistros', environmentId),
+    onInstallProgress: (callback: (progress: SkillInstallProgress) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, progress: SkillInstallProgress): void =>
+        callback(progress)
+      ipcRenderer.on('skills:installProgress', listener)
+      return () => ipcRenderer.removeListener('skills:installProgress', listener)
+    },
+    onShareProgress: (callback: (progress: SkillShareProgress) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, progress: SkillShareProgress): void =>
+        callback(progress)
+      ipcRenderer.on('skills:shareProgress', listener)
+      return () => ipcRenderer.removeListener('skills:shareProgress', listener)
+    },
     onUpdateRun: (callback: (run: SkillUpdateRun) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, run: SkillUpdateRun): void =>
         callback(run)
@@ -2441,6 +2709,8 @@ const api = {
   },
 
   browser: {
+    onClientPageRendererRequest: browserClientPageRendererRequests.subscribe,
+    readClientHostId: (): string | null => readBrowserClientHostIdArgument(process.argv),
     registerGuest: (args: {
       browserPageId: string
       workspaceId: string
@@ -2463,6 +2733,29 @@ const api = {
     unregisterGuest: (args: { browserPageId: string }): Promise<void> =>
       ipcRenderer.invoke('browser:unregisterGuest', args),
 
+    onWebAuthnAccountRequest: (
+      callback: (request: BrowserWebAuthnAccountRequest) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        request: BrowserWebAuthnAccountRequest
+      ): void => callback(request)
+      ipcRenderer.on('browser:webauthn-account-requested', listener)
+      return () => ipcRenderer.removeListener('browser:webauthn-account-requested', listener)
+    },
+
+    onWebAuthnAccountRequestClosed: (
+      callback: (event: { requestId: string }) => void
+    ): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { requestId: string }): void =>
+        callback(data)
+      ipcRenderer.on('browser:webauthn-account-request-closed', listener)
+      return () => ipcRenderer.removeListener('browser:webauthn-account-request-closed', listener)
+    },
+
+    respondWebAuthnAccount: (response: BrowserWebAuthnAccountResponse): Promise<boolean> =>
+      ipcRenderer.invoke('browser:respondWebAuthnAccount', response),
+
     openDevTools: (args: { browserPageId: string }): Promise<boolean> =>
       ipcRenderer.invoke('browser:openDevTools', args),
 
@@ -2473,6 +2766,9 @@ const api = {
 
     setAnnotationViewportBridge: (args): Promise<boolean> =>
       ipcRenderer.invoke('browser:setAnnotationViewportBridge', args),
+
+    publishClientPageMetadata: (args) =>
+      ipcRenderer.invoke('browser:publishClientPageMetadata', args),
 
     onGuestLoadFailed: (
       callback: (args: {
@@ -2590,6 +2886,7 @@ const api = {
         downloadId: string
         status: 'completed' | 'canceled' | 'failed'
         savePath: string | null
+        remoteDestination?: { workspaceRelativePath: string; hostLabel: string }
         error: string | null
       }) => void
     ): (() => void) => {
@@ -2600,6 +2897,7 @@ const api = {
           downloadId: string
           status: 'completed' | 'canceled' | 'failed'
           savePath: string | null
+          remoteDestination?: { workspaceRelativePath: string; hostLabel: string }
           error: string | null
         }
       ) => callback(data)
@@ -2740,9 +3038,17 @@ const api = {
     sessionListProfiles: (): Promise<unknown[]> =>
       ipcRenderer.invoke('browser:session:listProfiles'),
 
+    prepareSshWorkspacePartition: (args: {
+      targetId: string
+      browserProfileId?: string
+      skipProbe?: boolean
+    }): Promise<{ partition: string }> =>
+      ipcRenderer.invoke('browser:prepareSshWorkspacePartition', args),
+
     sessionCreateProfile: (args: {
       scope: 'default' | 'isolated' | 'imported'
       label: string
+      userAgentMode?: 'clean' | 'native'
     }): Promise<unknown> => ipcRenderer.invoke('browser:session:createProfile', args),
 
     sessionDeleteProfile: (args: { profileId: string }): Promise<boolean> =>
@@ -2760,12 +3066,31 @@ const api = {
     sessionDetectBrowsers: (): Promise<unknown[]> =>
       ipcRenderer.invoke('browser:session:detectBrowsers'),
 
+    sessionDetectBrowsersForClientHost: (args: {
+      environmentId: string
+    }): Promise<unknown[] | null> =>
+      ipcRenderer.invoke('browser:session:detectBrowsersForClientHost', args),
+
     sessionImportFromBrowser: (args: {
       profileId: string
       browserFamily: string
     }): Promise<
       { ok: true; profileId: string; summary: unknown } | { ok: false; reason: string }
     > => ipcRenderer.invoke('browser:session:importFromBrowser', args),
+
+    sessionImportFromBrowserForClientHost: (args: {
+      environmentId: string
+      profileId: string
+      browserFamily: string
+      browserProfile?: string
+    }): Promise<
+      { ok: true; profileId: string; summary: unknown } | { ok: false; reason: string } | null
+    > => ipcRenderer.invoke('browser:session:importFromBrowserForClientHost', args),
+
+    sessionClientRouteImportSources: (args: {
+      environmentId: string
+    }): Promise<Record<string, unknown>> =>
+      ipcRenderer.invoke('browser:session:clientRouteImportSources', args),
 
     sessionClearDefaultCookies: (): Promise<boolean> =>
       ipcRenderer.invoke('browser:session:clearDefaultCookies'),
@@ -2933,6 +3258,7 @@ const api = {
     suspendWorkspace: (args) => ipcRenderer.invoke('ephemeralVm:suspendWorkspace', args),
     resumeWorkspace: (args) => ipcRenderer.invoke('ephemeralVm:resumeWorkspace', args),
     cleanup: (args) => ipcRenderer.invoke('ephemeralVm:cleanup', args),
+    stopCleanup: (args) => ipcRenderer.invoke('ephemeralVm:stopCleanup', args),
     getCleanupCommand: (args) => ipcRenderer.invoke('ephemeralVm:getCleanupCommand', args)
   } satisfies PreloadApi['ephemeralVm'],
 
@@ -3002,6 +3328,27 @@ const api = {
       return () => ipcRenderer.removeListener('updater:clearDismissal', listener)
     }
   } satisfies PreloadApi['updater'],
+
+  docPreview: {
+    mintGrant: (request: DocPreviewGrantRequest): Promise<{ grantId: string; url: string }> =>
+      ipcRenderer.invoke(DOC_PREVIEW_MINT_GRANT_CHANNEL, request),
+    revokeGrant: (grantId: string): Promise<boolean> =>
+      ipcRenderer.invoke(DOC_PREVIEW_REVOKE_GRANT_CHANNEL, grantId),
+    authorizeDirectory: (grantId: string, relativePath: string): Promise<boolean> =>
+      ipcRenderer.invoke(DOC_PREVIEW_AUTHORIZE_DIRECTORY_CHANNEL, grantId, relativePath),
+    onExternalLink: (callback: (payload: { url: string }) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: { url: string }): void =>
+        callback(payload)
+      ipcRenderer.on(DOC_PREVIEW_EXTERNAL_LINK_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(DOC_PREVIEW_EXTERNAL_LINK_CHANNEL, listener)
+    },
+    onLoadFailure: (callback: (payload: DocPreviewFailure) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: DocPreviewFailure): void =>
+        callback(payload)
+      ipcRenderer.on(DOC_PREVIEW_LOAD_FAILURE_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(DOC_PREVIEW_LOAD_FAILURE_CHANNEL, listener)
+    }
+  },
 
   notebook: {
     runPythonCell: (args: {
@@ -3126,6 +3473,8 @@ const api = {
       connectionId?: string
       excludePaths?: string[]
       requestToken?: string
+      maxResults?: number
+      searchQuery?: string
     }): Promise<string[]> => ipcRenderer.invoke('fs:listFiles', args),
     cancelListFiles: (args: { requestToken: string }): Promise<void> =>
       ipcRenderer.invoke('fs:cancelListFiles', args),
@@ -3227,10 +3576,19 @@ const api = {
       includeIgnored?: boolean
       bypassEffectiveUpstreamNegativeCache?: boolean
       reuseLineStats?: boolean
+      branchLineTotalMergeBase?: string
       requestToken?: string
     }): Promise<unknown> => ipcRenderer.invoke('git:status', args),
     cancelStatus: (args: { requestToken: string }): Promise<void> =>
       ipcRenderer.invoke('git:cancelStatus', args),
+    setStatusUpstreamRefWatch: (args: {
+      worktreeId: string
+      worktreePath: string
+      executionHostId: string
+      connectionId?: string
+      branch?: string
+      upstreamName?: string
+    }): Promise<void> => ipcRenderer.invoke('git:setStatusUpstreamRefWatch', args),
     submoduleStatus: (args: {
       worktreePath: string
       submodulePath: string
@@ -3426,6 +3784,14 @@ const api = {
     },
     consumePendingOpenSettings: (): Promise<boolean> =>
       ipcRenderer.invoke('ui:consumePendingOpenSettings'),
+    onOpenSkillShare: (callback: (shareId: string) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, shareId: string): void =>
+        callback(shareId)
+      ipcRenderer.on('ui:openSkillShare', listener)
+      return () => ipcRenderer.removeListener('ui:openSkillShare', listener)
+    },
+    consumePendingSkillShare: (): Promise<string | null> =>
+      ipcRenderer.invoke('ui:consumePendingSkillShare'),
     onOpenSetupGuide: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:openSetupGuide', listener)
@@ -3501,6 +3867,11 @@ const api = {
       ipcRenderer.on('ui:openTasks', listener)
       return () => ipcRenderer.removeListener('ui:openTasks', listener)
     },
+    onToggleAgentDashboard: (callback: () => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent) => callback()
+      ipcRenderer.on('ui:toggleAgentDashboard', listener)
+      return () => ipcRenderer.removeListener('ui:toggleAgentDashboard', listener)
+    },
     onJumpToWorktreeIndex: (callback: (index: number) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, index: number) => callback(index)
       ipcRenderer.on('ui:jumpToWorktreeIndex', listener)
@@ -3539,6 +3910,7 @@ const api = {
         requestId: string
         url: string
         worktreeId?: string
+        browserPageId?: string
         sessionProfileId?: string | null
         sessionPartition?: string
         activate?: boolean
@@ -3550,6 +3922,7 @@ const api = {
           requestId: string
           url: string
           worktreeId?: string
+          browserPageId?: string
           sessionProfileId?: string | null
           sessionPartition?: string
           activate?: boolean
@@ -3598,7 +3971,11 @@ const api = {
       ipcRenderer.on('browser:requestTabClose', listener)
       return () => ipcRenderer.removeListener('browser:requestTabClose', listener)
     },
-    replyTabClose: (reply: { requestId: string; error?: string }): void => {
+    replyTabClose: (reply: {
+      requestId: string
+      error?: string
+      code?: 'browser_tab_not_found'
+    }): void => {
       ipcRenderer.send('browser:tabCloseReply', reply)
     },
     onNewTerminalTab: (callback: () => void): (() => void) => {
@@ -3696,6 +4073,12 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:appMenuPaste', listener)
       return () => ipcRenderer.removeListener('ui:appMenuPaste', listener)
+    },
+    onAppMenuSelectionAction: (callback: (action: 'copy' | 'select-all') => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, action: 'copy' | 'select-all'): void =>
+        callback(action)
+      ipcRenderer.on('ui:appMenuSelectionAction', listener)
+      return () => ipcRenderer.removeListener('ui:appMenuSelectionAction', listener)
     },
     onEditableContextPaste: (
       callback: (data: { plainTextOnly: boolean }) => void
@@ -3887,6 +4270,17 @@ const api = {
       ipcRenderer.on('ui:closeSessionTab', listener)
       return () => ipcRenderer.removeListener('ui:closeSessionTab', listener)
     },
+    onSessionTabCloseRequest: (callback) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        request: Parameters<typeof callback>[0]
+      ) => callback(request)
+      ipcRenderer.on('ui:sessionTabCloseRequest', listener)
+      return () => ipcRenderer.removeListener('ui:sessionTabCloseRequest', listener)
+    },
+    respondSessionTabClose: (response) => {
+      ipcRenderer.send('ui:sessionTabCloseResponse', response)
+    },
     onMoveSessionTab: (
       callback: (data: { worktreeId: string } & RuntimeMobileSessionTabMove) => void
     ): (() => void) => {
@@ -4010,6 +4404,9 @@ const api = {
         mode: options?.mode === 'paste-and-match-style' ? 'paste-and-match-style' : 'paste'
       })
     },
+    performNativeSelectionAction: (action: 'copy' | 'select-all'): void => {
+      ipcRenderer.send('ui:performNativeSelectionAction', action)
+    },
     writeClipboardFile: (
       args:
         | {
@@ -4027,6 +4424,9 @@ const api = {
     // Why: one-way send so main's before-input-event can synchronously skip Cmd+B while the markdown editor is focused (TipTap bold).
     setMarkdownEditorFocused: (focused: boolean): void => {
       ipcRenderer.send('ui:setMarkdownEditorFocused', focused)
+    },
+    setRichMarkdownContextMenuTarget: (target: RichMarkdownContextMenuTableTarget | null): void => {
+      ipcRenderer.send(richMarkdownContextMenuTargetChannel, target)
     },
     setTerminalInputFocused: (focused: boolean): void => {
       ipcRenderer.send('ui:setTerminalInputFocused', focused)
@@ -4123,63 +4523,15 @@ const api = {
     getSnapshot: (): Promise<MemorySnapshot> => ipcRenderer.invoke('memory:getSnapshot')
   },
 
-  claudeUsage: {
-    getScanState: (): Promise<unknown> => ipcRenderer.invoke('claudeUsage:getScanState'),
-    setEnabled: (args: { enabled: boolean }): Promise<unknown> =>
-      ipcRenderer.invoke('claudeUsage:setEnabled', args),
-    refresh: (args?: { force?: boolean }): Promise<unknown> =>
-      ipcRenderer.invoke('claudeUsage:refresh', args),
-    getSnapshot: (args: { scope: string; range: string; limit?: number }): Promise<unknown> =>
-      ipcRenderer.invoke('claudeUsage:getSnapshot', args),
-    getSummary: (args: { scope: string; range: string }): Promise<unknown> =>
-      ipcRenderer.invoke('claudeUsage:getSummary', args),
-    getDaily: (args: { scope: string; range: string }): Promise<unknown> =>
-      ipcRenderer.invoke('claudeUsage:getDaily', args),
-    getBreakdown: (args: { scope: string; range: string; kind: string }): Promise<unknown> =>
-      ipcRenderer.invoke('claudeUsage:getBreakdown', args),
-    getRecentSessions: (args: { scope: string; range: string; limit?: number }): Promise<unknown> =>
-      ipcRenderer.invoke('claudeUsage:getRecentSessions', args)
-  },
-
-  codexUsage: {
-    getScanState: (): Promise<unknown> => ipcRenderer.invoke('codexUsage:getScanState'),
-    setEnabled: (args: { enabled: boolean }): Promise<unknown> =>
-      ipcRenderer.invoke('codexUsage:setEnabled', args),
-    refresh: (args?: { force?: boolean }): Promise<unknown> =>
-      ipcRenderer.invoke('codexUsage:refresh', args),
-    getSnapshot: (args: { scope: string; range: string; limit?: number }): Promise<unknown> =>
-      ipcRenderer.invoke('codexUsage:getSnapshot', args),
-    getSummary: (args: { scope: string; range: string }): Promise<unknown> =>
-      ipcRenderer.invoke('codexUsage:getSummary', args),
-    getDaily: (args: { scope: string; range: string }): Promise<unknown> =>
-      ipcRenderer.invoke('codexUsage:getDaily', args),
-    getBreakdown: (args: { scope: string; range: string; kind: string }): Promise<unknown> =>
-      ipcRenderer.invoke('codexUsage:getBreakdown', args),
-    getRecentSessions: (args: { scope: string; range: string; limit?: number }): Promise<unknown> =>
-      ipcRenderer.invoke('codexUsage:getRecentSessions', args)
-  },
-
-  openCodeUsage: {
-    getScanState: (): Promise<unknown> => ipcRenderer.invoke('openCodeUsage:getScanState'),
-    setEnabled: (args: { enabled: boolean }): Promise<unknown> =>
-      ipcRenderer.invoke('openCodeUsage:setEnabled', args),
-    refresh: (args?: { force?: boolean }): Promise<unknown> =>
-      ipcRenderer.invoke('openCodeUsage:refresh', args),
-    getSnapshot: (args: { scope: string; range: string; limit?: number }): Promise<unknown> =>
-      ipcRenderer.invoke('openCodeUsage:getSnapshot', args),
-    getSummary: (args: { scope: string; range: string }): Promise<unknown> =>
-      ipcRenderer.invoke('openCodeUsage:getSummary', args),
-    getDaily: (args: { scope: string; range: string }): Promise<unknown> =>
-      ipcRenderer.invoke('openCodeUsage:getDaily', args),
-    getBreakdown: (args: { scope: string; range: string; kind: string }): Promise<unknown> =>
-      ipcRenderer.invoke('openCodeUsage:getBreakdown', args),
-    getRecentSessions: (args: { scope: string; range: string; limit?: number }): Promise<unknown> =>
-      ipcRenderer.invoke('openCodeUsage:getRecentSessions', args)
-  },
+  claudeUsage: createUsageProviderApi(ipcRenderer, 'claudeUsage'),
+  codexUsage: createUsageProviderApi(ipcRenderer, 'codexUsage'),
+  openCodeUsage: createUsageProviderApi(ipcRenderer, 'openCodeUsage'),
 
   aiVault: {
     listSessions: (args?: AiVaultListArgs): Promise<unknown> =>
       ipcRenderer.invoke('aiVault:listSessions', args),
+    resolveSessionTitles: (args: AiVaultSessionTitlesArgs): Promise<unknown> =>
+      ipcRenderer.invoke('aiVault:resolveSessionTitles', args),
     cancelListSessions: (args: { requestToken: string }): Promise<void> =>
       ipcRenderer.invoke('aiVault:cancelListSessions', args),
     prepareSessionResume: (args: AiVaultPrepareSessionResumeArgs): Promise<unknown> =>
@@ -4188,6 +4540,8 @@ const api = {
       ipcRenderer.invoke('aiVault:listSubagentSessions', args),
     getFirstUserPrompt: (args: AiVaultFirstUserPromptArgs): Promise<unknown> =>
       ipcRenderer.invoke('aiVault:getFirstUserPrompt', args),
+    deleteSession: (args: AiVaultDeleteSessionArgs): Promise<AiVaultDeleteSessionResult> =>
+      ipcRenderer.invoke('aiVault:deleteSession', args),
     onWindowFocused: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('aiVault:windowFocused', listener)
@@ -4229,7 +4583,9 @@ const api = {
   },
 
   runtime: {
-    syncWindowGraph: (graph: RuntimeSyncWindowGraph): Promise<RuntimeSyncWindowGraphResult> =>
+    syncWindowGraph: (
+      graph: RuntimeRendererSyncWindowGraph
+    ): Promise<RuntimeSyncWindowGraphResult> =>
       ipcRenderer.invoke('runtime:syncWindowGraph', graph),
     getStatus: (): Promise<RuntimeStatus> => ipcRenderer.invoke('runtime:getStatus'),
     call: (args: { method: string; params?: unknown }): Promise<RuntimeRpcResponse<unknown>> =>
@@ -4249,6 +4605,10 @@ const api = {
         driver: RuntimeBrowserDriverState
       }[]
     > => ipcRenderer.invoke('runtime:getBrowserDrivers'),
+    getBrowserRemoteViewerPages: (): Promise<string[]> =>
+      ipcRenderer.invoke('runtime:getBrowserRemoteViewerPages'),
+    getClientHostedBrowserRows: (): Promise<ClientHostedBrowserRowsEvent[]> =>
+      ipcRenderer.invoke('runtime:getClientHostedBrowserRows'),
     restoreTerminalFit: (ptyId: string): Promise<{ restored: boolean }> =>
       ipcRenderer.invoke('runtime:restoreTerminalFit', { ptyId }),
     reclaimBrowserForDesktop: (browserPageId: string): Promise<{ reclaimed: boolean }> =>
@@ -4308,6 +4668,27 @@ const api = {
       ) => callback(data)
       ipcRenderer.on('runtime:browserDriverChanged', listener)
       return () => ipcRenderer.removeListener('runtime:browserDriverChanged', listener)
+    },
+    onBrowserRemoteViewersChanged: (
+      callback: (event: { browserPageId: string; hasRemoteViewers: boolean }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: {
+          browserPageId: string
+          hasRemoteViewers: boolean
+        }
+      ) => callback(data)
+      ipcRenderer.on('runtime:browserRemoteViewersChanged', listener)
+      return () => ipcRenderer.removeListener('runtime:browserRemoteViewersChanged', listener)
+    },
+    onClientHostedBrowserRowsChanged: (
+      callback: (event: ClientHostedBrowserRowsEvent) => void
+    ): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: ClientHostedBrowserRowsEvent) =>
+        callback(data)
+      ipcRenderer.on('runtime:clientHostedBrowserRowsChanged', listener)
+      return () => ipcRenderer.removeListener('runtime:clientHostedBrowserRowsChanged', listener)
     }
   },
 
@@ -4343,6 +4724,8 @@ const api = {
       timeoutMs?: number
     }): Promise<RuntimeRpcResponse<RuntimeStatus>> =>
       ipcRenderer.invoke('runtimeEnvironments:getStatus', args),
+    prepareBrowserClientHostPlacement: (args) =>
+      ipcRenderer.invoke('runtimeEnvironments:prepareBrowserClientHostPlacement', args),
     retryConnectionsNow: (): Promise<void> =>
       ipcRenderer.invoke('runtimeEnvironments:retryConnectionsNow'),
     call: (args: {
@@ -4414,13 +4797,11 @@ const api = {
     listRemovedTargetLabels: (): Promise<Record<string, string>> =>
       ipcRenderer.invoke('ssh:listRemovedTargetLabels'),
 
-    addTarget: (args: { target: Omit<SshTarget, 'id'> }): Promise<SshTargetAddResult> =>
+    addTarget: (args: { target: SshTargetCreateInput }): Promise<SshTargetAddResult> =>
       ipcRenderer.invoke('ssh:addTarget', args),
 
-    updateTarget: (args: {
-      id: string
-      updates: Partial<Omit<SshTarget, 'id'>>
-    }): Promise<SshTarget> => ipcRenderer.invoke('ssh:updateTarget', args),
+    updateTarget: (args: { id: string; updates: SshTargetUpdateInput }): Promise<SshTarget> =>
+      ipcRenderer.invoke('ssh:updateTarget', args),
 
     removeTarget: (args: { id: string }): Promise<void> =>
       ipcRenderer.invoke('ssh:removeTarget', args),
@@ -4572,27 +4953,25 @@ const api = {
       ipcRenderer.invoke('ssh:submitCredential', args)
   },
 
+  // Orca automation CRUD rides the local runtime RPC surface (`runtime:call`),
+  // so only external-manager and dispatch-loop plumbing stays on IPC.
   automations: {
-    list: (): Promise<Automation[]> => ipcRenderer.invoke('automations:list'),
-    listRuns: (args?: { automationId?: string }): Promise<AutomationRun[]> =>
-      ipcRenderer.invoke('automations:listRuns', args),
-    listExternalManagers: (): Promise<ExternalAutomationManager[]> =>
-      ipcRenderer.invoke('automations:listExternalManagers'),
-    listExternalRuns: (input: ExternalAutomationRunsInput): Promise<ExternalAutomationRunsPage> =>
-      ipcRenderer.invoke('automations:listExternalRuns', input),
-    createExternal: (input: ExternalAutomationCreateInput): Promise<void> =>
-      ipcRenderer.invoke('automations:createExternal', input),
-    updateExternal: (input: ExternalAutomationUpdateInput): Promise<void> =>
-      ipcRenderer.invoke('automations:updateExternal', input),
-    runExternalAction: (input: ExternalAutomationActionInput): Promise<void> =>
-      ipcRenderer.invoke('automations:runExternalAction', input),
-    create: (input: AutomationCreateInput): Promise<Automation> =>
-      ipcRenderer.invoke('automations:create', input),
-    update: (args: { id: string; updates: AutomationUpdateInput }): Promise<Automation> =>
-      ipcRenderer.invoke('automations:update', args),
-    delete: (args: { id: string }): Promise<void> => ipcRenderer.invoke('automations:delete', args),
-    runNow: (args: { id: string }): Promise<AutomationRun> =>
-      ipcRenderer.invoke('automations:runNow', args),
+    listExternalManagerForOwner: (
+      request: ScopedExternalManagerListRequest
+    ): Promise<ExternalAutomationManagerResult> =>
+      ipcRenderer.invoke('automations:listExternalManagerForOwner', request),
+    listExternalRunsForOwner: (
+      request: ScopedExternalManagerRunsRequest
+    ): Promise<ExternalAutomationRunsPage> =>
+      ipcRenderer.invoke('automations:listExternalRunsForOwner', request),
+    createExternalForOwner: (request: ScopedExternalManagerCreateRequest): Promise<void> =>
+      ipcRenderer.invoke('automations:createExternalForOwner', request),
+    updateExternalForOwner: (request: ScopedExternalManagerUpdateRequest): Promise<void> =>
+      ipcRenderer.invoke('automations:updateExternalForOwner', request),
+    runExternalActionForOwner: (request: ScopedExternalManagerActionRequest): Promise<void> =>
+      ipcRenderer.invoke('automations:runExternalActionForOwner', request),
+    retainExternalScopes: (request: { owners: readonly AutomationOwnerRef[] }): Promise<void> =>
+      ipcRenderer.invoke('automations:retainExternalScopes', request),
     runPrecheck: (args: {
       automationId: string
       runId: string
@@ -4608,6 +4987,12 @@ const api = {
         callback(request)
       ipcRenderer.on('automations:dispatchRequested', listener)
       return () => ipcRenderer.removeListener('automations:dispatchRequested', listener)
+    },
+    onChanged: (callback: (payload: AutomationsChangedPayload) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: AutomationsChangedPayload) =>
+        callback(payload)
+      ipcRenderer.on('automations:changed', listener)
+      return () => ipcRenderer.removeListener('automations:changed', listener)
     }
   },
 
@@ -4617,7 +5002,7 @@ const api = {
 
   mobile: {
     listNetworkInterfaces: (): Promise<{
-      interfaces: { name: string; address: string }[]
+      interfaces: { name: string; address: string; hasDefaultRoute?: boolean }[]
     }> => ipcRenderer.invoke('mobile:listNetworkInterfaces'),
 
     getPairingQR: (args?: {
@@ -4634,9 +5019,12 @@ const api = {
       | {
           available: true
           qrDataUrl: string | null
+          /** Natural bitmap width and height in pixels. */
+          qrSize: number | null
           qrError?: 'encoding_failed'
           pairingUrl: string
-          endpoint: string
+          /** Null when no direct address was advertised — the QR pairs over Relay alone. */
+          endpoint: string | null
           deviceId: string
           connectionMode: MobilePairingConnectionMode
         }
@@ -4761,12 +5149,18 @@ const api = {
     drop: (paneKey: string): void => {
       ipcRenderer.send('agentStatus:drop', paneKey)
     },
+    reconcileEndedProcess: (paneKey: string): void => {
+      ipcRenderer.send('agentStatus:reconcileEndedProcess', paneKey)
+    },
     /** Drop all cached hook statuses under one terminal tab prefix; fired on explicit tab close even without a local row. */
     dropByTabPrefix: (tabId: string): void => {
       ipcRenderer.send('agentStatus:dropByTabPrefix', tabId)
     },
     retirePaneAuthority: (paneKey: string): void => {
       ipcRenderer.send('agentStatus:retirePaneAuthority', paneKey)
+    },
+    restorePaneAuthority: (paneKey: string): void => {
+      ipcRenderer.send('agentStatus:restorePaneAuthority', paneKey)
     },
     transferPaneAuthority: (args: {
       fromPaneKey: string
@@ -4860,8 +5254,7 @@ if (process.contextIsolated) {
     console.error(error)
   }
 } else {
-  // @ts-ignore (define in dts)
   window.electron = electronAPI
-  // @ts-ignore (define in dts)
+  // @ts-expect-error (define in dts)
   window.api = api
 }

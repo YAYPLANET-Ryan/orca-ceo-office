@@ -5,7 +5,7 @@
  * Memory dashboard collector.
  *
  * One snapshot covers two sources:
- *   - Orca's own Electron processes, via `app.getAppMetrics()`, bucketed
+ *   - Orca's own Electron processes, via `getAppEnvironment().getAppMetrics()`, bucketed
  *     into main / renderer / other.
  *   - Each registered PTY's process subtree, enumerated once from a host-
  *     wide process sweep (PowerShell CIM with a Typeperf fallback on Windows).
@@ -21,13 +21,18 @@ import { basename } from 'node:path'
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
 import os from 'node:os'
-import { splitWorktreeIdForFilesystem } from '../../shared/worktree-id'
+import { splitWorktreeIdForFilesystem } from '../../shared/worktree/id'
 import {
   getProcessOutputFields,
   iterateProcessOutputLines
 } from '../../shared/process-output-field-scanner'
-import { app } from 'electron'
-import type { AppMemory, MemorySnapshot, SessionMemory, WorktreeMemory } from '../../shared/types'
+import { getAppEnvironment, type AppEnvironment } from '../../shared/app-environment'
+import type {
+  AppMemory,
+  MemorySnapshot,
+  SessionMemory,
+  WorktreeMemory
+} from '../../shared/process-stats-types'
 import type { Store } from '../persistence'
 import { ORPHAN_WORKTREE_ID } from '../../shared/constants'
 import { listRegisteredPtys } from './pty-registry'
@@ -242,14 +247,14 @@ export function collectSubtree(index: ProcIndex, root: number): number[] {
 type AppBucketsRaw = Omit<AppMemory, 'history'>
 
 function electronMetricMemoryBytes(
-  proc: ReturnType<typeof app.getAppMetrics>[number],
+  proc: ReturnType<AppEnvironment['getAppMetrics']>[number],
   processIndex: ProcIndex
 ): number {
   const hostMemory = processIndex.byPid.get(proc.pid)?.memory
   if (typeof hostMemory === 'number' && Number.isFinite(hostMemory) && hostMemory > 0) {
     return hostMemory
   }
-  // Why: on macOS, app.getAppMetrics().workingSetSize can include large shared
+  // Why: on macOS, getAppEnvironment().getAppMetrics().workingSetSize can include large shared
   // Chromium/Electron mappings. Prefer the host RSS sweep used elsewhere, but
   // keep workingSetSize as a fallback when the process disappears mid-snapshot.
   return clampNumber(proc.memory?.workingSetSize) * 1024
@@ -260,7 +265,7 @@ function bucketElectronMetrics(processIndex: ProcIndex): AppBucketsRaw {
   const renderer = { cpu: 0, memory: 0 }
   const other = { cpu: 0, memory: 0 }
 
-  for (const proc of app.getAppMetrics()) {
+  for (const proc of getAppEnvironment().getAppMetrics()) {
     const cpu = clampNumber(proc.cpu?.percentCPUUsage)
     const memoryBytes = electronMetricMemoryBytes(proc, processIndex)
 

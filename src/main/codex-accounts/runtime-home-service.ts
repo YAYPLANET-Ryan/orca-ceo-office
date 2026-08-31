@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- Why: keeps Codex's whole runtime-home contract in one place so account-switch semantics don't drift across launch/login/quota paths. */
+import { quotePosixShell } from '../../shared/wsl-login-shell-command'
 import {
   appendFileSync,
   copyFileSync,
@@ -16,6 +17,7 @@ import {
   symlinkSync,
   unlinkSync
 } from 'node:fs'
+import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 import { execFileSync } from 'node:child_process'
 import {
   dirname,
@@ -28,7 +30,7 @@ import {
   win32 as pathWin32
 } from 'node:path'
 import { app } from 'electron'
-import type { CodexManagedAccount } from '../../shared/types'
+import type { CodexManagedAccount } from '../../shared/managed-account-types'
 import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
 import type { Store } from '../persistence'
 import { WSL_CODEX_RUNTIME_HOME_SEGMENTS } from '../pty/codex-home-wsl-env'
@@ -41,7 +43,6 @@ import {
 import {
   getOrcaManagedCodexHomePath,
   getOrcaUserDataPath,
-  getCodexSessionBackfillStateDirPath,
   getSystemCodexHomePath,
   resolveOrcaManagedCodexHomePath,
   syncCodexGlobalInstructionsIntoManagedHome,
@@ -67,10 +68,16 @@ import {
   type CodexAccountSelectionTarget
 } from './runtime-selection'
 import { getDefaultWslDistro, getWslHome } from '../wsl'
-import { isCodexSystemDefaultRealHomeEnabled } from '../codex/codex-real-home-flag'
 import { hasCustomCodexHomeOverrideForLaunch } from '../codex/codex-real-home-path'
-import { invalidateCodexSessionBackfillMarker } from '../codex/codex-session-backfill-marker'
-import { assertOwnedHostCodexManagedHomePath } from './host-codex-managed-home-ownership'
+import {
+  hasCompletedCodexSessionBackfillMarker,
+  invalidateCodexSessionBackfillMarker
+} from '../codex/codex-session-backfill-marker'
+import { resolveCodexSessionBackfillPaths } from '../codex/codex-session-backfill'
+import {
+  ManagedCodexHomeTemporarilyUnavailableError,
+  resolveHostCodexManagedHomeVerdict
+} from './host-codex-managed-home-ownership'
 import {
   codexAuthCouldBelongToManagedAccount,
   codexAuthIsFresher,
@@ -81,6 +88,7 @@ import { migrateLegacySharedAuthToPerAccountHome } from './legacy-shared-auth-mi
 import { CodexCredentialAbsenceGrace } from './codex-credential-absence-grace'
 import { syncLegacySharedCodexConfigForRetainedPanes } from './legacy-shared-config-compatibility'
 import {
+  getCodexPaneAccount,
   hasRecordedLegacySharedCodexPane,
   type CodexPaneHomeRoute
 } from '../codex/codex-pane-account-registry'
@@ -166,6 +174,20 @@ function codexAuthIsMonotonicallyFresher(
   return codexAuthIsFresher(candidateAuthJson, baselineAuthJson)
 }
 
+/**
+ * Why: a skipped Codex quota poll must be distinguishable from "use the
+ * system-default home". `null` inside `ready` still means the system lane;
+ * `skip` means do not fetch at all this cycle (#STA-4422).
+ */
+/** Mirror path for the config-sync status channel; `unavailable` is not `null`. */
+export type CodexMirroredHomeStatus =
+  | { kind: 'ready'; homePath: string | null }
+  | { kind: 'unavailable' }
+
+export type CodexRateLimitHomeResolution =
+  | { kind: 'ready'; codexHomePath: string | null }
+  | { kind: 'skip' }
+
 export class CodexRuntimeHomeService {
   // Which managed account runtime auth.json mirrors; null means it follows system-default ~/.codex instead of a managed account.
   private lastSyncedAccountId: string | null = null
@@ -176,12 +198,15 @@ export class CodexRuntimeHomeService {
   private readonly lastSyncedWslAccountIdByDistro = new Map<string, string | null>()
   private readonly wslRuntimeHomePathByDistro = new Map<string, string>()
   private skipNextReadBackForAccountId: string | null = null
-  // Why: a flag-ON host account refreshes auth in its own home. Remember that
-  // provenance so a later deselect/rollback never adopts stale shared bytes.
+  // Why: a managed host account refreshes auth in its own home. Remember that
+  // provenance so a later deselect never adopts stale shared bytes.
   private lastHostAccountUsedSelfContainedHome = false
   private sharedAuthRefreshBlockedByManagedTransition = false
   // Why: transient auth.json read/parse failures must not deselect an account.
   private readonly credentialAbsenceGrace = new CodexCredentialAbsenceGrace()
+  private hostSystemDefaultSessionMigrationPending = false
+  private pendingHostSystemDefaultSessionMigrationNeedsFullScan = false
+  private pendingHostSystemDefaultSessionMigrationTarget: string | null = null
 
   constructor(private readonly store: Store) {
     this.safeRecoverInterruptedRuntimeAuthOperation()
@@ -236,7 +261,7 @@ export class CodexRuntimeHomeService {
       // system default without injecting a path Orca cannot prove it owns.
     }
     if (this.isHostSystemDefaultRealHome(launchEnv)) {
-      // Why (flag ON, system default): run Codex on the user's own ~/.codex.
+      // Why: the system default runs Codex on the user's own ~/.codex.
       // Returning null tells the PTY/env layer to inject no managed CODEX_HOME;
       // the retired mirror is refreshed only for pre-rollout PTYs.
       this.reconcileLegacySharedHomeForRetainedPanes()
@@ -254,17 +279,59 @@ export class CodexRuntimeHomeService {
     return this.getRuntimeHomePath()
   }
 
-  // Why: with the real-home flag ON, a managed HOST account runs against its own
-  // self-contained CODEX_HOME (codex-accounts/<id>/home) instead of the shared
-  // runtime mirror. Its auth.json lives there and codex refreshes it in place,
-  // so two accounts never race one auth.json (GAP-5) and the mirror can be
-  // deleted once no lane still injects it (GAP-1). WSL accounts keep their
-  // per-distro lane; the flag-OFF opt-out keeps the shared-home hot-swap.
-  private getSelfContainedManagedHostAccount(): CodexManagedAccount | null {
-    const settings = this.store.getSettings()
-    if (!isCodexSystemDefaultRealHomeEnabled()) {
+  beginHostSystemDefaultSessionMigrationLaunch(
+    codexHomePath: string | null,
+    options: { reattached?: boolean; launchEnv?: NodeJS.ProcessEnv } = {}
+  ): boolean | null {
+    if (
+      !this.isHostSystemDefaultSessionMigrationEligible() ||
+      (!codexHomePath && !options.reattached) ||
+      (codexHomePath &&
+        normalizeRuntimePathForComparison(codexHomePath) !==
+          normalizeRuntimePathForComparison(this.getRuntimeHomePath()))
+    ) {
       return null
     }
+    // Why: an older pass can clear launch preparation while PTY spawn awaits recovery.
+    return this.invalidateBackfillAfterManagedSystemDefaultLaunch(
+      options.reattached && !codexHomePath ? undefined : options.launchEnv
+    )
+  }
+
+  isHostSystemDefaultSessionMigrationEligible(): boolean {
+    return (
+      normalizeCodexRuntimeSelection(this.store.getSettings()).host === null &&
+      !hasCustomCodexHomeOverrideForLaunch()
+    )
+  }
+
+  prepareHostSystemDefaultSessionMigrationPass(): boolean {
+    const paths = resolveCodexSessionBackfillPaths(
+      resolveHostCodexSessionSourceHome(this.store.getSettings())
+    )
+    if (
+      this.hostSystemDefaultSessionMigrationPending &&
+      this.pendingHostSystemDefaultSessionMigrationTarget !== paths.systemSessionsRoot
+    ) {
+      this.pendingHostSystemDefaultSessionMigrationNeedsFullScan = true
+      this.pendingHostSystemDefaultSessionMigrationTarget = paths.systemSessionsRoot
+    }
+    invalidateCodexSessionBackfillMarker(paths.markerPath)
+    return this.pendingHostSystemDefaultSessionMigrationNeedsFullScan
+  }
+
+  finishHostSystemDefaultSessionMigrationPass(): void {
+    this.hostSystemDefaultSessionMigrationPending = false
+    this.pendingHostSystemDefaultSessionMigrationNeedsFullScan = false
+    this.pendingHostSystemDefaultSessionMigrationTarget = null
+  }
+
+  // Why: a managed HOST account runs against its own self-contained CODEX_HOME
+  // (codex-accounts/<id>/home) rather than the shared runtime mirror. Its
+  // auth.json lives there and codex refreshes it in place, so two accounts never
+  // race one auth.json. WSL accounts keep their per-distro lane.
+  private getSelfContainedManagedHostAccount(): CodexManagedAccount | null {
+    const settings = this.store.getSettings()
     const account = this.getActiveAccount(
       settings.codexManagedAccounts,
       normalizeCodexRuntimeSelection(settings).host
@@ -276,22 +343,17 @@ export class CodexRuntimeHomeService {
   }
 
   // Why: session discovery must surface a managed account's own rollouts wherever
-  // they physically live. Flag ON makes every host managed home a live CODEX_HOME,
-  // so scan them all. Flag OFF (opt-out/rollback) hands launches back to the shared
-  // mirror, but a home that already accumulated rollouts while the flag was ON must
-  // still surface them — otherwise opting out silently hides history that is safe on
-  // disk. Gate the flag-OFF case on a sessions/ tree so a never-enabled install stays
-  // byte-identical to today (its per-account homes hold only auth, no rollouts).
+  // they physically live. Every host managed home is a live CODEX_HOME, so scan
+  // them all.
   private getManagedHostAccountHomesForSessionDiscovery(): string[] {
     const settings = this.store.getSettings()
-    const flagEnabled = isCodexSystemDefaultRealHomeEnabled()
     const homes: string[] = []
     for (const account of settings.codexManagedAccounts) {
       if (this.getWslManagedHomePath(account)) {
         continue
       }
       const trustedHome = this.getTrustedSelfContainedManagedHomePath(account)
-      if (trustedHome && (flagEnabled || existsSync(join(trustedHome, 'sessions')))) {
+      if (trustedHome) {
         homes.push(trustedHome)
       }
     }
@@ -302,11 +364,18 @@ export class CodexRuntimeHomeService {
     account: CodexManagedAccount,
     unavailableManagedHomePath?: string
   ): string | null {
-    const perAccountHome = this.getTrustedSelfContainedManagedHomePath(account)
-    if (!perAccountHome) {
+    const resolved = this.resolveSelfContainedManagedHome(account)
+    if (resolved.kind === 'indeterminate') {
+      // Why: refuse the launch rather than silently falling through to the
+      // system default, which would run a different account behind a UI still
+      // showing this one. The selection stays put; a later read may succeed.
+      throw new ManagedCodexHomeTemporarilyUnavailableError()
+    }
+    if (resolved.kind === 'untrusted') {
       this.clearSelfContainedManagedSelection(account)
       return null
     }
+    const perAccountHome = resolved.homePath
     if (
       unavailableManagedHomePath &&
       normalizeRuntimePathForComparison(unavailableManagedHomePath) ===
@@ -364,7 +433,13 @@ export class CodexRuntimeHomeService {
   // hot-swap or token read-back to reconcile. A trusted home remains selected
   // while Codex atomically replaces auth.json.
   private syncSelfContainedManagedSelection(account: CodexManagedAccount): void {
-    const perAccountHome = this.getTrustedSelfContainedManagedHomePath(account)
+    const resolved = this.resolveSelfContainedManagedHome(account)
+    if (resolved.kind === 'indeterminate') {
+      // Why: a sync runs on every app start, exactly when antivirus is busiest.
+      // An unreadable home must not deselect the account (#STA-4422).
+      return
+    }
+    const perAccountHome = resolved.kind === 'owned' ? resolved.homePath : null
     if (perAccountHome) {
       this.lastSyncedAccountId = account.id
       this.lastHostAccountUsedSelfContainedHome = true
@@ -378,21 +453,41 @@ export class CodexRuntimeHomeService {
     this.clearSelfContainedManagedSelection(account)
   }
 
-  private getTrustedSelfContainedManagedHomePath(account: CodexManagedAccount): string | null {
-    try {
-      assertOwnedHostCodexManagedHomePath({
-        candidatePath: account.managedHomePath,
-        managedAccountsRoot: this.getManagedAccountsRoot(),
-        systemCodexHomePath: getSystemCodexHomePath(),
-        expectedAccountId: account.id
-      })
+  /**
+   * Why: an unreadable home and an untrustworthy one demand opposite responses.
+   * Only `untrusted` may clear the user's selection; `indeterminate` means we
+   * could not tell, so callers refuse the operation and leave durable state
+   * alone (#STA-4422).
+   */
+  private resolveSelfContainedManagedHome(
+    account: CodexManagedAccount
+  ): { kind: 'owned'; homePath: string } | { kind: 'untrusted' } | { kind: 'indeterminate' } {
+    const verdict = resolveHostCodexManagedHomeVerdict({
+      candidatePath: account.managedHomePath,
+      managedAccountsRoot: this.getManagedAccountsRoot(),
+      systemCodexHomePath: getSystemCodexHomePath(),
+      expectedAccountId: account.id
+    })
+    if (verdict.kind === 'owned') {
       // Preserve the persisted path spelling (notably /var vs /private/var on
       // macOS) so injected CODEX_HOME stays stable across the rollout.
-      return account.managedHomePath
-    } catch (error) {
-      console.warn('[codex-runtime-home] Refusing untrusted managed account home:', error)
-      return null
+      return { kind: 'owned', homePath: account.managedHomePath }
     }
+    if (verdict.kind === 'untrusted') {
+      console.warn('[codex-runtime-home] Refusing untrusted managed account home:', verdict.reason)
+      return { kind: 'untrusted' }
+    }
+    console.warn(
+      '[codex-runtime-home] Managed account home is temporarily unreadable; keeping selection:',
+      verdict.error
+    )
+    return { kind: 'indeterminate' }
+  }
+
+  /** Read-only callers that mutate nothing and simply skip an unusable home. */
+  private getTrustedSelfContainedManagedHomePath(account: CodexManagedAccount): string | null {
+    const resolved = this.resolveSelfContainedManagedHome(account)
+    return resolved.kind === 'owned' ? resolved.homePath : null
   }
 
   private clearSelfContainedManagedSelection(
@@ -415,17 +510,26 @@ export class CodexRuntimeHomeService {
     this.lastHostAccountUsedSelfContainedHome = false
   }
 
-  private invalidateBackfillAfterManagedSystemDefaultLaunch(launchEnv?: NodeJS.ProcessEnv): void {
+  private invalidateBackfillAfterManagedSystemDefaultLaunch(
+    launchEnv?: NodeJS.ProcessEnv
+  ): boolean | null {
     const settings = this.store.getSettings()
-    if (normalizeCodexRuntimeSelection(settings).host !== null) {
-      return
+    if (
+      normalizeCodexRuntimeSelection(settings).host !== null ||
+      hasCustomCodexHomeOverrideForLaunch(launchEnv)
+    ) {
+      return null
     }
-    const realHomeSelected = this.isHostSystemDefaultRealHomeSelected(launchEnv)
-    if (realHomeSelected || !isCodexSystemDefaultRealHomeEnabled()) {
-      invalidateCodexSessionBackfillMarker(
-        join(getCodexSessionBackfillStateDirPath(), 'backfill-complete.json')
+    if (!this.hostSystemDefaultSessionMigrationPending) {
+      const paths = resolveCodexSessionBackfillPaths(
+        resolveHostCodexSessionSourceHome(this.store.getSettings())
       )
+      this.pendingHostSystemDefaultSessionMigrationNeedsFullScan =
+        !hasCompletedCodexSessionBackfillMarker(paths.markerPath, paths.systemSessionsRoot)
+      this.pendingHostSystemDefaultSessionMigrationTarget = paths.systemSessionsRoot
+      this.hostSystemDefaultSessionMigrationPending = true
     }
+    return this.prepareHostSystemDefaultSessionMigrationPass()
   }
 
   private startWslSessionBridgeForLaunch(
@@ -463,10 +567,9 @@ export class CodexRuntimeHomeService {
       // mirror, so include the real root for both directly-routed host lanes.
       homes.push(getSystemCodexHomePath())
     }
-    // Why: flag ON routes each managed host account to its own self-contained
-    // home, so its rollouts live there rather than in the shared mirror. Scan
-    // every such home — plus any that retained rollouts across an opt-out — so
-    // account-scoped sessions still surface in the AI Vault.
+    // Why: each managed host account runs in its own self-contained home, so
+    // its rollouts live there rather than in the shared mirror. Scan every such
+    // home so account-scoped sessions still surface in the AI Vault.
     for (const perAccountHome of this.getManagedHostAccountHomesForSessionDiscovery()) {
       homes.push(perAccountHome)
     }
@@ -475,9 +578,8 @@ export class CodexRuntimeHomeService {
 
   /**
    * The account-owned CODEX_HOME the current HOST selection runs against, or
-   * null when the selection is not routed to one (system default, or the
-   * flag-OFF shared mirror, which every account hot-swaps and so names no
-   * account).
+   * null when the selection is not routed to one (system default, or a WSL
+   * account, whose home lives inside the distro).
    *
    * Read-only on purpose: session discovery ranks homes with this before any
    * launch prep, so it must create no directories and sync no auth.
@@ -489,11 +591,81 @@ export class CodexRuntimeHomeService {
       : null
   }
 
+  /**
+   * Same selection, but an unreadable home refuses instead of collapsing to
+   * `null`. Session resume must not read "no managed selection" out of a failed
+   * marker stat: another account's readable alias would then win the legacy
+   * rescan and the pane would resume under that account's credentials while the
+   * UI still shows this one (#STA-4422).
+   */
+  resolveSelectedHostAccountCodexHomePathForResume(): string | null {
+    const selfContainedAccount = this.getSelfContainedManagedHostAccount()
+    if (!selfContainedAccount) {
+      return null
+    }
+    const resolved = this.resolveSelfContainedManagedHome(selfContainedAccount)
+    if (resolved.kind === 'indeterminate') {
+      throw new ManagedCodexHomeTemporarilyUnavailableError()
+    }
+    if (resolved.kind === 'untrusted') {
+      this.clearSelfContainedManagedSelection(selfContainedAccount)
+      return null
+    }
+    return resolved.homePath
+  }
+
+  /** Trust-gates host previews without changing WSL routing or durable account state. */
+  resolveCodexManagedAccountHomeForInactiveFetch(
+    account: CodexManagedAccount
+  ): { kind: 'ready'; homePath: string } | { kind: 'skip' } {
+    if (account.managedHomeRuntime === 'wsl' || this.getWslManagedHomePath(account)) {
+      return { kind: 'ready', homePath: account.managedHomePath }
+    }
+    const resolved = this.resolveSelfContainedManagedHome(account)
+    return resolved.kind === 'owned'
+      ? { kind: 'ready', homePath: resolved.homePath }
+      : { kind: 'skip' }
+  }
+
   getSelectedHostCodexHomeRoute(): CodexPaneHomeRoute {
     if (this.getSelfContainedManagedHostAccount()) {
       return 'account-home'
     }
     return this.isHostSystemDefaultRealHome() ? 'real-home' : 'shared-home'
+  }
+
+  getRetainedHostCodexHookHomePaths(ptyIds: readonly string[]): string[] {
+    const settings = this.store.getSettings()
+    const homes = new Map<string, string>()
+    for (const ptyId of ptyIds) {
+      const record = getCodexPaneAccount(ptyId)
+      if (!record || record.selectionKey !== 'host') {
+        continue
+      }
+      if (
+        record.homeRoute === undefined ||
+        record.homeRoute === 'shared-home' ||
+        record.homeRoute === 'custom-home'
+      ) {
+        const homePath = this.getRuntimeHomePath()
+        homes.set(normalizeRuntimePathForComparison(homePath), homePath)
+        continue
+      }
+      if (record.homeRoute !== 'account-home' || !record.accountId) {
+        continue
+      }
+      const account = settings.codexManagedAccounts.find(
+        (candidate) => candidate.id === record.accountId
+      )
+      if (!account || this.getWslManagedHomePath(account)) {
+        continue
+      }
+      const homePath = this.getTrustedSelfContainedManagedHomePath(account)
+      if (homePath) {
+        homes.set(normalizeRuntimePathForComparison(homePath), homePath)
+      }
+    }
+    return [...homes.values()]
   }
 
   // Why: the real-home hook installer flips this gate off when the trust-grant
@@ -505,13 +677,13 @@ export class CodexRuntimeHomeService {
     this.realHomeLaneGate = gate
   }
 
-  // Why: real-home routing applies only to the host system-default selection
-  // with the staged flag ON. Managed accounts keep hot-swap isolation; custom
-  // CODEX_HOMEs stay managed until phase 1 can track cleanup across old homes.
+  // Why: real-home routing applies only to the host system-default selection.
+  // Managed accounts run in their own homes; Windows (no shell-startup probe)
+  // and custom CODEX_HOMEs stay on the mirror until cleanup can be tracked
+  // across old homes.
   isHostSystemDefaultRealHomeSelected(launchEnv?: NodeJS.ProcessEnv): boolean {
     const settings = this.store.getSettings()
     if (
-      !isCodexSystemDefaultRealHomeEnabled() ||
       normalizeCodexRuntimeSelection(settings).host !== null ||
       !isShellStartupEnvProbeSupported()
     ) {
@@ -588,22 +760,32 @@ export class CodexRuntimeHomeService {
     syncSystemConfigIntoManagedCodexHome({ runtimeHomePath, systemHomePath })
   }
 
-  prepareForRateLimitFetch(target?: CodexAccountSelectionTarget): string | null {
+  // Why: `null` is a real value here — it means "use the system-default lane".
+  // A skipped poll needs its own channel or the fetcher silently retargets the
+  // user's real ~/.codex (#STA-4422).
+  prepareForRateLimitFetch(target?: CodexAccountSelectionTarget): CodexRateLimitHomeResolution {
     if (target?.runtime === 'wsl') {
       const wslTarget = this.resolveWslDefaultTarget(target)
       const syncedRuntimeHomePath = this.getPreparedWslRateLimitHomePath(wslTarget)
-      return syncedRuntimeHomePath ?? this.getWslSystemCodexHomePath(wslTarget)
+      return {
+        kind: 'ready',
+        codexHomePath: syncedRuntimeHomePath ?? this.getWslSystemCodexHomePath(wslTarget)
+      }
     }
     const selfContainedAccount = this.getSelfContainedManagedHostAccount()
-    const selfContainedHome = selfContainedAccount
-      ? this.getTrustedSelfContainedManagedHomePath(selfContainedAccount)
-      : null
-    if (selfContainedAccount && selfContainedHome) {
-      // Why: the quota fetch reads the account's own auth.json in place; no
-      // shared-home hot-swap or per-poll resource relink (that is launch prep).
-      return selfContainedHome
-    }
     if (selfContainedAccount) {
+      const resolved = this.resolveSelfContainedManagedHome(selfContainedAccount)
+      if (resolved.kind === 'owned') {
+        // Why: the quota fetch reads the account's own auth.json in place; no
+        // shared-home hot-swap or per-poll resource relink (that is launch prep).
+        return { kind: 'ready', codexHomePath: resolved.homePath }
+      }
+      if (resolved.kind === 'indeterminate') {
+        // Why: returning null here would NOT skip — the fetcher maps null to
+        // ~/.codex and would probe the user's real home with a token-refreshing
+        // app-server. Skip the poll outright and keep the selection.
+        return { kind: 'skip' }
+      }
       this.clearSelfContainedManagedSelection(selfContainedAccount)
     }
     if (this.isHostSystemDefaultRealHome()) {
@@ -614,12 +796,12 @@ export class CodexRuntimeHomeService {
       if (hasRecordedLegacySharedCodexPane()) {
         this.syncLegacySharedSystemDefaultAuthForRetainedPanes()
       }
-      return getSystemCodexHomePath()
+      return { kind: 'ready', codexHomePath: getSystemCodexHomePath() }
     }
     this.syncForCurrentSelection()
     syncSystemCodexResourcesIntoManagedHome()
     syncSystemConfigIntoManagedCodexHome()
-    return this.getRuntimeHomePath()
+    return { kind: 'ready', codexHomePath: this.getRuntimeHomePath() }
   }
 
   syncForCurrentSelection(
@@ -640,9 +822,9 @@ export class CodexRuntimeHomeService {
     }
     const settings = this.store.getSettings()
     if (this.lastHostAccountUsedSelfContainedHome) {
-      // Why: E auth is already canonical in the per-account home. Reset the
-      // legacy mirror baseline without reading it; flag-OFF can then seed the
-      // mirror from canonical storage, while real-home deselect needs no sync.
+      // Why: the account's auth is already canonical in its own home. Reset the
+      // legacy mirror baseline without reading it; a real-home deselect needs no
+      // further sync, and the mirror lane below re-seeds from canonical storage.
       this.lastHostAccountUsedSelfContainedHome = false
       this.lastSyncedAccountId = null
       this.lastWrittenAuthJson = null
@@ -668,105 +850,16 @@ export class CodexRuntimeHomeService {
       settings.codexManagedAccounts,
       normalizeCodexRuntimeSelection(settings).host
     )
-    const previousAccount = this.getActiveAccount(
-      settings.codexManagedAccounts,
-      this.lastSyncedAccountId
-    )
-    if (this.getWslManagedHomePath(activeAccount)) {
-      const previousWasHostManaged = previousAccount && !this.getWslManagedHomePath(previousAccount)
-      const outgoingReadBackResult = previousWasHostManaged
-        ? this.readBackRefreshedTokensForAccount(previousAccount, {
-            updateLastWrittenAuthJson: false
-          })
-        : 'unchanged'
-      if (previousWasHostManaged) {
-        this.restoreSystemDefaultSnapshot({
-          detectExternalLogin: outgoingReadBackResult !== 'rejected'
-        })
-      }
+    if (activeAccount) {
+      // Why: only a WSL-managed account can reach here — every host account was
+      // routed to its own self-contained home above. Its auth lives in the
+      // distro-local runtime home, so the host mirror only drops its baseline.
       this.lastSyncedAccountId = null
       this.lastWrittenAuthJson = null
       this.skipNextReadBackForAccountId = null
       return
     }
-    let outgoingReadBackResult: CodexReadBackResult = 'unchanged'
-    if (previousAccount && previousAccount.id !== activeAccount?.id) {
-      outgoingReadBackResult = this.readBackRefreshedTokensForAccount(previousAccount, {
-        updateLastWrittenAuthJson: true
-      })
-    }
-    if (!activeAccount) {
-      if (normalizeCodexRuntimeSelection(settings).host) {
-        this.store.updateSettings({
-          activeCodexManagedAccountId: null,
-          activeCodexManagedAccountIdsByRuntime: {
-            ...normalizeCodexRuntimeSelection(settings),
-            host: null
-          }
-        })
-      }
-      // Why: only restore the system-default mirror when leaving a managed account; otherwise later syncs mirror current ~/.codex instead of replaying an old snapshot.
-      if (this.lastSyncedAccountId !== null) {
-        this.restoreSystemDefaultSnapshot({
-          detectExternalLogin: outgoingReadBackResult !== 'rejected'
-        })
-        this.lastSyncedAccountId = null
-      } else if (!runtimeAuthExistedBeforeSync) {
-        const logoutMarkerStatus = this.getRuntimeLogoutMarkerStatus()
-        if (logoutMarkerStatus.kind === 'applies') {
-          this.lastWrittenAuthJson = null
-        } else if (
-          logoutMarkerStatus.kind === 'system-default-changed' &&
-          logoutMarkerStatus.systemDefaultAuthJson !== null
-        ) {
-          this.restoreSystemDefaultSnapshot({ detectExternalLogin: false })
-        } else if (logoutMarkerStatus.kind === 'system-default-changed') {
-          // Why: a real ~/.codex logout after a local runtime logout should keep runtime auth absent, not restore the stale snapshot.
-          this.captureSystemDefaultSnapshot({ force: true })
-          this.persistRuntimeLogoutMarker(null)
-          this.lastWrittenAuthJson = null
-        } else if (this.lastWrittenAuthJson === null) {
-          // Why: unmanaged sessions use an Orca-owned CODEX_HOME; seed it once from system-default auth so terminals stay logged in without mutating ~/.codex.
-          this.restoreSystemDefaultSnapshot({ detectExternalLogin: false })
-        } else {
-          this.persistRuntimeLogoutMarker()
-        }
-      } else {
-        this.clearRuntimeLogoutMarker()
-        this.syncRuntimeAuthWithSystemDefault()
-      }
-      return
-    }
-
-    const activeAuthPath = join(activeAccount.managedHomePath, 'auth.json')
-    const authAbsence = this.credentialAbsenceGrace.assess(activeAuthPath)
-    if (authAbsence.state !== 'present' && authAbsence.state !== 'incomplete') {
-      if (!authAbsence.durable) {
-        if (this.sharedRuntimeAuthBelongsToAccount(activeAccount)) {
-          // Why: mid-rotation reads look missing/unreadable for a moment; skip
-          // this sync without deselecting and let a settled read decide later.
-          console.warn(
-            '[codex-runtime-home] Active managed account auth.json unavailable, keeping selection through grace window'
-          )
-          return
-        }
-        // Why: the runtime home still holds another account, so riding out the
-        // grace would launch that account under this selection. Not being able
-        // to read the selected account is no license to run a different one.
-        console.warn(
-          '[codex-runtime-home] Active managed account auth.json unavailable while the runtime home holds another account, clearing runtime auth'
-        )
-        this.clearRuntimeAuthForUnprovenSelection()
-        return
-      }
-      console.warn(
-        '[codex-runtime-home] Active managed account credential is unavailable, restoring system default'
-      )
-      // Why: valid credential-free JSON is an explicit logout; never revive it
-      // from stale shared-home bytes while clearing the selection.
-      if (authAbsence.state !== 'no-credential' && this.lastSyncedAccountId === activeAccount.id) {
-        outgoingReadBackResult = this.recoverRefreshForMissingActiveAccount(activeAccount)
-      }
+    if (normalizeCodexRuntimeSelection(settings).host) {
       this.store.updateSettings({
         activeCodexManagedAccountId: null,
         activeCodexManagedAccountIdsByRuntime: {
@@ -774,38 +867,35 @@ export class CodexRuntimeHomeService {
           host: null
         }
       })
-      if (this.lastSyncedAccountId !== null) {
-        this.restoreSystemDefaultSnapshot({
-          detectExternalLogin: outgoingReadBackResult !== 'rejected'
-        })
-        this.lastSyncedAccountId = null
-      }
-      return
     }
-
-    if (this.lastSyncedAccountId === null) {
-      this.captureSystemDefaultSnapshot({ force: true })
-    }
-
-    // Why: Codex refreshes OAuth tokens in the runtime auth.json; if it differs from Orca's last write, read those back to managed storage before overwriting.
-    if (this.lastSyncedAccountId === activeAccount.id) {
-      if (this.skipNextReadBackForAccountId === activeAccount.id) {
-        this.skipNextReadBackForAccountId = null
+    // Why: only restore the system-default mirror when leaving a managed account; otherwise later syncs mirror current ~/.codex instead of replaying an old snapshot.
+    if (this.lastSyncedAccountId !== null) {
+      this.restoreSystemDefaultSnapshot({ detectExternalLogin: true })
+      this.lastSyncedAccountId = null
+    } else if (!runtimeAuthExistedBeforeSync) {
+      const logoutMarkerStatus = this.getRuntimeLogoutMarkerStatus()
+      if (logoutMarkerStatus.kind === 'applies') {
+        this.lastWrittenAuthJson = null
+      } else if (
+        logoutMarkerStatus.kind === 'system-default-changed' &&
+        logoutMarkerStatus.systemDefaultAuthJson !== null
+      ) {
+        this.restoreSystemDefaultSnapshot({ detectExternalLogin: false })
+      } else if (logoutMarkerStatus.kind === 'system-default-changed') {
+        // Why: a real ~/.codex logout after a local runtime logout should keep runtime auth absent, not restore the stale snapshot.
+        this.captureSystemDefaultSnapshot({ force: true })
+        this.persistRuntimeLogoutMarker(null)
+        this.lastWrittenAuthJson = null
+      } else if (this.lastWrittenAuthJson === null) {
+        // Why: unmanaged sessions use an Orca-owned CODEX_HOME; seed it once from system-default auth so terminals stay logged in without mutating ~/.codex.
+        this.restoreSystemDefaultSnapshot({ detectExternalLogin: false })
       } else {
-        this.readBackRefreshedTokens({
-          updateLastWrittenAuthJson: true
-        })
+        this.persistRuntimeLogoutMarker()
       }
+    } else {
+      this.clearRuntimeLogoutMarker()
+      this.syncRuntimeAuthWithSystemDefault()
     }
-
-    if (this.lastSyncedAccountId !== activeAccount.id) {
-      this.skipNextReadBackForAccountId = null
-    }
-    this.lastSyncedAccountId = activeAccount.id
-    this.writeRuntimeAuth(readFileSync(activeAuthPath, 'utf-8'), {
-      owner: 'managed',
-      accountId: activeAccount.id
-    })
   }
 
   // Why: re-auth/add-account write fresh managed tokens, so skip the next read-back to avoid clobbering them with stale runtime tokens.
@@ -816,26 +906,6 @@ export class CodexRuntimeHomeService {
       this.lastWrittenAuthJson = null
     }
     this.skipNextReadBackForAccountId = accountId
-  }
-
-  private readBackRefreshedTokens(options: {
-    updateLastWrittenAuthJson: boolean
-  }): CodexReadBackResult {
-    const selectedAccountId = normalizeCodexRuntimeSelection(this.store.getSettings()).host
-    if (selectedAccountId) {
-      const selectedAccountResult = this.readBackRefreshedTokensFromPath(
-        this.getRuntimeAuthPath(),
-        {
-          ...options,
-          expectedAccountId: selectedAccountId
-        }
-      )
-      if (selectedAccountResult !== 'rejected') {
-        return selectedAccountResult
-      }
-    }
-
-    return this.readBackRefreshedTokensFromPath(this.getRuntimeAuthPath(), options)
   }
 
   private readBackRefreshedTokensFromPath(
@@ -893,127 +963,6 @@ export class CodexRuntimeHomeService {
       console.warn('[codex-runtime-home] Failed to read back refreshed tokens:', error)
       return 'rejected'
     }
-  }
-
-  private readBackRefreshedTokensForAccount(
-    account: CodexManagedAccount,
-    options: { updateLastWrittenAuthJson: boolean }
-  ): CodexReadBackResult {
-    return this.readBackRefreshedTokensFromPath(this.getRuntimeAuthPath(), {
-      ...options,
-      expectedAccountId: account.id
-    })
-  }
-
-  private recoverRefreshForMissingActiveAccount(account: CodexManagedAccount): CodexReadBackResult {
-    try {
-      const runtimeAuthPath = this.getRuntimeAuthPath()
-      if (!existsSync(runtimeAuthPath) || this.lastWrittenAuthJson === null) {
-        return 'rejected'
-      }
-      const runtimeContents = readFileSync(runtimeAuthPath, 'utf-8')
-      if (runtimeContents === this.lastWrittenAuthJson) {
-        return 'unchanged'
-      }
-      // Why: the canonical file is gone, so the exact in-memory bytes Orca
-      // previously mirrored are the only safe identity baseline for recovery.
-      if (!codexAuthMatchesManagedAccount(runtimeContents, account, this.lastWrittenAuthJson)) {
-        return 'rejected'
-      }
-      writeFileAtomically(join(account.managedHomePath, 'auth.json'), runtimeContents, {
-        mode: 0o600
-      })
-      this.lastWrittenAuthJson = runtimeContents
-      return 'persisted'
-    } catch (error) {
-      console.warn('[codex-runtime-home] Failed to recover missing managed auth:', error)
-      return 'rejected'
-    }
-  }
-
-  // Why: an unreadable managed auth.json says nothing about who the shared
-  // runtime home currently holds. The credential's own identity claims answer
-  // that without touching the unreadable home; Orca's write records and its
-  // provenance file are corroboration, not the only evidence — a torn or fenced
-  // provenance file is no proof the bytes belong to somebody else.
-  private sharedRuntimeAuthBelongsToAccount(account: CodexManagedAccount): boolean {
-    if (!existsSync(this.getRuntimeAuthPath())) {
-      return true
-    }
-    const runtimeAuth = this.readRuntimeAuthForProvenance()
-    if (runtimeAuth !== null) {
-      if (codexAuthMatchesManagedAccount(runtimeAuth, account, null)) {
-        return true
-      }
-      // Why: Orca itself mirrored these exact bytes for this account this run.
-      if (this.lastSyncedAccountId === account.id && this.lastWrittenAuthJson === runtimeAuth) {
-        return true
-      }
-    }
-    const status = this.resolveSharedRuntimeAuthProvenanceStatus()
-    if (status.kind === 'committed') {
-      return status.provenance.owner === 'managed' && status.provenance.accountId === account.id
-    }
-    // Why: with no committed record left, only claims that contradict this
-    // account prove the mirror is somebody else's. Deleting bytes nothing can
-    // attribute logs the user out over the very absence the grace window covers.
-    return runtimeAuth !== null && codexAuthCouldBelongToManagedAccount(runtimeAuth, account)
-  }
-
-  // Why: the absence may still heal, so keep the selection — but leave no other
-  // identity's credentials behind for the launch. Logged out beats logged in as
-  // someone else, and fencing stops later syncs adopting the removed bytes.
-  private clearRuntimeAuthForUnprovenSelection(): void {
-    const runtimeAuthPath = this.getRuntimeAuthPath()
-    try {
-      try {
-        // Why: a refresh Codex wrote into the mirror belongs to whoever owns
-        // those bytes; persist it to that owner's home — managed or ~/.codex —
-        // first, then fence so a delete the OS refuses (Windows AV lock, EBUSY)
-        // still leaves the surviving bytes marked untrusted.
-        const readBackResult = this.readBackRefreshedTokensFromPath(runtimeAuthPath, {
-          updateLastWrittenAuthJson: false
-        })
-        if (readBackResult === 'rejected') {
-          this.readBackRefreshedSystemDefaultAuth()
-        }
-        this.persistSharedRuntimeAuthProvenance({ owner: 'fenced' })
-      } finally {
-        // Why: neither the rescue nor the fence may cancel the delete — leaving
-        // another identity's credentials for the launch is the defect itself.
-        this.lastWrittenAuthJson = null
-        rmSync(runtimeAuthPath, { force: true })
-      }
-    } catch (error) {
-      // Why: this branch only runs because the filesystem already refused a
-      // read; a second failure must not throw out of launch preparation.
-      console.warn('[codex-runtime-home] Failed to clear unproven runtime auth:', error)
-    }
-  }
-
-  // Why: a token Codex refreshed inside the mirror has no managed home to fall
-  // back to when the mirror holds the user's own ~/.codex credential, so persist
-  // it there before the unproven mirror is dropped.
-  private readBackRefreshedSystemDefaultAuth(): void {
-    const runtimeAuth = this.readRuntimeAuthForProvenance()
-    const systemDefaultAuth = this.readSystemDefaultAuth()
-    if (runtimeAuth === null || systemDefaultAuth === null || runtimeAuth === systemDefaultAuth) {
-      return
-    }
-    const claim = this.resolveSystemDefaultMirrorClaim(
-      runtimeAuth,
-      this.resolveSharedRuntimeAuthProvenanceStatus()
-    )
-    if (
-      !claim.ownershipProven ||
-      claim.mirroredAuthJson === null ||
-      systemDefaultAuth !== claim.mirroredAuthJson ||
-      !this.runtimeAuthMatchesSystemDefaultIdentity(runtimeAuth, systemDefaultAuth)
-    ) {
-      return
-    }
-    this.writeSystemDefaultAuth(runtimeAuth)
-    this.captureSystemDefaultSnapshot({ force: true })
   }
 
   // Why: which ~/.codex bytes the mirror was seeded from, and whether the system
@@ -1265,38 +1214,36 @@ export class CodexRuntimeHomeService {
     )
     const nextLinuxPath = `${activeLinuxPath}.next-${process.pid}-${Date.now()}`
     const activeLinuxParentPath = this.dirnameLinuxPath(activeLinuxPath)
-    // Why: WSL drops bash argv, so keep the script literal; login-shell cleanup turns `exit 0` into status 1, so fall through.
+    // Why: login-shell cleanup turns `exit 0` into status 1, so fall through.
     execFileSync(
       'wsl.exe',
       [
         '-d',
         distro,
-        '--',
+        '--exec',
         'bash',
         '-lc',
         [
           'set -e',
-          `if [ ! -e ${this.quoteBashString(activeLinuxPath)} ] && [ ! -L ${this.quoteBashString(activeLinuxPath)} ]; then :`,
-          `elif [ -e ${this.quoteBashString(activeLinuxPath)} ] && [ ! -L ${this.quoteBashString(activeLinuxPath)} ]; then :`,
+          `if [ ! -e ${quotePosixShell(activeLinuxPath)} ] && [ ! -L ${quotePosixShell(activeLinuxPath)} ]; then :`,
+          `elif [ -e ${quotePosixShell(activeLinuxPath)} ] && [ ! -L ${quotePosixShell(activeLinuxPath)} ]; then :`,
           'else',
-          `mkdir -p ${this.quoteBashString(activeLinuxParentPath)}`,
-          `rm -rf -- ${this.quoteBashString(nextLinuxPath)}`,
-          `ln -s -- ${this.quoteBashString(runtimeWsl.linuxPath)} ${this.quoteBashString(nextLinuxPath)}`,
-          `mv -Tf -- ${this.quoteBashString(nextLinuxPath)} ${this.quoteBashString(activeLinuxPath)}`,
+          `mkdir -p ${quotePosixShell(activeLinuxParentPath)}`,
+          `rm -rf -- ${quotePosixShell(nextLinuxPath)}`,
+          `ln -s -- ${quotePosixShell(runtimeWsl.linuxPath)} ${quotePosixShell(nextLinuxPath)}`,
+          `mv -Tf -- ${quotePosixShell(nextLinuxPath)} ${quotePosixShell(activeLinuxPath)}`,
           'fi'
         ].join('\n')
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 }
+      // wsl.exe is console-subsystem: without this a GUI-launched Orca flashes
+      // a conhost and steals foreground for up to the timeout (#10488).
+      { stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000, windowsHide: true }
     )
   }
 
   private dirnameLinuxPath(value: string): string {
     const index = value.lastIndexOf('/')
     return index > 0 ? value.slice(0, index) : '/'
-  }
-
-  private quoteBashString(value: string): string {
-    return `'${value.replace(/'/g, `'\\''`)}'`
   }
 
   private joinWslPath(basePath: string, ...segments: string[]): string {
@@ -1407,9 +1354,6 @@ export class CodexRuntimeHomeService {
 
   private safeMigrateLegacySharedAuth(): void {
     const settings = this.store.getSettings()
-    if (!isCodexSystemDefaultRealHomeEnabled()) {
-      return
-    }
     try {
       migrateLegacySharedAuthToPerAccountHome({
         activeHostAccountId: normalizeCodexRuntimeSelection(settings).host,
@@ -1462,15 +1406,24 @@ export class CodexRuntimeHomeService {
    * real-home lane, which runs Codex directly against ~/.codex — there is no
    * mirror there, so there is nothing that can fall behind.
    */
-  getMirroredHostHomePathForStatus(): string | null {
+  getMirroredHostHomePathForStatus(): CodexMirroredHomeStatus {
     const selfContainedAccount = this.getSelfContainedManagedHostAccount()
     if (selfContainedAccount) {
-      return this.getTrustedSelfContainedManagedHomePath(selfContainedAccount)
+      const resolved = this.resolveSelfContainedManagedHome(selfContainedAccount)
+      if (resolved.kind === 'indeterminate') {
+        // Why: `null` here is a positive claim that no mirror exists, which the
+        // status channel reports as healthy. An unreadable home is not that.
+        return { kind: 'unavailable' }
+      }
+      return { kind: 'ready', homePath: resolved.kind === 'owned' ? resolved.homePath : null }
     }
     if (this.isHostSystemDefaultRealHome()) {
-      return null
+      return { kind: 'ready', homePath: null }
     }
-    return join(getOrcaUserDataPath(), 'codex-runtime-home', 'home')
+    return {
+      kind: 'ready',
+      homePath: join(getOrcaUserDataPath(), 'codex-runtime-home', 'home')
+    }
   }
 
   private getRuntimeAuthPath(): string {
@@ -2058,7 +2011,15 @@ export class CodexRuntimeHomeService {
     }
     const provenance: CodexSharedRuntimeAuthProvenance =
       owner.owner === 'system-default' ? { owner: 'system-default', authJson: contents } : owner
-    const runtimeAuthAlreadyMatches = this.fileContentsEqual(runtimeAuthPath, contents)
+    const runtimeAuthComparison = this.compareFileContents(runtimeAuthPath, contents)
+    if (runtimeAuthComparison === null) {
+      // Why: an unreadable runtime auth.json may hold a token Codex rotated a
+      // moment ago. Treating "could not read" as "differs" sent execution to the
+      // unconditional write below, consuming that rotation and logging the user
+      // out for good. Refuse; the next sync retries.
+      return false
+    }
+    const runtimeAuthAlreadyMatches = runtimeAuthComparison
     if (
       runtimeAuthAlreadyMatches &&
       this.sharedRuntimeAuthProvenanceMatches(
@@ -2106,16 +2067,31 @@ export class CodexRuntimeHomeService {
     writeFileAtomically(authPath, contents, { mode: 0o600 })
   }
 
-  private fileContentsEqual(targetPath: string, contents: string): boolean {
+  /**
+   * `true`/`false` only when the bytes were actually read; `null` when the file
+   * could not be read at all. The old `catch { return false }` reported "these
+   * differ" for a file nobody could open, and every caller reads that as
+   * permission to write.
+   */
+  private compareFileContents(targetPath: string, contents: string): boolean | null {
     try {
-      return existsSync(targetPath) && readFileSync(targetPath, 'utf-8') === contents
-    } catch {
-      return false
+      return readFileSync(targetPath, 'utf-8') === contents
+    } catch (error) {
+      return isDefinitiveAbsence(error) ? false : null
     }
+  }
+
+  private fileContentsEqual(targetPath: string, contents: string): boolean {
+    return this.compareFileContents(targetPath, contents) === true
   }
 
   private fileContentsMatchExpected(targetPath: string, expectedContents: string | null): boolean {
     if (expectedContents === null) {
+      // Why: `!existsSync` does report `true` for a locked file, but this branch
+      // is not where that matters — the write it guards is
+      // `writeFileAtomicallyIfUnchanged`, whose rename-and-compare re-checks the
+      // real file and refuses on its own. Classifying here would be a guard no
+      // test can drive.
       return !existsSync(targetPath)
     }
     return this.fileContentsEqual(targetPath, expectedContents)

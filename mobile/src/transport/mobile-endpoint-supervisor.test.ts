@@ -35,7 +35,12 @@ describe('mobile endpoint supervisor', () => {
 
     await supervisor.start()
 
-    expect(logical.migrateTo).toHaveBeenCalledWith(expect.any(FakeRelaySession), 'relay')
+    expect(logical.migrateTo).toHaveBeenCalledWith(
+      expect.any(FakeRelaySession),
+      'relay',
+      undefined,
+      expect.any(Function)
+    )
     expect(logical.getActivePath()).toBe('relay')
     expect(deps.writeBundle).toHaveBeenCalledWith(
       expect.objectContaining({ current: expect.objectContaining({ version: 2 }) })
@@ -60,7 +65,12 @@ describe('mobile endpoint supervisor', () => {
     logical.publishState('reconnecting')
     await vi.waitFor(() => expect(logical.getActivePath()).toBe('relay'))
 
-    expect(logical.migrateTo).toHaveBeenCalledWith(expect.any(FakeRelaySession), 'relay')
+    expect(logical.migrateTo).toHaveBeenCalledWith(
+      expect.any(FakeRelaySession),
+      'relay',
+      undefined,
+      expect.any(Function)
+    )
     supervisor.stop()
   })
 
@@ -71,9 +81,71 @@ describe('mobile endpoint supervisor', () => {
 
     await supervisor.start()
 
-    expect(logical.migrateTo).toHaveBeenCalledWith(expect.any(FakeRelaySession), 'relay')
+    expect(logical.migrateTo).toHaveBeenCalledWith(
+      expect.any(FakeRelaySession),
+      'relay',
+      undefined,
+      expect.any(Function)
+    )
     expect(logical.getActivePath()).toBe('relay')
     supervisor.stop()
+  })
+
+  it('does not announce Relay when credential selection finishes after backgrounding', async () => {
+    const logical = new FakeLogicalClient('reconnecting', 'lan')
+    let finishCredentialRead: ((value: MobileRelayCredentialBundle) => void) | undefined
+    const credentialReadPending = new Promise<MobileRelayCredentialBundle>((resolve) => {
+      finishCredentialRead = resolve
+    })
+    const readBundle = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockReturnValueOnce(credentialReadPending)
+    const deps = dependencies({ readBundle })
+    const supervisor = new MobileEndpointSupervisor(logical, host, deps)
+
+    const starting = supervisor.start()
+    await vi.waitFor(() => expect(readBundle).toHaveBeenCalledTimes(2))
+    supervisor.setForeground(false)
+    finishCredentialRead?.(bundle)
+    await starting
+
+    expect(deps.openRelay).not.toHaveBeenCalled()
+    expect(logical.setRecoveryPath).not.toHaveBeenCalledWith('relay')
+    expect(logical.getPendingPath()).toBeNull()
+    supervisor.stop()
+  })
+
+  it('does not announce Relay without a dialable credential', async () => {
+    const logical = new FakeLogicalClient('reconnecting', 'lan')
+    const expired = { ...bundle, current: { ...bundle.current, expiresAt: Date.now() - 1 } }
+    const deps = dependencies({ readBundle: vi.fn(async () => expired) })
+    const supervisor = new MobileEndpointSupervisor(logical, host, deps)
+
+    await supervisor.start()
+
+    expect(deps.openRelay).not.toHaveBeenCalled()
+    expect(logical.setRecoveryPath).not.toHaveBeenCalledWith('relay')
+    expect(logical.getPendingPath()).toBeNull()
+    supervisor.stop()
+  })
+
+  it('keeps Relay pending through a failed dial cooldown and clears it on stop', async () => {
+    const logical = new FakeLogicalClient('reconnecting', 'lan')
+    const deps = dependencies({
+      openRelay: vi.fn(() => new FakeRelaySession('disconnected', new RelayOuterError(4408))),
+      randomBytes: () => new Uint8Array([128, 0])
+    })
+    const supervisor = new MobileEndpointSupervisor(logical, host, deps)
+
+    await supervisor.start()
+
+    expect(logical.getPendingPath()).toBe('relay')
+    await vi.advanceTimersByTimeAsync(249)
+    expect(logical.getPendingPath()).toBe('relay')
+
+    supervisor.stop()
+    expect(logical.getPendingPath()).toBeNull()
   })
 
   it('does not spend a queued relay retry while direct authentication is progressing', async () => {
@@ -156,46 +228,6 @@ describe('mobile endpoint supervisor', () => {
     supervisor.stop()
   })
 
-  it('replaces a half-open relay on a network nudge, then backs off failed resumes', async () => {
-    const logical = new FakeLogicalClient('disconnected', 'lan')
-    const openRelay = vi
-      .fn()
-      .mockReturnValueOnce(new FakeRelaySession('connected'))
-      .mockImplementation(() => new FakeRelaySession('disconnected', new RelayOuterError(4408)))
-    const deps = dependencies({
-      openRelay,
-      // Keep direct unavailable so relay recovery stays the only path under test.
-      openDirect: vi.fn(() => new FakeSession('disconnected')),
-      // Deterministic full jitter: fraction 0.5 → half the backoff window.
-      randomBytes: () => new Uint8Array([128, 0])
-    })
-    const supervisor = new MobileEndpointSupervisor(logical, host, deps)
-
-    await supervisor.start()
-    expect(openRelay).toHaveBeenCalledOnce()
-
-    // The OS reports a network handoff, but the dead relay never published onclose.
-    supervisor.setForeground(true)
-    await vi.advanceTimersByTimeAsync(0)
-    expect(logical.suspendActiveSession).toHaveBeenCalledOnce()
-    expect(openRelay).toHaveBeenCalledTimes(2)
-
-    // The relay cell rejects the replacement with PEER_DROPPED; more flap nudges
-    // must share the existing cooldown rather than opening more sockets.
-    for (let i = 0; i < 5; i++) {
-      supervisor.setForeground(true)
-      await vi.advanceTimersByTimeAsync(0)
-    }
-    expect(openRelay).toHaveBeenCalledTimes(2)
-
-    // Exactly one retry fires at the 250 ms deterministic backoff boundary.
-    await vi.advanceTimersByTimeAsync(249)
-    expect(openRelay).toHaveBeenCalledTimes(2)
-    await vi.advanceTimersByTimeAsync(1)
-    expect(openRelay).toHaveBeenCalledTimes(3)
-    supervisor.stop()
-  })
-
   it('backs off a close from the active relay before opening its replacement', async () => {
     const logical = new FakeLogicalClient('disconnected', 'lan')
     const openRelay = vi
@@ -212,10 +244,27 @@ describe('mobile endpoint supervisor', () => {
     logical.publishState('disconnected')
 
     expect(openRelay).toHaveBeenCalledOnce()
+    expect(logical.getPendingPath()).toBe('relay')
     await vi.advanceTimersByTimeAsync(249)
     expect(openRelay).toHaveBeenCalledOnce()
     await vi.advanceTimersByTimeAsync(1)
     expect(openRelay).toHaveBeenCalledTimes(2)
+    supervisor.stop()
+  })
+
+  it('does not announce recovery when an active Relay drops after credential expiry', async () => {
+    const logical = new FakeLogicalClient('connected', 'relay')
+    const expired = { ...bundle, current: { ...bundle.current, expiresAt: Date.now() - 1 } }
+    const deps = dependencies({ readBundle: vi.fn(async () => expired) })
+    const supervisor = new MobileEndpointSupervisor(logical, host, deps)
+    await supervisor.start()
+
+    logical.publishState('disconnected')
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(deps.openRelay).not.toHaveBeenCalled()
+    expect(logical.setRecoveryPath).not.toHaveBeenCalledWith('relay')
+    expect(logical.getPendingPath()).toBeNull()
     supervisor.stop()
   })
 
@@ -457,6 +506,7 @@ describe('mobile endpoint supervisor', () => {
 
     expect(openRelay).toHaveBeenCalledOnce()
     expect(deps.writeBundle).not.toHaveBeenCalled()
+    expect(logical.getPendingPath()).toBeNull()
 
     logical.publishState('connected')
     await vi.waitFor(() => expect(deps.writeBundle).toHaveBeenCalledOnce())
@@ -604,6 +654,10 @@ describe('mobile endpoint supervisor', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(openRelay).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(1)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(logical.suspendActiveSession).toHaveBeenCalledOnce()
+    expect(openRelay).toHaveBeenCalledTimes(2)
     expect(vi.getTimerCount()).toBe(0)
     supervisor.stop()
   })
@@ -714,7 +768,10 @@ describe('mobile endpoint supervisor', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     expect(openRelay).toHaveBeenCalledTimes(2)
 
-    supervisor.setForeground(true)
+    // A network nudge inside the cooldown must not dial early and must not tear
+    // down the healthy session; the queued intent runs at the 250 ms boundary.
+    supervisor.nudge('network-change')
+    expect(logical.suspendActiveSession).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(249)
     expect(openRelay).toHaveBeenCalledTimes(2)
     await vi.advanceTimersByTimeAsync(1)
@@ -768,20 +825,88 @@ describe('mobile endpoint supervisor', () => {
     supervisor.stop()
   })
 
-  it('releases a background relay session and reconnects it on foreground', async () => {
-    const logical = new FakeLogicalClient('connected', 'relay')
+  it('races a relay dial when the direct dial stalls unauthenticated', async () => {
+    const logical = new FakeLogicalClient('connecting', 'lan')
     const deps = dependencies()
     const supervisor = new MobileEndpointSupervisor(logical, host, deps)
-    await supervisor.start()
 
-    supervisor.setForeground(false)
-    expect(logical.suspendActiveSession).toHaveBeenCalledOnce()
-    expect(logical.getState()).toBe('disconnected')
+    await supervisor.start()
+    await vi.advanceTimersByTimeAsync(2_499)
+    expect(deps.openRelay).not.toHaveBeenCalled()
+    expect(logical.getState()).toBe('connecting')
+
+    // The direct dial never authenticates; the relay wins the race through migrateTo.
+    await vi.advanceTimersByTimeAsync(1)
+    await vi.waitFor(() => expect(logical.getActivePath()).toBe('relay'))
+    expect(logical.migrateTo).toHaveBeenCalledWith(
+      expect.any(FakeRelaySession),
+      'relay',
+      undefined,
+      expect.any(Function)
+    )
+    supervisor.stop()
+  })
+
+  it('cancels the grace race when the direct dial authenticates first', async () => {
+    const logical = new FakeLogicalClient('connecting', 'lan')
+    const deps = dependencies()
+    const supervisor = new MobileEndpointSupervisor(logical, host, deps)
+
+    await supervisor.start()
+    logical.publishState('connected')
     expect(vi.getTimerCount()).toBe(0)
 
-    supervisor.setForeground(true)
-    await vi.waitFor(() => expect(logical.migrateTo).toHaveBeenCalled())
-    expect(logical.getActivePath()).toBe('relay')
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(deps.openRelay).not.toHaveBeenCalled()
+    expect(logical.getActivePath()).toBe('lan')
+    supervisor.stop()
+  })
+
+  it('never races a relay dial against a desktop with no relay endpoint', async () => {
+    const logical = new FakeLogicalClient('connecting', 'lan')
+    const deps = dependencies()
+    const supervisor = new MobileEndpointSupervisor(logical, { ...host, relay: undefined }, deps)
+
+    await supervisor.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(deps.openRelay).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+    supervisor.stop()
+  })
+
+  it('drops the pending grace race when the phone backgrounds', async () => {
+    const logical = new FakeLogicalClient('connecting', 'lan')
+    const deps = dependencies()
+    const supervisor = new MobileEndpointSupervisor(logical, host, deps)
+
+    await supervisor.start()
+    supervisor.setForeground(false)
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(deps.openRelay).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+    supervisor.stop()
+  })
+
+  it('books the shared cooldown when the grace race loses its dial', async () => {
+    const logical = new FakeLogicalClient('connecting', 'lan')
+    const openRelay = vi.fn(() => new FakeRelaySession('disconnected', new RelayOuterError(4408)))
+    const deps = dependencies({ openRelay, randomBytes: () => new Uint8Array([128, 0]) })
+    const supervisor = new MobileEndpointSupervisor(logical, host, deps)
+
+    await supervisor.start()
+    await vi.advanceTimersByTimeAsync(2_500)
+    expect(openRelay).toHaveBeenCalledOnce()
+
+    // The armed retry runs unforced, so it yields to the still-progressing direct
+    // dial: the race gets one attempt, never a socket-per-cooldown loop.
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(openRelay).toHaveBeenCalledOnce()
+
+    // Direct finally gives up: ordinary recovery still owns the failure.
+    logical.publishState('reconnecting')
+    await vi.waitFor(() => expect(openRelay).toHaveBeenCalledTimes(2))
     supervisor.stop()
   })
 })

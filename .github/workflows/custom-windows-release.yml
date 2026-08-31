@@ -4,11 +4,15 @@ on:
   push:
     branches:
       - ryan/ceo-office-sidebar
+      - ryan/ceo-office-sidebar-latest
+      - 'ryan/ceo-office-sidebar-release-*'
+      - 'ryan/ceo-office-sidebar-bridge-*'
+  workflow_call:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version greater than the currently installed version (for example 1.4.169-ceo.20260805.1)'
-        required: true
+        description: 'Release version (e.g. 1.4.175-ceo.20260806.1)'
+        required: false
         type: string
 
 permissions:
@@ -18,17 +22,31 @@ concurrency:
   group: custom-windows-release
   cancel-in-progress: false
 
+env:
+  ORCA_RELEASE_REPOSITORY: YAYPLANET-Ryan/orca-ceo-office
+  ORCA_LEGACY_RELEASE_REPOSITORY: YAYPLANET-Ryan/orca
+  ORCA_UPDATE_OWNER: YAYPLANET-Ryan
+  ORCA_UPDATE_REPO: orca-ceo-office
+
 jobs:
   build-and-publish:
+    if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
     runs-on: windows-latest
-    env:
-      ORCA_UPDATE_OWNER: YAYPLANET-Ryan
-      ORCA_UPDATE_REPO: orca-ceo-office
+    timeout-minutes: 45
+
     steps:
       - name: Checkout custom branch
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.ref_name }}
           fetch-depth: 1
+
+      - name: Verify canonical release repository
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REPOSITORY -ne $env:ORCA_RELEASE_REPOSITORY) {
+            throw "Refusing to publish from '$env:GITHUB_REPOSITORY'; canonical release repository is '$env:ORCA_RELEASE_REPOSITORY'."
+          }
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -43,31 +61,310 @@ jobs:
         shell: pwsh
         run: pnpm install --no-frozen-lockfile --ignore-scripts
 
+      - name: Verify CEO customization and session preservation
+        shell: pwsh
+        run: |
+          node --test config/scripts/custom-windows-release-workflow-contract.test.mjs
+          pnpm exec vitest run --config config/vitest.config.ts `
+            src/renderer/src/components/ceo-office `
+            src/renderer/src/components/sidebar/WorktreeCardAgents.activation.test.tsx `
+            src/renderer/src/components/sidebar/worktree-title-derived-agent-rows.test.ts `
+            src/renderer/src/components/terminal-pane/pty-connection-cold-restore-agent-resume.test.ts `
+            src/renderer/src/components/terminal-pane/pty-connection/reattach-payload-context.test.ts `
+            src/renderer/src/components/terminal-pane/pty-connection/reattach-payload-ssh-reconnect-model-paint.test.ts `
+            src/renderer/src/components/terminal-pane/pty-transport-connect-spawn.test.ts `
+            src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-create-handoff.test.ts `
+            src/renderer/src/components/terminal-pane/session-restored-banner-pane-state.test.tsx `
+            src/main/window/createMainWindow-renderer-crash-recovery.test.ts `
+            src/main/daemon/daemon-pty-adapter-cold-restore-reanchor.test.ts `
+            src/main/window/attach-main-window-services.test.ts `
+            src/main/updater-repository.test.ts `
+            src/main/updater-auto-download.test.ts `
+            src/main/updater-release-builds.test.ts `
+            src/main/updater.quit-and-install.test.ts `
+            src/main/persistence-workspace-session-scrollback.test.ts `
+            src/main/persistence-host-partitioned-sessions.test.ts `
+            src/main/ai-vault/session-parse-cache-persistence.test.ts `
+            src/renderer/src/lib/workspace-session-persistence-gate.test.ts `
+            src/renderer/src/lib/workspace-session-host-persistence.test.ts `
+            src/renderer/src/lib/resume-sleeping-agent-session.test.ts
+          # Keep timer-driven updater scheduling isolated from the wider parallel suite. Under
+          # contention, Vitest's fake-timer wait loop can advance the 24h callback twice.
+          pnpm exec vitest run --config config/vitest.config.ts `
+            src/main/updater.startup-scheduling.test.ts
+          # Keep the supported manual update path in a third worker process. Running this menu
+          # suite beside the fake-timer updater suite can also advance the 24h timer twice.
+          pnpm exec vitest run --config config/vitest.config.ts `
+            src/main/menu/register-app-menu.test.ts
+
       - name: Resolve release version
         shell: pwsh
         env:
           INPUT_VERSION: ${{ inputs.version }}
           RUN_NUMBER: ${{ github.run_number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if ($env:INPUT_VERSION) {
             $version = $env:INPUT_VERSION
           } else {
-            $base = node -p "require('./package.json').version.split('-')[0]"
-            $parts = $base.Split('.')
-            $parts[2] = ([int]$parts[2] + 1).ToString()
-            $version = "$($parts -join '.')-ceo.$((Get-Date).ToUniversalTime().ToString('yyyyMMdd')).$env:RUN_NUMBER"
+            $sourceVersion = (node -p "require('./package.json').version").Trim()
+            if ($LASTEXITCODE -ne 0 -or $sourceVersion -notmatch '^(\d+\.\d+\.\d+)(?:-|$)') {
+              throw "Could not resolve the source version from package.json (got '$sourceVersion')."
+            }
+            $base = $Matches[1]
+
+            $publishedBases = gh api --paginate `
+              "repos/$env:ORCA_RELEASE_REPOSITORY/releases?per_page=100" `
+              --jq '.[].tag_name' |
+              ForEach-Object {
+                if ($_ -match '^v?(\d+\.\d+\.\d+)-ceo\.') {
+                  [version]$Matches[1]
+                }
+              }
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not inspect existing canonical releases."
+            }
+            $newerPublishedBase = $publishedBases |
+              Where-Object { $_ -gt [version]$base } |
+              Sort-Object -Descending |
+              Select-Object -First 1
+            if ($newerPublishedBase) {
+              throw "Source base $base is older than published custom base $newerPublishedBase. Merge the newer official source instead of mislabeling this build."
+            }
+
+            $kst = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId(
+              (Get-Date).ToUniversalTime(),
+              'Korea Standard Time'
+            )
+            $date = $kst.ToString('yyyyMMdd')
+            $version = "$base-ceo.$date.$env:RUN_NUMBER"
           }
           "ORCA_RELEASE_VERSION=$version" >> $env:GITHUB_ENV
-          "Resolved release version: $version"
+          Write-Host "Resolved release version: $version"
 
       - name: Build desktop
         shell: pwsh
         run: pnpm run build:desktop
 
-      - name: Build and publish Windows installer
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          pnpm run ensure:electron-runtime
+          pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish never
+
+      - name: Verify assets
+        shell: pwsh
+        run: |
+          $assets = @(
+            "dist/orca-windows-setup.exe",
+            "dist/orca-windows-setup.exe.blockmap",
+            "dist/latest.yml"
+          )
+          $missing = @()
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset)) {
+              $missing += $asset
+            } else {
+              Write-Host "Found: $asset ($((Get-Item $asset).Length) bytes)"
+            }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "##[error]Missing assets: $($missing -join ', ')"
+            Write-Host "##[error]Contents of dist/:"
+            Get-ChildItem dist -Recurse | ForEach-Object { Write-Host "  $($_.FullName) ($($_.Length) bytes)" }
+            exit 1
+          }
+
+          $updateConfigPath = "dist/win-unpacked/resources/app-update.yml"
+          if (-not (Test-Path -LiteralPath $updateConfigPath)) {
+            throw "Missing packaged update configuration: $updateConfigPath"
+          }
+          $updateConfig = Get-Content -LiteralPath $updateConfigPath -Raw
+          if ($updateConfig -notmatch '(?m)^owner:\s*YAYPLANET-Ryan\s*$' -or
+              $updateConfig -notmatch '(?m)^repo:\s*orca-ceo-office\s*$' -or
+              $updateConfig -notmatch '(?m)^provider:\s*github\s*$') {
+            throw "Packaged app-update.yml does not point to YAYPLANET-Ryan/orca-ceo-office on GitHub."
+          }
+          Write-Host "Verified packaged update feed: YAYPLANET-Ryan/orca-ceo-office"
+
+      - name: Retain verified release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: orca-windows-release-${{ env.ORCA_RELEASE_VERSION }}
+          path: |
+            dist/orca-windows-setup.exe
+            dist/orca-windows-setup.exe.blockmap
+            dist/latest.yml
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish Windows release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pnpm run ensure:electron-runtime
-          pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish always
+          $tag = "v$env:ORCA_RELEASE_VERSION"
+          $assets = @(
+            "dist/orca-windows-setup.exe",
+            "dist/orca-windows-setup.exe.blockmap",
+            "dist/latest.yml"
+          )
+          gh release create $tag @assets `
+            --repo "$env:ORCA_RELEASE_REPOSITORY" `
+            --target "$env:GITHUB_SHA" `
+            --title $env:ORCA_RELEASE_VERSION `
+            --notes "Custom Orca Windows build with CEO Office sidebar, durable agent rows, renderer-crash recovery, and cold-restore session preservation."
+          Write-Host "##[notice]Published: $tag"
+
+  publish-legacy-feed-bridge:
+    if: github.repository == 'YAYPLANET-Ryan/orca'
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Verify one-time bridge branch
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -notmatch '^ryan/ceo-office-sidebar-bridge-\d{8}-\d+$') {
+            throw "Legacy-feed publication is allowed only from an immutable bridge branch."
+          }
+
+      - name: Resolve matching canonical release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $release = gh api "repos/$env:ORCA_RELEASE_REPOSITORY/releases/latest" | ConvertFrom-Json
+          if ($release.draft -or $release.prerelease) {
+            throw "The canonical release must be a published stable release."
+          }
+          if ($release.target_commitish -ne $env:GITHUB_SHA) {
+            throw "Canonical release target '$($release.target_commitish)' does not match bridge SHA '$env:GITHUB_SHA'."
+          }
+          if ($release.tag_name -notmatch '^v\d+\.\d+\.\d+-ceo\.\d{8}\.\d+$') {
+            throw "Unexpected canonical release tag '$($release.tag_name)'."
+          }
+          $requiredAssets = @(
+            "orca-windows-setup.exe",
+            "orca-windows-setup.exe.blockmap",
+            "latest.yml"
+          )
+          $assetContract = foreach ($name in $requiredAssets) {
+            $matches = @($release.assets | Where-Object { $_.name -eq $name })
+            if ($matches.Count -ne 1) {
+              throw "Canonical release must contain exactly one '$name' asset."
+            }
+            $asset = $matches[0]
+            if ($asset.digest -notmatch '^sha256:[0-9a-f]{64}$') {
+              throw "Canonical asset '$name' has no verified SHA-256 digest."
+            }
+            [pscustomobject]@{
+              name = $name
+              size = [long]$asset.size
+              digest = $asset.digest.ToLowerInvariant()
+            }
+          }
+          $contractJson = ConvertTo-Json -InputObject @{ assets = @($assetContract) } -Compress
+          $contractBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($contractJson))
+          "ORCA_BRIDGE_TAG=$($release.tag_name)" >> $env:GITHUB_ENV
+          "ORCA_BRIDGE_TITLE=$($release.name)" >> $env:GITHUB_ENV
+          "ORCA_BRIDGE_ASSET_CONTRACT_B64=$contractBase64" >> $env:GITHUB_ENV
+          Write-Host "Verified canonical release: $($release.tag_name) at $env:GITHUB_SHA"
+
+      - name: Download canonical release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          New-Item -ItemType Directory -Path bridge-assets | Out-Null
+          gh release download $env:ORCA_BRIDGE_TAG `
+            --repo "$env:ORCA_RELEASE_REPOSITORY" `
+            --dir bridge-assets `
+            --pattern "orca-windows-setup.exe" `
+            --pattern "orca-windows-setup.exe.blockmap" `
+            --pattern "latest.yml"
+
+          $contractJson = [Text.Encoding]::UTF8.GetString(
+            [Convert]::FromBase64String($env:ORCA_BRIDGE_ASSET_CONTRACT_B64)
+          )
+          $contract = @(($contractJson | ConvertFrom-Json).assets)
+          foreach ($expected in $contract) {
+            $assetPath = Join-Path "bridge-assets" $expected.name
+            if (-not (Test-Path -LiteralPath $assetPath)) {
+              throw "Missing canonical bridge asset: $assetPath"
+            }
+            $actualSize = (Get-Item -LiteralPath $assetPath).Length
+            $actualDigest = "sha256:$((Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant())"
+            if ($actualSize -ne [long]$expected.size) {
+              throw "Canonical asset size mismatch for '$($expected.name)'."
+            }
+            if ($actualDigest -ne $expected.digest) {
+              throw "Canonical asset digest mismatch for '$($expected.name)'."
+            }
+            Write-Host "Verified canonical bytes: $($expected.name) ($actualSize bytes, $actualDigest)"
+          }
+
+      - name: Retain bridge assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: orca-legacy-feed-bridge-${{ env.ORCA_BRIDGE_TAG }}
+          path: bridge-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish exact assets to legacy feed
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $assets = @(
+            "bridge-assets/orca-windows-setup.exe",
+            "bridge-assets/orca-windows-setup.exe.blockmap",
+            "bridge-assets/latest.yml"
+          )
+          gh release create $env:ORCA_BRIDGE_TAG @assets `
+            --repo "$env:ORCA_LEGACY_RELEASE_REPOSITORY" `
+            --target "$env:GITHUB_SHA" `
+            --title $env:ORCA_BRIDGE_TITLE `
+            --notes "One-time bridge to the canonical CEO Office update feed. Assets are copied unchanged from $env:ORCA_RELEASE_REPOSITORY."
+
+          $contractJson = [Text.Encoding]::UTF8.GetString(
+            [Convert]::FromBase64String($env:ORCA_BRIDGE_ASSET_CONTRACT_B64)
+          )
+          $contract = @(($contractJson | ConvertFrom-Json).assets)
+          $legacyRelease = $null
+          for ($attempt = 1; $attempt -le 12; $attempt++) {
+            $legacyRelease = gh api `
+              "repos/$env:ORCA_LEGACY_RELEASE_REPOSITORY/releases/tags/$env:ORCA_BRIDGE_TAG" |
+              ConvertFrom-Json
+            $ready = @($contract | Where-Object {
+              $name = $_.name
+              $match = @($legacyRelease.assets | Where-Object { $_.name -eq $name })
+              $match.Count -eq 1 -and $match[0].digest -match '^sha256:[0-9a-f]{64}$'
+            }).Count -eq $contract.Count
+            if ($ready) {
+              break
+            }
+            Start-Sleep -Seconds 5
+          }
+          if ($legacyRelease.target_commitish -ne $env:GITHUB_SHA) {
+            throw "Legacy release target does not match bridge SHA."
+          }
+          if (@($legacyRelease.assets).Count -ne $contract.Count) {
+            throw "Legacy release has an unexpected asset count."
+          }
+          foreach ($expected in $contract) {
+            $matches = @($legacyRelease.assets | Where-Object { $_.name -eq $expected.name })
+            if ($matches.Count -ne 1) {
+              throw "Legacy release must contain exactly one '$($expected.name)' asset."
+            }
+            $actual = $matches[0]
+            if ([long]$actual.size -ne [long]$expected.size) {
+              throw "Legacy asset size mismatch for '$($expected.name)'."
+            }
+            if ($actual.digest.ToLowerInvariant() -ne $expected.digest) {
+              throw "Legacy asset digest mismatch for '$($expected.name)'."
+            }
+            Write-Host "Verified legacy bytes: $($expected.name) ($($actual.size) bytes, $($actual.digest))"
+          }
+          Write-Host "##[notice]Published legacy-feed bridge: $env:ORCA_BRIDGE_TAG"

@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  SESSION_RESUME_REQUIRED_BANNER_TEXT,
   SESSION_RESTORED_BANNER_TEXT,
   SESSION_RESUME_UNAVAILABLE_BANNER_TEXT
 } from './SessionRestoredBanner'
@@ -150,6 +151,14 @@ describe('session restored banner pane state', () => {
 
     expect(paneText(restoredPane)).toBe(SESSION_RESTORED_BANNER_TEXT)
     expect(paneText(freshPane)).toBe(SESSION_RESUME_UNAVAILABLE_BANNER_TEXT)
+  })
+
+  it('names a shell-only recovery when no exact provider session was captured', async () => {
+    const pane = createPane(1)
+
+    await renderPortals([pane], new Map([[pane.id, 'resume-required' as const]]))
+
+    expect(paneText(pane)).toBe(SESSION_RESUME_REQUIRED_BANNER_TEXT)
   })
 
   it('upgrades a restored pane to resume-unavailable and keeps identity otherwise', () => {
