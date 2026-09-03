@@ -137,6 +137,47 @@ describe('Last-status persistence', () => {
     }
   })
 
+  it('keeps Claude model metadata through status hydration and a later model-less hook', async () => {
+    const firstServer = new AgentHookServer()
+    await firstServer.start({ env: 'production', userDataPath })
+    await postHookEvent(
+      firstServer,
+      buildBody({
+        hook_event_name: 'SessionStart',
+        session_id: 'claude-session-model',
+        source: 'startup',
+        model: 'claude-opus-4-1'
+      })
+    )
+    firstServer.flushStatusPersistSync()
+    firstServer.stop()
+
+    const server = new AgentHookServer()
+    await server.start({ env: 'production', userDataPath })
+    try {
+      await postHookEvent(
+        server,
+        buildBody({
+          hook_event_name: 'PostToolUse',
+          session_id: 'claude-session-model'
+        })
+      )
+
+      expect(server.getStatusSnapshot()[0]?.model).toBe('claude-opus-4-1')
+
+      await postHookEvent(
+        server,
+        buildBody({
+          hook_event_name: 'PostToolUse',
+          session_id: 'replacement-claude-session'
+        })
+      )
+      expect(server.getStatusSnapshot()[0]?.model).toBeUndefined()
+    } finally {
+      server.stop()
+    }
+  })
+
   it('does not inherit a stale tool id from hydrated Claude progress', async () => {
     const firstServer = new AgentHookServer()
     await firstServer.start({ env: 'production', userDataPath })

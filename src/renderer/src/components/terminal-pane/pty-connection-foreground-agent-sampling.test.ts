@@ -634,7 +634,8 @@ describe('connectPanePty', () => {
         agent: null,
         shellForeground: true
       })
-      expect(mockStoreState.clearAgentLaunchConfig).toHaveBeenCalledWith(cacheKey)
+      expect(mockStoreState.dropAgentStatus).toHaveBeenCalledWith(cacheKey)
+      expect(window.api.agentStatus.reconcileEndedProcess).toHaveBeenCalledWith(cacheKey)
 
       mockStoreState.paneForegroundAgentByPaneKey[cacheKey] = {
         agent: null,
@@ -659,13 +660,46 @@ describe('connectPanePty', () => {
       const tabId = `tab-${ptyId}`
       mockStoreState.agentStatusByPaneKey[makePaneKey(tabId, LEAF_1)] = {
         state: 'working',
-        agentType: 'codex'
+        agentType: 'codex',
+        updatedAt: Date.now()
       }
 
       await connectRestoredPaneForForegroundSampling({ ptyId, tabId })
       await advanceVisibleForegroundRead()
 
       expect(foregroundReadCallsFor(ptyId)).toHaveLength(0)
+    })
+
+    it('resumes the exact provider session when a stale hook row reattaches at a shell', async () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(2_000_000_000)
+      const getForegroundProcess = vi.mocked(window.api.pty.getForegroundProcess)
+      getForegroundProcess.mockResolvedValue('powershell.exe')
+      const ptyId = 'pty-stale-codex-exact-resume'
+      const tabId = `tab-${ptyId}`
+      const cacheKey = makePaneKey(tabId, LEAF_1)
+      mockStoreState.agentStatusByPaneKey[cacheKey] = {
+        state: 'working',
+        agentType: 'codex',
+        providerSession: { key: 'session_id', id: 'codex-session-1' },
+        updatedAt: Date.now() - 30 * 60 * 1000 - 1
+      }
+
+      const { binding, transport } = await connectRestoredPaneForForegroundSampling({
+        ptyId,
+        tabId
+      })
+      binding.sampleForegroundAgentOnFocus()
+      await advanceVisibleForegroundRead()
+      await vi.advanceTimersByTimeAsync(WRAPPER_RESOLVE_RETRY_MS + SECOND_WRAPPER_RETRY_MS)
+      await flushAsyncTicks()
+
+      expect(foregroundReadCallsFor(ptyId).length).toBeGreaterThanOrEqual(3)
+      expect(mockStoreState.dropAgentStatus).not.toHaveBeenCalledWith(cacheKey)
+      expect(window.api.agentStatus.reconcileEndedProcess).not.toHaveBeenCalledWith(cacheKey)
+      expect(transport.sendInputAccepted).toHaveBeenCalledWith(
+        expect.stringMatching(/codex.+resume.+codex-session-1.*\r$/)
+      )
     })
 
     it('does not sample when process identity is already known', async () => {
