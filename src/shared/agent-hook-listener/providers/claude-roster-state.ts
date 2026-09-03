@@ -68,6 +68,9 @@ export function voidClaimsOfReplacedClaudeSession(
   if (previousOwner === undefined || previousOwner === sessionId) {
     return
   }
+  // Why: only SessionStart supplies a Claude model. Never let an owner change inherit the old
+  // conversation's model while waiting for a boundary event that may never arrive.
+  state.claudeModelByPaneKey.delete(paneKey)
   // Why: a compact restart mints a SessionStart mid-turn under the same conversation; the existing
   // handler already fails closed on non-idle sources, and this must not undercut it. No other
   // allow-listed event carries a compact `trigger`, so SessionStart is the whole guard — if a
@@ -182,10 +185,23 @@ export function seedClaudeSubagentRosterFromSnapshots(
 export function seedClaudeLeadTurnFromPersistedStatus(
   state: HookListenerState,
   paneKey: string,
-  status: Pick<AgentHookEventPayload, 'payload'>,
+  status: Pick<AgentHookEventPayload, 'payload' | 'providerSession'>,
   options: { childOnlyBoundary: boolean }
 ): void {
-  if (options.childOnlyBoundary && status.payload.agentType === 'claude') {
+  if (status.payload.agentType !== 'claude') {
+    return
+  }
+  if (status.payload.model) {
+    // Why: after an Orca restart, Claude's next hook omits model just like every post-SessionStart
+    // hook. Rehydrate the cache with the row or that first live update would erase the model.
+    state.claudeModelByPaneKey.set(paneKey, status.payload.model)
+  }
+  if (status.providerSession?.key === 'session_id') {
+    // Why: the owner and model must hydrate as a pair. Without the owner anchor, a first hook from
+    // a replacement conversation would inherit the restored session's model before SessionStart.
+    state.claudeSessionOwnerByPaneKey.set(paneKey, status.providerSession.id)
+  }
+  if (options.childOnlyBoundary) {
     state.claudeLeadStateByPaneKey.set(paneKey, {
       state: 'done',
       ...(status.payload.interrupted === true ? { interrupted: true } : {}),

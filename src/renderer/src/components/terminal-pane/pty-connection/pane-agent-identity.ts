@@ -1,4 +1,8 @@
 import { agentTypeToIconAgent } from '@/lib/agent-status'
+import {
+  isExplicitAgentStatusFresh,
+  resolveCommittedTitleAgentType
+} from '@/lib/pane-agent-evidence'
 import { useAppStore } from '@/store'
 import { getConnectionId } from '@/lib/connection-context'
 import { replayIntoTerminal } from '../replay-guard'
@@ -12,11 +16,12 @@ import { createPaneForegroundAgentTracker } from '../pane-foreground-agent-track
 import { parseAppSshPtyId } from '../../../../../shared/ssh-pty-id'
 import { dispatchTerminalCommandFinishedEvent } from '@/hooks/terminal-command-finished-event'
 import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
-import { resolveCommittedTitleAgentType } from '@/lib/pane-agent-evidence'
 import type { TuiAgent } from '../../../../../shared/tui-agent'
 import { isTuiAgent, TUI_AGENT_CONFIG } from '../../../../../shared/tui-agent-config'
+import { AGENT_STATUS_STALE_AFTER_MS } from '../../../../../shared/agent-status-types'
 
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
+import { createAttachedShellAgentRecovery } from './attached-shell-agent-recovery'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
@@ -27,7 +32,11 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
   // can't drift and silently reintroduce the icon bug this fix closes.
   session.paneHasLiveHookAgentIcon = (state: ReturnType<typeof useAppStore.getState>): boolean => {
     const entry = state.agentStatusByPaneKey[session.cacheKey]
-    return entry?.state !== 'done' && Boolean(agentTypeToIconAgent(entry?.agentType))
+    return (
+      entry?.state !== 'done' &&
+      Boolean(agentTypeToIconAgent(entry?.agentType)) &&
+      isExplicitAgentStatusFresh(entry, Date.now(), AGENT_STATUS_STALE_AFTER_MS)
+    )
   }
   // Why: one ladder for both launch-agent signals; a second copy could drift.
   const resolveLaunchAgentCandidate = (
@@ -61,9 +70,13 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     const state = useAppStore.getState()
     const registeredLaunchAgent =
       state.agentLaunchConfigByPaneKey[session.cacheKey]?.identity?.agentType
+    const hookEntry = state.agentStatusByPaneKey[session.cacheKey]
+    const historicalHookAgent =
+      hookEntry?.state !== 'done' ? agentTypeToIconAgent(hookEntry?.agentType) : null
     return (
       Boolean(state.paneForegroundAgentByPaneKey[session.cacheKey]?.agent) ||
       session.paneHasLiveHookAgentIcon(state) ||
+      Boolean(historicalHookAgent) ||
       isTuiAgent(registeredLaunchAgent)
     )
   }
@@ -116,6 +129,7 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
   }
   session.visibleForegroundSamplePending = false
   session.visibleForegroundSampleSettled = false
+  const resumeExitedAgentInAttachedShell = createAttachedShellAgentRecovery(session)
   session.settleDeferredCommandFinishedStatusDrop = (
     options: { confirmedShell?: boolean } = {}
   ): void => {
@@ -173,7 +187,7 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
         shouldRefreshViewportSynchronously: session.shouldRefreshForegroundSynchronously
       })
       if (reason === 'visible-pty') {
-        useAppStore.getState().clearAgentLaunchConfig(session.cacheKey)
+        resumeExitedAgentInAttachedShell()
         return
       }
       session.settleDeferredCommandFinishedStatusDrop({ confirmedShell: true })

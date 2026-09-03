@@ -111,6 +111,7 @@ import {
 import { parseLegacyNumericPaneKey, parsePaneKey } from '../../shared/stable-pane-id'
 import type { LegacyPaneKeyAliasEntry } from '../../shared/persisted-state-types'
 import {
+  agentProviderSessionsEqual,
   getAgentResumeArgv,
   normalizeAgentProviderSession,
   type AgentProviderSessionMetadata
@@ -1270,8 +1271,22 @@ export class AgentHookServer {
         previousPromptInteractionKey: previous.promptInteractionKey,
         incomingPromptInteractionKey: payload.promptInteractionKey
       })
+    const providerSessionChanged =
+      previous?.providerSession !== undefined &&
+      payload.providerSession !== undefined &&
+      !agentProviderSessionsEqual(
+        payload.payload.agentType,
+        previous.providerSession,
+        payload.providerSession
+      )
+    const providerNewTurn =
+      payload.source !== undefined && isNewTurnEvent(payload.source, payload.hookEventName)
     const stateStartedAt =
-      previous && previous.payload.state === payload.payload.state && !commandCodeNewTurn
+      previous &&
+      previous.payload.state === payload.payload.state &&
+      !commandCodeNewTurn &&
+      !providerSessionChanged &&
+      !providerNewTurn
         ? previous.stateStartedAt
         : now
     return {

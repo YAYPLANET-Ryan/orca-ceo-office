@@ -63,6 +63,12 @@ export function normalizeClaudeEvent(
     state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
     state.claudeActiveSessionCronPaneKeys.delete(paneKey)
     state.claudeLeadStateByPaneKey.set(paneKey, { state: 'done' })
+    const model = readString(hookPayload, 'model')
+    if (model) {
+      state.claudeModelByPaneKey.set(paneKey, model)
+    } else {
+      state.claudeModelByPaneKey.delete(paneKey)
+    }
     return buildClaudeStatusPayload(state, eventName, promptText, paneKey, hookPayload, {
       stateName: 'done',
       updateToolSnapshot: true,

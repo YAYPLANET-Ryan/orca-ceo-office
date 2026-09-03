@@ -35,6 +35,53 @@ function stop(
 // A replacement session is the only evidence Orca gets for the exits Claude emits no terminating
 // hook for (/clear, relaunch, resume). See PLAN-STA-4612 §4.1.
 describe('Claude session replacement voids the replaced session claims', () => {
+  it('keeps the SessionStart model on later hooks from the same session', () => {
+    const state = createHookListenerState()
+    const paneKey = makePaneKey('model-cache', LEAF_ID)
+
+    const started = claudeEvent(state, paneKey, {
+      hook_event_name: 'SessionStart',
+      session_id: SESSION_A,
+      source: 'startup',
+      model: 'claude-opus-4-1'
+    })
+    const working = claudeEvent(state, paneKey, {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: SESSION_A,
+      prompt: 'continue'
+    })
+    const stopped = stop(state, paneKey, SESSION_A)
+
+    expect(started?.payload.model).toBe('claude-opus-4-1')
+    expect(working?.payload.model).toBe('claude-opus-4-1')
+    expect(stopped?.payload.model).toBe('claude-opus-4-1')
+  })
+
+  it('does not carry a cached model into a replacement Claude session', () => {
+    const state = createHookListenerState()
+    const paneKey = makePaneKey('model-replacement', LEAF_ID)
+
+    claudeEvent(state, paneKey, {
+      hook_event_name: 'SessionStart',
+      session_id: SESSION_A,
+      source: 'startup',
+      model: 'claude-opus-4-1'
+    })
+    const replacedWithoutBoundary = claudeEvent(state, paneKey, {
+      hook_event_name: 'PostToolUse',
+      session_id: SESSION_B
+    })
+    const replacementStart = claudeEvent(state, paneKey, {
+      hook_event_name: 'SessionStart',
+      session_id: 'session-c',
+      source: 'resume',
+      model: 'claude-sonnet-4-5'
+    })
+
+    expect(replacedWithoutBoundary?.payload.model).toBeUndefined()
+    expect(replacementStart?.payload.model).toBe('claude-sonnet-4-5')
+  })
+
   it('voids a session cron gate held by the previous session', () => {
     const state = createHookListenerState()
     const paneKey = makePaneKey('cron-gate', LEAF_ID)

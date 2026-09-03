@@ -126,6 +126,7 @@ describe('agent hook extraction boundaries', () => {
       state.antigravityCompletedTranscriptByPaneKey,
       state.claudeSubagentRosterByPaneKey,
       state.claudeLeadStateByPaneKey,
+      state.claudeModelByPaneKey,
       state.codexSubagentRosterByPaneKey,
       state.codexSubagentTranscriptByPaneKey,
       state.codexLeadStateByPaneKey
@@ -188,6 +189,7 @@ describe('agent hook extraction boundaries', () => {
     state.ampCompletedCacheKeys.add(scoped)
     state.ampCompletedCacheKeys.add(sibling)
     state.claudeLeadStateByPaneKey.set(PANE, { state: 'working' })
+    state.claudeModelByPaneKey.set(PANE, 'claude-opus-4-1')
     state.codexLeadStateByPaneKey.set(PANE, { state: 'working' })
 
     clearPaneCacheState(state, PANE)
@@ -201,6 +203,7 @@ describe('agent hook extraction boundaries', () => {
     expect(state.ampCompletedCacheKeys.has(scoped)).toBe(false)
     expect(state.ampCompletedCacheKeys.has(sibling)).toBe(true)
     expect(state.claudeLeadStateByPaneKey.has(PANE)).toBe(false)
+    expect(state.claudeModelByPaneKey.has(PANE)).toBe(false)
     expect(state.codexLeadStateByPaneKey.has(PANE)).toBe(false)
   })
 
