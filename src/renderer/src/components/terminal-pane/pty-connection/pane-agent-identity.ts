@@ -71,7 +71,10 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     const registeredLaunchAgent =
       state.agentLaunchConfigByPaneKey[session.cacheKey]?.identity?.agentType
     const hookEntry = state.agentStatusByPaneKey[session.cacheKey]
-    const historicalHookAgent = agentTypeToIconAgent(hookEntry?.agentType)
+    const historicalHookAgent =
+      hookEntry?.state !== 'done' || hookEntry.providerSession
+        ? agentTypeToIconAgent(hookEntry?.agentType)
+        : null
     const savedAgent = session.getSleepingRecordForPane(state)?.record.agent
     return (
       Boolean(state.paneForegroundAgentByPaneKey[session.cacheKey]?.agent) ||
