@@ -302,6 +302,7 @@ export type AgentStatusSlice = {
   clearSleepingAgentSession: (paneKey: string) => void
   clearSleepingAgentSessionsByPaneKey: (paneKeys: readonly string[]) => void
   setSleepingAgentAutomaticResumeBlocked: (paneKey: string, blocked: boolean) => void
+  markSleepingAgentSessionExited: (paneKey: string) => void
   clearSleepingAgentSessionsByWorktree: (worktreeId: string) => void
   pruneSleepingAgentSessions: (validWorktreeIds: Set<string>) => void
 
@@ -678,6 +679,9 @@ function carryOverAutomaticResumeBlock(
   record: SleepingAgentSessionRecord,
   previous: SleepingAgentSessionRecord | undefined
 ): void {
+  if (previous?.requiresManualResume && recoveryRecordTargetsSameSession(previous, record)) {
+    record.requiresManualResume = true
+  }
   if (
     previous?.automaticResumeBlockedBy === 'legacy-orchestration-worker' &&
     previous.agent === record.agent &&
@@ -888,6 +892,7 @@ function sleepingRecordsEquivalentIgnoringCaptureTime(
     existing.lastAssistantMessage === next.lastAssistantMessage &&
     existing.interrupted === next.interrupted &&
     existing.origin === next.origin &&
+    existing.requiresManualResume === next.requiresManualResume &&
     launchConfigsEqual(existing.launchConfig, next.launchConfig)
   )
 }
@@ -907,6 +912,7 @@ function recoveryRecordMatches(
     existing.tabId === next.tabId &&
     existing.state === next.state &&
     existing.interrupted === next.interrupted &&
+    existing.requiresManualResume === next.requiresManualResume &&
     agentProviderSessionsEqual(existing.agent, existing.providerSession, next.providerSession) &&
     launchConfigsEqual(existing.launchConfig, next.launchConfig)
   )
@@ -3240,6 +3246,9 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             origin
           })
           const existing = next[entry.paneKey]
+          if (record) {
+            carryOverAutomaticResumeBlock(record, existing)
+          }
           // Why: a periodic timer must not downgrade a confirmed-quit shutdown snapshot; a live hook event supersedes it elsewhere.
           if (
             mode === 'periodic' &&
@@ -3260,6 +3269,20 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
 
     clearSleepingAgentSession: (paneKey) => clearSleepingAgentSessionsByPaneKey([paneKey]),
     clearSleepingAgentSessionsByPaneKey,
+    markSleepingAgentSessionExited: (paneKey) => {
+      set((s) => {
+        const record = s.sleepingAgentSessionsByPaneKey[paneKey]
+        if (!record || record.requiresManualResume) {
+          return s
+        }
+        return {
+          sleepingAgentSessionsByPaneKey: {
+            ...s.sleepingAgentSessionsByPaneKey,
+            [paneKey]: { ...record, requiresManualResume: true }
+          }
+        }
+      })
+    },
     setSleepingAgentAutomaticResumeBlocked: (paneKey, blocked) => {
       set((s) => {
         const current = s.sleepingAgentSessionsByPaneKey[paneKey]

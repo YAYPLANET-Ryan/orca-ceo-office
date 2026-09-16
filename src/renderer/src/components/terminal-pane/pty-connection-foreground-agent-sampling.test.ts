@@ -652,55 +652,94 @@ describe('connectPanePty', () => {
       expect(foregroundReadCallsFor(ptyId)).toHaveLength(settledReadCount)
     })
 
-    it('does not sample when a live hook row already supplies pane identity', async () => {
+    it.each([
+      { state: 'working', foreground: 'codex' },
+      { state: 'done', foreground: 'codex' },
+      { state: 'done', foreground: null }
+    ] as const)('keeps $state / $foreground', async ({ state, foreground }) => {
       vi.useFakeTimers()
-      const getForegroundProcess = vi.mocked(window.api.pty.getForegroundProcess)
-      getForegroundProcess.mockResolvedValue('codex')
+      vi.mocked(window.api.pty.getForegroundProcess).mockResolvedValue(foreground)
       const ptyId = 'pty-hook-identity-no-sample'
       const tabId = `tab-${ptyId}`
       mockStoreState.agentStatusByPaneKey[makePaneKey(tabId, LEAF_1)] = {
-        state: 'working',
+        state,
         agentType: 'codex',
+        providerSession: { key: 'session_id', id: 'codex-session-1' },
         updatedAt: Date.now()
       }
 
-      await connectRestoredPaneForForegroundSampling({ ptyId, tabId })
+      const { transport } = await connectRestoredPaneForForegroundSampling({ ptyId, tabId })
       await advanceVisibleForegroundRead()
-
-      expect(foregroundReadCallsFor(ptyId)).toHaveLength(0)
-    })
-
-    it('resumes the exact provider session when a stale hook row reattaches at a shell', async () => {
-      vi.useFakeTimers()
-      vi.setSystemTime(2_000_000_000)
-      const getForegroundProcess = vi.mocked(window.api.pty.getForegroundProcess)
-      getForegroundProcess.mockResolvedValue('powershell.exe')
-      const ptyId = 'pty-stale-codex-exact-resume'
-      const tabId = `tab-${ptyId}`
-      const cacheKey = makePaneKey(tabId, LEAF_1)
-      mockStoreState.agentStatusByPaneKey[cacheKey] = {
-        state: 'working',
-        agentType: 'codex',
-        providerSession: { key: 'session_id', id: 'codex-session-1' },
-        updatedAt: Date.now() - 30 * 60 * 1000 - 1
+      if (state === 'working') {
+        expect(foregroundReadCallsFor(ptyId)).toHaveLength(0)
       }
-
-      const { binding, transport } = await connectRestoredPaneForForegroundSampling({
-        ptyId,
-        tabId
-      })
-      binding.sampleForegroundAgentOnFocus()
-      await advanceVisibleForegroundRead()
       await vi.advanceTimersByTimeAsync(WRAPPER_RESOLVE_RETRY_MS + SECOND_WRAPPER_RETRY_MS)
       await flushAsyncTicks()
-
-      expect(foregroundReadCallsFor(ptyId).length).toBeGreaterThanOrEqual(3)
-      expect(mockStoreState.dropAgentStatus).not.toHaveBeenCalledWith(cacheKey)
-      expect(window.api.agentStatus.reconcileEndedProcess).not.toHaveBeenCalledWith(cacheKey)
-      expect(transport.sendInputAccepted).toHaveBeenCalledWith(
-        expect.stringMatching(/codex.+resume.+codex-session-1.*\r$/)
-      )
+      expect(transport.sendInputAccepted).not.toHaveBeenCalled()
+      expect(mockStoreState.dropAgentStatus).not.toHaveBeenCalled()
     })
+
+    it.each([
+      { state: 'working', restoredUnconfirmed: false, age: 30 * 60 * 1000 + 1, recordOnly: false },
+      { state: 'working', restoredUnconfirmed: true, age: 1000, recordOnly: false },
+      { state: 'done', restoredUnconfirmed: false, age: 30 * 60 * 1000 + 1, recordOnly: false },
+      { state: 'done', restoredUnconfirmed: false, age: 1000, recordOnly: false },
+      { state: 'done', restoredUnconfirmed: false, age: 1000, recordOnly: true }
+    ] as const)(
+      'resumes the exact $state provider session at a restored shell ($age ms; saved only: $recordOnly)',
+      async ({ state, restoredUnconfirmed, age, recordOnly }) => {
+        vi.useFakeTimers()
+        vi.setSystemTime(2_000_000_000)
+        const getForegroundProcess = vi.mocked(window.api.pty.getForegroundProcess)
+        getForegroundProcess.mockResolvedValue('powershell.exe')
+        const ptyId = 'pty-stale-codex-exact-resume'
+        const tabId = `tab-${ptyId}`
+        const cacheKey = makePaneKey(tabId, LEAF_1)
+        mockStoreState.agentStatusByPaneKey[cacheKey] = {
+          state,
+          agentType: 'codex',
+          providerSession: { key: 'session_id', id: 'codex-session-1' },
+          updatedAt: Date.now() - age,
+          restoredUnconfirmed
+        }
+        if (recordOnly) {
+          delete mockStoreState.agentStatusByPaneKey[cacheKey]
+          mockStoreState.sleepingAgentSessionsByPaneKey = {
+            [cacheKey]: {
+              paneKey: cacheKey,
+              tabId,
+              worktreeId: 'wt-1',
+              agent: 'codex',
+              providerSession: { key: 'session_id', id: 'codex-session-1' },
+              state: 'done',
+              origin: 'live',
+              capturedAt: Date.now() - age,
+              updatedAt: Date.now() - age,
+              launchConfig: { agentArgs: '--model gpt-original', agentEnv: {} }
+            }
+          }
+        }
+
+        const restored = await connectRestoredPaneForForegroundSampling({ ptyId, tabId })
+        restored.binding.sampleForegroundAgentOnFocus()
+        await advanceVisibleForegroundRead()
+        await vi.advanceTimersByTimeAsync(WRAPPER_RESOLVE_RETRY_MS + SECOND_WRAPPER_RETRY_MS)
+        await flushAsyncTicks()
+
+        expect(foregroundReadCallsFor(ptyId).length).toBeGreaterThanOrEqual(3)
+        expect(mockStoreState.dropAgentStatus).not.toHaveBeenCalledWith(cacheKey)
+        expect(window.api.agentStatus.reconcileEndedProcess).not.toHaveBeenCalledWith(cacheKey)
+        expect(restored.transport.sendInputAccepted).toHaveBeenCalledWith(
+          expect.stringMatching(/codex.+resume.+codex-session-1.*\r$/)
+        )
+        if (recordOnly) {
+          expect(restored.transport.sendInputAccepted?.mock.calls[0]?.[0]).toContain('gpt-original')
+        }
+        restored.binding.sampleForegroundAgentOnFocus()
+        await advanceVisibleForegroundRead()
+        expect(restored.transport.sendInputAccepted).toHaveBeenCalledTimes(1)
+      }
+    )
 
     it('does not sample when process identity is already known', async () => {
       vi.useFakeTimers()

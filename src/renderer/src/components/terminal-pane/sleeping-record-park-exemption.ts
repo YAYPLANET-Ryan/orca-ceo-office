@@ -23,7 +23,11 @@ export function selectSleepingRecordParkExemptTabIds(
     if (!record || record.worktreeId !== worktreeId) {
       continue
     }
-    if (record.automaticResumeBlockedBy || isPassiveCompletedHibernationEvidence(record)) {
+    if (
+      record.automaticResumeBlockedBy ||
+      record.requiresManualResume ||
+      isPassiveCompletedHibernationEvidence(record)
+    ) {
       continue
     }
     const tabId = record.tabId ?? record.paneKey.slice(0, record.paneKey.indexOf(':'))

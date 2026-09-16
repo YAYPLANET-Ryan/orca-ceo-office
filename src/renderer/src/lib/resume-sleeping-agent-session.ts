@@ -197,7 +197,10 @@ export function resumeSleepingAgentSessionsForWorktree(
     if (options?.skipClaimKeys?.has(claimKey)) {
       continue
     }
-    if (record.automaticResumeBlockedBy === 'legacy-orchestration-worker') {
+    if (
+      record.automaticResumeBlockedBy === 'legacy-orchestration-worker' ||
+      record.requiresManualResume
+    ) {
       continue
     }
     if (isInvalidWorktreeActivationRecord(record)) {

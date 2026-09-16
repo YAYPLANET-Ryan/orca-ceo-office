@@ -72,11 +72,15 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
       state.agentLaunchConfigByPaneKey[session.cacheKey]?.identity?.agentType
     const hookEntry = state.agentStatusByPaneKey[session.cacheKey]
     const historicalHookAgent =
-      hookEntry?.state !== 'done' ? agentTypeToIconAgent(hookEntry?.agentType) : null
+      hookEntry?.state !== 'done' || hookEntry.providerSession
+        ? agentTypeToIconAgent(hookEntry?.agentType)
+        : null
+    const savedAgent = session.getSleepingRecordForPane(state)?.record.agent
     return (
       Boolean(state.paneForegroundAgentByPaneKey[session.cacheKey]?.agent) ||
       session.paneHasLiveHookAgentIcon(state) ||
       Boolean(historicalHookAgent) ||
+      isTuiAgent(savedAgent) ||
       isTuiAgent(registeredLaunchAgent)
     )
   }
@@ -121,6 +125,8 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     if (current && current.acceptedStatusSeq !== armedAcceptedStatusSeq) {
       return
     }
+    // Why: zero/nonzero exit codes cannot distinguish /exit or Ctrl+C from a crash.
+    useAppStore.getState().markSleepingAgentSessionExited(session.cacheKey)
     // Why: main-side only. The renderer row and launch config are already owned by the deferred
     // drop above; what that path cannot reach is the hook server's per-pane Claude latches, which
     // `agentStatus:drop` deliberately preserves for a still-live pane. Main echoes its own clear
