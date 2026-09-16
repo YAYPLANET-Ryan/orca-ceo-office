@@ -24,6 +24,9 @@ export function bindBuildColdRestoreAgentResumeStartup(session: ConnectPanePtySe
     const state = useAppStore.getState()
     const entry = state.agentStatusByPaneKey[session.cacheKey]
     const sleepingRecord = session.getSleepingRecordForPane(state)?.record
+    if (sleepingRecord?.requiresManualResume) {
+      return true
+    }
     const useLiveEntry = entry && (entry.state !== 'done' || !sleepingRecord)
     const agent =
       (useLiveEntry ? entry.agentType : sleepingRecord?.agent) ??
@@ -48,7 +51,7 @@ export function bindBuildColdRestoreAgentResumeStartup(session: ConnectPanePtySe
     const entry = state.agentStatusByPaneKey[session.cacheKey]
     const sleepingRecordEntry = session.getSleepingRecordForPane(state)
     const sleepingRecord = sleepingRecordEntry?.record
-    if (session.isLegacyWorkerAutomaticResumeBlocked()) {
+    if (session.isLegacyWorkerAutomaticResumeBlocked() || sleepingRecord?.requiresManualResume) {
       return null
     }
     // Why: completed turns still identify resumable conversations when no durable record was captured.

@@ -21,7 +21,7 @@ jobs:
     env:
       ORCA_UPDATE_OWNER: YAYPLANET-Ryan
       ORCA_UPDATE_REPO: orca-ceo-office
-      ORCA_LOCAL_BUILD_VERSION: 1.4.191-ceo.20260916.1
+      ORCA_LOCAL_BUILD_VERSION: 1.4.191-ceo.20260916.2
       ORCA_REUSE_PREPARED_NATIVE_RUNTIME: '1'
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +47,10 @@ jobs:
           src/renderer/src/components/terminal-pane/pane-foreground-agent-tracker.test.ts
           src/renderer/src/lib/wake-sleeping-agents-live-done.test.ts
           src/renderer/src/lib/resume-sleeping-agent-session.test.ts
+          src/renderer/src/lib/resume-exited-agent-session.test.ts
+          src/renderer/src/store/slices/agent-status-exit-continuity.test.ts
+          src/renderer/src/components/terminal-pane/pty-connection/attached-shell-agent-recovery.test.ts
+          src/renderer/src/components/terminal-pane/pty-connection-command-finished-cleanup.test.ts
       - name: Build desktop and installer
         run: |
           pnpm run build:desktop

@@ -7,16 +7,34 @@ import type { ConnectPanePtySession } from './connect-pane-pty-session'
 /** Resume the saved conversation after a restored local pane is confirmed at its shell. */
 export function createAttachedShellAgentRecovery(session: ConnectPanePtySession): () => void {
   let resumeAttempted = false
-  const retire = (): void => {
-    useAppStore.getState().dropAgentStatus(session.cacheKey)
-    window.api?.agentStatus?.reconcileEndedProcess?.(session.cacheKey)
-  }
 
   return (): void => {
-    if (resumeAttempted) {
+    if (resumeAttempted || session.disposed) {
       return
     }
+    resumeAttempted = true
+    const ptyId = session.transport.getPtyId()
+    const generation = session.transportStreamGeneration
+    const lastInputAt = session.lastTerminalInputAt
     const entry = useAppStore.getState().agentStatusByPaneKey[session.cacheKey]
+    const saved = session.getSleepingRecordForPane(useAppStore.getState())
+    const isCurrent = (): boolean =>
+      !session.disposed &&
+      session.transport.getPtyId() === ptyId &&
+      session.transportStreamGeneration === generation &&
+      session.lastTerminalInputAt === lastInputAt &&
+      useAppStore.getState().agentStatusByPaneKey[session.cacheKey] === entry &&
+      session.getSleepingRecordForPane(useAppStore.getState())?.record === saved?.record
+    const retire = (): void => {
+      // Why: delayed input acknowledgements must not retire a replacement pane or newer hook row.
+      if (!isCurrent()) {
+        return
+      }
+      const state = useAppStore.getState()
+      state.markSleepingAgentSessionExited(saved?.paneKey ?? session.cacheKey)
+      state.dropAgentStatus(session.cacheKey)
+      window.api?.agentStatus?.reconcileEndedProcess?.(session.cacheKey)
+    }
     if (
       entry &&
       entry.state !== 'done' &&
@@ -31,10 +49,12 @@ export function createAttachedShellAgentRecovery(session: ConnectPanePtySession)
       retire()
       return
     }
-    resumeAttempted = true
     void session.transport
       .sendInputAccepted(`${startup.command}\r`)
       .then((accepted: boolean) => {
+        if (!isCurrent()) {
+          return
+        }
         if (!accepted) {
           retire()
           return

@@ -8,6 +8,7 @@ import { cleanupE2EDaemons } from './helpers/electron-process-shutdown'
 import { ensureTerminalVisible, waitForSessionReady } from './helpers/store'
 import {
   execInTerminal,
+  getTerminalContent,
   waitForActivePaneHookDescriptor,
   waitForActivePanePtyId,
   waitForActiveTerminalManager,
@@ -19,7 +20,7 @@ import { DEFAULT_LOCAL_ORCA_PROFILE_ID } from '../../src/shared/orca-profiles'
 const SESSION_ID = 'e2e-completed-conversation'
 const MODEL = 'gpt-continuity-test'
 
-function useHermeticResume(userDataDir: string): void {
+function useHermeticResume(userDataDir: string, observedExit: boolean): void {
   const dataPath = path.join(
     userDataDir,
     'profiles',
@@ -29,10 +30,11 @@ function useHermeticResume(userDataDir: string): void {
   const data = JSON.parse(readFileSync(dataPath, 'utf8'))
   const records = data.workspaceSession.sleepingAgentSessionsByPaneKey as Record<
     string,
-    { providerSession?: { id: string }; launchConfig?: unknown }
+    { providerSession?: { id: string }; launchConfig?: unknown; requiresManualResume?: boolean }
   >
   const record = Object.values(records).find((entry) => entry.providerSession?.id === SESSION_ID)
   expect(record, 'the completed conversation must survive on disk').toBeDefined()
+  expect(record?.requiresManualResume === true).toBe(observedExit)
   // Why: echo exercises the actual shell and resume command without credentials or a model call.
   record!.launchConfig = {
     agentCommand: `echo '--model' '${MODEL}' '-c' 'model_reasoning_effort=medium'`,
@@ -42,8 +44,13 @@ function useHermeticResume(userDataDir: string): void {
   writeFileSync(dataPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
 }
 
-for (const coldRestart of [false, true]) {
-  test(`preserves a completed conversation after ${coldRestart ? 'daemon loss' : 'app restart'}`, async (// oxlint-disable-next-line no-empty-pattern -- Restart tests own both Electron launches instead of using the single-app fixture.
+for (const [coldRestart, observedExit] of [
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true]
+]) {
+  test(`preserves a ${observedExit ? 'manually resumable exited' : 'completed'} conversation after ${coldRestart ? 'daemon loss' : 'app restart'}`, async (// oxlint-disable-next-line no-empty-pattern -- Restart tests own both Electron launches instead of using the single-app fixture.
   {}, testInfo) => {
     test.setTimeout(180_000)
     const repoPath = readFileSync(TEST_REPO_PATH_FILE, 'utf8').trim()
@@ -64,7 +71,7 @@ for (const coldRestart of [false, true]) {
       await waitForTerminalOutput(first.page, marker)
       const transcriptPath = session.seedCodexResumeRollout(SESSION_ID, repoPath)
       await first.page.evaluate(
-        ({ paneKey, worktreeId, id, transcriptPath }) => {
+        ({ paneKey, worktreeId, id, transcriptPath, observedExit }) => {
           window.__store
             ?.getState()
             .setAgentStatus(
@@ -75,12 +82,16 @@ for (const coldRestart of [false, true]) {
               { worktreeId },
               { providerSession: { key: 'session_id', id, transcriptPath } }
             )
+          if (observedExit) {
+            window.__store?.getState().markSleepingAgentSessionExited(paneKey)
+            window.__store?.getState().dropAgentStatus(paneKey)
+          }
         },
-        { ...descriptor, id: SESSION_ID, transcriptPath }
+        { ...descriptor, id: SESSION_ID, transcriptPath, observedExit }
       )
       await session.close(app)
       app = null
-      useHermeticResume(session.userDataDir)
+      useHermeticResume(session.userDataDir, observedExit)
       if (coldRestart) {
         // Why: stop only this isolated fixture's daemon to model a computer restart.
         await cleanupE2EDaemons(session.userDataDir)
@@ -92,9 +103,23 @@ for (const coldRestart of [false, true]) {
       await waitForActiveTerminalManager(second.page, 30_000)
       await waitForPaneCount(second.page, 1, 30_000)
       await waitForTerminalOutput(second.page, marker, 30_000)
-      await waitForTerminalOutput(second.page, SESSION_ID, 30_000)
-      await waitForTerminalOutput(second.page, MODEL, 30_000)
-      await waitForTerminalOutput(second.page, 'model_reasoning_effort=medium', 30_000)
+      if (observedExit) {
+        // Why: a negative resume assertion must outlive the full visible-process confirmation ladder.
+        await second.page.waitForTimeout(8500)
+        expect(await getTerminalContent(second.page, 20_000)).not.toContain(SESSION_ID)
+        if (coldRestart) {
+          await expect(
+            second.page.getByText('--- previous session not resumed; restored shell only ---')
+          ).toBeVisible()
+        }
+        const shellPtyId = await waitForActivePanePtyId(second.page)
+        await execInTerminal(second.page, shellPtyId, 'echo MANUAL_RESUME_SHELL_READY')
+        await waitForTerminalOutput(second.page, 'MANUAL_RESUME_SHELL_READY')
+      } else {
+        await waitForTerminalOutput(second.page, SESSION_ID, 30_000)
+        await waitForTerminalOutput(second.page, MODEL, 30_000)
+        await waitForTerminalOutput(second.page, 'model_reasoning_effort=medium', 30_000)
+      }
       await second.page.screenshot({ path: testInfo.outputPath('restored-conversation.png') })
     } finally {
       if (app) {

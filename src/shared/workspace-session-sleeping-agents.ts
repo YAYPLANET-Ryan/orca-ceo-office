@@ -100,6 +100,7 @@ const sleepingAgentSessionRecordSchema = z
     launchConfig: sleepingAgentLaunchConfigSchema.optional(),
     origin: z.enum(['worktree-sleep', 'quit', 'live']).optional(),
     automaticResumeBlockedBy: z.enum(['legacy-orchestration-worker']).optional(),
+    requiresManualResume: z.boolean().optional(),
     restoreOnTabOpenOnly: z.boolean().optional()
   })
   .refine(

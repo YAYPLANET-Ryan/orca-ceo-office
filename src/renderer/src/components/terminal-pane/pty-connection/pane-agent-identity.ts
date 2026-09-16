@@ -125,6 +125,8 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     if (current && current.acceptedStatusSeq !== armedAcceptedStatusSeq) {
       return
     }
+    // Why: zero/nonzero exit codes cannot distinguish /exit or Ctrl+C from a crash.
+    useAppStore.getState().markSleepingAgentSessionExited(session.cacheKey)
     // Why: main-side only. The renderer row and launch config are already owned by the deferred
     // drop above; what that path cannot reach is the hook server's per-pane Claude latches, which
     // `agentStatus:drop` deliberately preserves for a still-live pane. Main echoes its own clear
