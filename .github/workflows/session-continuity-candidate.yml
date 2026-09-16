@@ -1,0 +1,68 @@
+name: Session continuity Windows candidate
+
+# Why: produce an inspectable installer without publishing an update or changing main.
+on:
+  push:
+    branches: [ryan/ws-pc-orca-reboot-source-20260916]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: session-continuity-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+    runs-on: windows-2022
+    timeout-minutes: 35
+    env:
+      ORCA_UPDATE_OWNER: YAYPLANET-Ryan
+      ORCA_UPDATE_REPO: orca-ceo-office
+      ORCA_LOCAL_BUILD_VERSION: 1.4.191-ceo.20260916.1
+      ORCA_REUSE_PREPARED_NATIVE_RUNTIME: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Build patched terminal library
+        env:
+          npm_config_build_from_source: 'true'
+        run: pnpm rebuild node-pty
+      - name: Test restart recovery
+        run: >-
+          pnpm exec vitest run --config config/vitest.config.ts
+          src/renderer/src/components/terminal-pane/pty-connection-foreground-agent-sampling.test.ts
+          src/renderer/src/components/terminal-pane/pty-connection-cold-restore-agent-resume.test.ts
+          src/renderer/src/components/terminal-pane/pty-connection-cold-restore-resume-command.test.ts
+          src/renderer/src/components/terminal-pane/pane-foreground-agent-tracker.test.ts
+          src/renderer/src/lib/wake-sleeping-agents-live-done.test.ts
+          src/renderer/src/lib/resume-sleeping-agent-session.test.ts
+      - name: Build desktop and installer
+        run: |
+          pnpm run build:desktop
+          node config/scripts/ensure-native-runtime.mjs --runtime=electron
+          pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish never
+      - name: Verify packaged runtime
+        run: |
+          pnpm run smoke:windows-pty-native-capability -- --exe=dist/win-unpacked/Orca.exe
+          node config/scripts/smoke-packaged-cli.mjs --app-dir=dist/win-unpacked
+          Get-FileHash dist/orca-windows-setup.exe -Algorithm SHA256 | Format-List | Out-File dist/installer-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orca-restart-continuity-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            dist/orca-windows-setup.exe
+            dist/orca-windows-setup.exe.blockmap
+            dist/installer-sha256.txt

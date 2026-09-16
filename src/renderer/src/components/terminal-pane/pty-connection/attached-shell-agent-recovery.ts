@@ -4,7 +4,7 @@ import { AGENT_STATUS_STALE_AFTER_MS } from '../../../../../shared/agent-status-
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
-/** Resume a stale nonterminal provider session in a surviving local shell, or retire its ghost row. */
+/** Resume the saved conversation after a restored local pane is confirmed at its shell. */
 export function createAttachedShellAgentRecovery(session: ConnectPanePtySession): () => void {
   let resumeAttempted = false
   const retire = (): void => {
@@ -18,13 +18,14 @@ export function createAttachedShellAgentRecovery(session: ConnectPanePtySession)
     }
     const entry = useAppStore.getState().agentStatusByPaneKey[session.cacheKey]
     if (
-      !entry ||
-      entry.state === 'done' ||
+      entry &&
+      entry.state !== 'done' &&
       isExplicitAgentStatusFresh(entry, Date.now(), AGENT_STATUS_STALE_AFTER_MS)
     ) {
       retire()
       return
     }
+    // Why: done means the last turn finished, not that its conversation should be abandoned.
     const startup = session.buildColdRestoreAgentResumeStartup()
     if (!startup || !session.transport.sendInputAccepted) {
       retire()
