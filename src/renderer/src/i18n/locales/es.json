@@ -1,4 +1,17 @@
 {
+  "sessionRecovery": {
+    "context": "Last saved context",
+    "contextNote": "Saved excerpts, not a complete handoff. Check the task checkpoint before continuing work.",
+    "uncertain": "Delivery could not be confirmed. Check the terminal before retrying.",
+    "submitted": "Resume requested; waiting for the agent.",
+    "changed": "Terminal input changed. Finish or cancel the command before resuming.",
+    "unavailable": "Cannot safely resume here yet. Your saved conversation is retained.",
+    "ready": "Agent exited. Your conversation is saved.",
+    "continue": "Continue conversation",
+    "savedTabs": "Saved conversations",
+    "fold": "Fold ended agent tabs",
+    "showAll": "Show all tabs"
+  },
   "app": {
     "recoverableError": {
       "rootTitle": "Orca tuvo un error de renderizado.",

@@ -3132,6 +3132,7 @@ function TerminalPane(
           activePane.container
         )}
       <SessionRestoredBannerPortals
+        tabId={tabId}
         panes={managerRef.current?.getPanes() ?? []}
         paneIds={sessionRestoredBannerPaneIds}
       />

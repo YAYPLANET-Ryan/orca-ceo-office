@@ -135,3 +135,11 @@ describe('attached shell recovery safety', () => {
     expect(state.markSleepingAgentSessionExited).toHaveBeenCalledExactlyOnceWith('tab:leaf')
   })
 })
+
+it('never appends automatic resume to a draft shell command', () => {
+  const f = setup()
+  f.session.lastTerminalInputAt = 100
+  createAttachedShellAgentRecovery(f.session)()
+  expect(f.sendInputAccepted).not.toHaveBeenCalled()
+  expect(state.markSleepingAgentSessionExited).toHaveBeenCalled()
+})

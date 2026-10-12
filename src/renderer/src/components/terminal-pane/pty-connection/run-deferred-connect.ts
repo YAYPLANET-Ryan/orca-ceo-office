@@ -7,6 +7,7 @@ import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 import { bindBuildColdRestoreAgentResumeStartup } from './cold-restore-resume-startup'
+import { installManualConversationRecovery } from './manual-conversation-recovery'
 
 import { bindPrepaintParkedSshSnapshot } from './ssh-snapshot-prepaint'
 import { bindForegroundOutputRefresh } from './foreground-output-refresh'
@@ -96,6 +97,7 @@ export function installRunDeferredConnect(session: ConnectPanePtySession): void 
     bindRegisterPaneSerializer(session)
     bindSettlePaneSerializer(session)
     bindBuildColdRestoreAgentResumeStartup(session)
+    installManualConversationRecovery(session)
     bindDeferredColdRestoreAndSnapshot(session)
     session.canUseMainBufferSnapshot = function (ptyId: string | null): ptyId is string {
       return Boolean(ptyId) && !isRemoteRuntimePtyId(ptyId)

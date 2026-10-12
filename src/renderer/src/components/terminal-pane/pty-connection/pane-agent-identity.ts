@@ -180,6 +180,12 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     publish: (entry) => useAppStore.getState().setPaneForegroundAgent(session.cacheKey, entry),
     hasKnownAgentIdentity: session.paneHasKnownAgentIdentity,
     onConfirmedShellForeground: (reason) => {
+      if (reason === 'command-finished') {
+        session.recoveryShellSequence = (session.recoveryShellSequence ?? 0) + 1
+      }
+      if (reason === 'visible-pty' && !Number.isFinite(session.lastTerminalInputAt)) {
+        session.recoveryShellInputAt = session.lastTerminalInputAt
+      }
       session.clearStaleAgentTabTitleOnConfirmedShell()
       // Why: a hard-killed agent leaves mouse/focus/kitty modes armed, and the
       // surviving shell then receives pointer moves as typed SGR reports; the
@@ -223,6 +229,7 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
   // routing both through this handler keeps the drop/interrupt semantics
   // identical across authority modes.
   session.handleCommandFinished = (bestEffortExitCode: number | null): void => {
+    session.recoveryShellInputAt = session.lastTerminalInputAt
     session.clearCommandInferredPaneAgentAfterPtySideEffects()
     session.visibleForegroundSamplePending = false
     const shouldDeferStatusDrop = session.paneForegroundAgentTracker.onCommandFinished()

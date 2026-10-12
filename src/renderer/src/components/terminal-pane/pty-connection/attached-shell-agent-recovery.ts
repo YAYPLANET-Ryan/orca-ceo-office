@@ -43,6 +43,10 @@ export function createAttachedShellAgentRecovery(session: ConnectPanePtySession)
       retire()
       return
     }
+    if (Number.isFinite(lastInputAt) && session.recoveryShellInputAt !== lastInputAt) {
+      retire()
+      return
+    }
     // Why: done means the last turn finished, not that its conversation should be abandoned.
     const startup = session.buildColdRestoreAgentResumeStartup()
     if (!startup || !session.transport.sendInputAccepted) {

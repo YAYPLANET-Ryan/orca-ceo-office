@@ -43,7 +43,9 @@ export function bindBuildColdRestoreAgentResumeStartup(session: ConnectPanePtySe
     // correct historical session instead of losing track of it behind a clone.
     return providerSession === null
   }
-  session.buildColdRestoreAgentResumeStartup = (): ColdRestoreAgentResumeStartup | null => {
+  session.buildColdRestoreAgentResumeStartup = (options?: {
+    manual?: boolean
+  }): ColdRestoreAgentResumeStartup | null => {
     if (session.pendingStartupCommand) {
       return null
     }
@@ -51,7 +53,10 @@ export function bindBuildColdRestoreAgentResumeStartup(session: ConnectPanePtySe
     const entry = state.agentStatusByPaneKey[session.cacheKey]
     const sleepingRecordEntry = session.getSleepingRecordForPane(state)
     const sleepingRecord = sleepingRecordEntry?.record
-    if (session.isLegacyWorkerAutomaticResumeBlocked() || sleepingRecord?.requiresManualResume) {
+    if (
+      session.isLegacyWorkerAutomaticResumeBlocked() ||
+      (sleepingRecord?.requiresManualResume && !options?.manual)
+    ) {
       return null
     }
     // Why: completed turns still identify resumable conversations when no durable record was captured.

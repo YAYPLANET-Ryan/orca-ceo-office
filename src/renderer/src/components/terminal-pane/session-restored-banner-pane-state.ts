@@ -1,6 +1,7 @@
 import type { ManagedPane } from '@/lib/pane-manager/pane-manager'
 
-export type SessionRestoredBannerPane = Pick<ManagedPane, 'id' | 'container'>
+export type SessionRestoredBannerPane = Pick<ManagedPane, 'id' | 'container'> &
+  Partial<Pick<ManagedPane, 'leafId'>>
 
 /** `resume-unavailable`: the pane asked to resume a provider session Orca could not
  *  verify, so it launched a fresh one — silence would read as a successful restore. */
@@ -73,11 +74,16 @@ export function dismissSessionRestoredBannerPaneIds(
   event: SessionRestoredBannerDismissEvent,
   panes: readonly SessionRestoredBannerPane[]
 ): Map<number, SessionRestoredBannerReason> {
+  if (event.target instanceof Element && event.target.closest('[data-conversation-recovery]')) {
+    return new Map(paneReasons)
+  }
   const paneId = getSessionRestoredBannerDismissPaneId(event, panes)
   if (paneId === null) {
-    return new Map()
+    return new Map([...paneReasons].filter(([, reason]) => reason !== 'restored'))
   }
-  return removeSessionRestoredBannerPaneId(paneReasons, paneId)
+  return paneReasons.get(paneId) === 'restored'
+    ? removeSessionRestoredBannerPaneId(paneReasons, paneId)
+    : new Map(paneReasons)
 }
 
 export function seedStartupSessionRestoredBanner(
