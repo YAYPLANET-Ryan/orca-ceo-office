@@ -12,6 +12,33 @@ import {
 } from './tui-agent-startup-shell'
 import type { TuiAgent } from './tui-agent'
 
+/** Appends the agent's contract `launchArgs` (tui-agent-config.ts) unless the
+ * command already carries each of them as its own token. Used for the fresh
+ * launch base and again at resume time, because a command captured before the
+ * contract existed (or a user override) may lack them. */
+export function appendAgentLaunchArgs(
+  agent: TuiAgent,
+  command: string,
+  shell: AgentStartupShell
+): string {
+  const launchArgs = TUI_AGENT_CONFIG[agent].launchArgs
+  if (!launchArgs?.length) {
+    return command
+  }
+  const tokenized = tokenizeStartupCommand(command, shell)
+  const present = tokenized.ok
+    ? new Set(tokenized.tokens)
+    : // Why: a command this shell cannot tokenize still gets a whitespace-bounded
+      // check; for Codex a duplicate flag is harmless while a missing one re-opens
+      // the daemon attribution gap.
+      new Set(command.split(/\s+/).map((token) => token.replace(/^(['"])(.*)\1$/, '$2')))
+  const missing = launchArgs.filter((arg) => !present.has(arg))
+  if (missing.length === 0) {
+    return command
+  }
+  return `${command} ${missing.map((arg) => quoteStartupArg(arg, shell)).join(' ')}`
+}
+
 export type ResolvedAgentLaunchCommand =
   | {
       ok: true
@@ -32,11 +59,16 @@ export function resolveAgentLaunchCommand(args: {
   isRemote?: boolean
 }): ResolvedAgentLaunchCommand {
   const override = args.cmdOverrides[args.agent]
-  const command =
+  // Why: contract args ride in the base command (not the picker/session-option
+  // suffix) so the command captured for resume keeps them too.
+  const command = appendAgentLaunchArgs(
+    args.agent,
     override ||
-    getTuiAgentLaunchCommand(TUI_AGENT_CONFIG[args.agent], args.platform, {
-      isRemote: args.isRemote
-    })
+      getTuiAgentLaunchCommand(TUI_AGENT_CONFIG[args.agent], args.platform, {
+        isRemote: args.isRemote
+      }),
+    args.shell
+  )
   const suffix = planAgentCliArgsSuffix(args.agentArgs, args.shell)
   if (!suffix.ok) {
     return suffix

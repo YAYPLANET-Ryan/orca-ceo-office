@@ -116,7 +116,7 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
     store.settings.terminalWindowsShell = 'cmd.exe'
 
     await expect(launch()).resolves.toBe(
-      `codex "--dangerously-bypass-approvals-and-sandbox" "resume" "${SESSION_ID}"`
+      `codex "--no-daemon" "--dangerously-bypass-approvals-and-sandbox" "resume" "${SESSION_ID}"`
     )
   })
 
@@ -124,7 +124,7 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
     store.settings.terminalWindowsShell = 'powershell.exe'
 
     await expect(launch()).resolves.toBe(
-      `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
+      `codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
     )
   })
 
@@ -132,7 +132,7 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
     store.settings.terminalWindowsShell = 'git-bash'
 
     await expect(launch()).resolves.toBe(
-      `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
+      `codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
     )
   })
 
@@ -151,7 +151,7 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
     }
 
     await expect(launch()).resolves.toBe(
-      `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
+      `codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
     )
   })
 })
