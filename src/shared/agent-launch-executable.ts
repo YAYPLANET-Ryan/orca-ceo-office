@@ -172,7 +172,9 @@ export function locateAgentExecutable(
         insidePayload: false,
         // Why: the inner shell's grammar decides, whatever the outer pane shell is:
         // `bash -c codex` and `bash -c 'codex'` both run the token as the script.
-        scriptArgument: POSIX_SCRIPT_SHELLS.has(wrapper) && tokens[i - 1] === '-c'
+        // `-c` may ride in a cluster (`bash -lc`, `sh -ec`); the script is still one token.
+        scriptArgument:
+          POSIX_SCRIPT_SHELLS.has(wrapper) && /^-[A-Za-z]*c$/.test(tokens[i - 1] ?? '')
       }
     }
     const payload = /^(["']?)([^\s"']+)\s/.exec(raw)

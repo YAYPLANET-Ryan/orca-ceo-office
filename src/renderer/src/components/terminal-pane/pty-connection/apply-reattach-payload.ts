@@ -17,6 +17,7 @@ import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { restoredSnapshotPaintsPrintableContent } from '../restored-snapshot-coverage'
 import { resolveSshReconnectModelPaint } from './resolve-ssh-reconnect-model-paint'
 
+import { releaseInPlaceRestore } from '@/lib/in-place-restore-claims'
 import type { ReattachPayloadContext } from './reattach-payload-context'
 import type { ReattachPayloadSession } from './reattach-payload-session'
 
@@ -32,6 +33,10 @@ export function createReattachPayloadHandlers(
       return
     }
     if (ctx.connectResult?.snapshot) {
+      // Why: a live reattach does not consume the sleeping record through a
+      // spawn; a background in-place claim marked in flight for this pane would
+      // otherwise stay in flight forever. The live PTY owns the pane from here.
+      releaseInPlaceRestore(session.cacheKey)
       const snapshotPrefixAnsi = ctx.connectResult.snapshotPrefixAnsi
       const snapshotFrameAnsi = ctx.connectResult.snapshotFrameAnsi
       const snapshotFrameRestoreAnsi = ctx.connectResult.snapshotFrameRestoreAnsi
@@ -111,6 +116,7 @@ export function createReattachPayloadHandlers(
       ctx.prefetchedParkModelSnapshot ||
       ctx.reconnectMayUseModel
     ) {
+      releaseInPlaceRestore(session.cacheKey)
       // Why scoped to a park-reveal: the 100KiB relay tail loses scrollback the
       // model still holds, but an in-place reattach (network reconnect, wake,
       // reload) already has that replay in hand, so probing would only delay its
@@ -343,6 +349,7 @@ export function createReattachPayloadHandlers(
         }
       }
     } else if (ctx.isCurrentReattachPayload() && !isRemoteRuntimePtyId(reattachPtyId)) {
+      releaseInPlaceRestore(session.cacheKey)
       window.api.pty.signal(reattachPtyId, 'SIGWINCH')
     }
   }

@@ -22,6 +22,9 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
     options: FreshSpawnOptions = {}
   ): Promise<string | null> => {
     if (session.isLegacyWorkerAutomaticResumeBlocked()) {
+      // Why: no spawn will consume the record; an in-place restore claim marked
+      // in flight for it must end here (partial test sessions lack the binding).
+      session.clearSleepingRecordAfterColdRestoreSpawn?.(null)
       return Promise.resolve(null)
     }
     if (useAppStore.getState().deleteStateByWorktreeId?.[session.deps.worktreeId]?.isDeleting) {
@@ -29,6 +32,7 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
       // filesystem teardown. A fresh shell must not spawn into a directory the
       // removal is about to delete (main fences it anyway), and the pane is
       // about to unmount — so skip the doomed respawn instead of racing it.
+      session.clearSleepingRecordAfterColdRestoreSpawn?.(null)
       return Promise.resolve(null)
     }
     session.authoritativeReattachGeneration += 1

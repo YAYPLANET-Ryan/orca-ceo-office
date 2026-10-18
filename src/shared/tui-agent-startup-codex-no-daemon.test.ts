@@ -269,6 +269,13 @@ describe('Codex --no-daemon launch contract', () => {
     expect(applyAgentLaunchArgsToCustomCommand('sudo -u me codex', 'posix', host)).toBe(
       "sudo -u me codex '--no-daemon'"
     )
+    // Why: Git Bash wrappers commonly cluster `-lc`; and a flag after the script is `$0`, not an option.
+    expect(applyAgentLaunchArgsToCustomCommand("bash -lc 'codex'", 'posix', host)).toBe(
+      "bash -lc 'codex --no-daemon'"
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('bash -c codex --no-daemon', 'posix', host)).toBe(
+      "bash -c 'codex --no-daemon' --no-daemon"
+    )
     expect(applyAgentLaunchArgsToCustomCommand("& 'codex' -- prompt", 'powershell', host)).toBe(
       "& 'codex' '--no-daemon' -- prompt"
     )

@@ -104,7 +104,11 @@ export function appendAgentLaunchArgs(
     return command
   }
   let optionTokens: string[]
-  if (location.insidePayload) {
+  if (location.scriptArgument) {
+    // Why: only the script's own words reach the agent; a later token is the
+    // script's `$0`, so it never counts as the flag being present.
+    optionTokens = [tokens[location.index]]
+  } else if (location.insidePayload) {
     const span = spans[location.index]
     const words = command
       .slice(span.start, span.end)
