@@ -265,14 +265,17 @@ export function locateAgentExecutable(
     // executable followed by options; a second word that is not an option
     // (`"Codex CLI\\codex.exe"`, `"Codex Tools\\helper.exe"`) means the words are
     // one spaced path, which must never be split.
-    const payload = /^(["']?)(&\s*)?([^\s"']+)(?=\s+-|\s*["']?$)/.exec(raw)
+    const payload =
+      /^(["']?)(&\s*)?([^\s"']+)(?=\s+(?:-{1,2}[A-Za-z]|--(?=\s|["']|$))|\s*["']?$)/.exec(raw)
     // Why: a quoted payload whose first word is a path is ambiguous — it may be one
     // spaced path (`"C:\\Tools\\Codex CLI\\codex.exe"`) rather than a command line, and
     // splitting it would corrupt the path; only a bare name is placed inside.
     if (
       payload &&
       (!payload[2] || wrapper === 'powershell' || wrapper === 'pwsh') &&
-      !/[\\/]/.test(payload[3]) &&
+      // Why: a spaced path carries a separator somewhere (`"Codex - Tools\\helper.exe"`);
+      // a payload that holds one is never split, whatever its first word.
+      !/[\\/]/.test(raw) &&
       isAgentExecutableToken(agent, payload[3])
     ) {
       return {

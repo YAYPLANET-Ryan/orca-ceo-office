@@ -306,6 +306,13 @@ describe('Codex --no-daemon launch contract', () => {
     expect(
       applyAgentLaunchArgsToCustomCommand('cmd /c "Codex Tools\\helper.exe"', 'powershell', host)
     ).toBe('cmd /c "Codex Tools\\helper.exe"')
+    expect(
+      applyAgentLaunchArgsToCustomCommand('cmd /c "Codex - Tools\\helper.exe"', 'powershell', host)
+    ).toBe('cmd /c "Codex - Tools\\helper.exe"')
+    // Why: a payload holding a path separator is never split, even behind a real option.
+    expect(
+      applyAgentLaunchArgsToCustomCommand('cmd /c "codex --cd C:\\x"', 'powershell', host)
+    ).toBe('cmd /c "codex --cd C:\\x"')
     // and a quoted payload whose second word is not an option is left alone too
     expect(
       applyAgentLaunchArgsToCustomCommand('cmd /c "codex resume abc"', 'powershell', host)
