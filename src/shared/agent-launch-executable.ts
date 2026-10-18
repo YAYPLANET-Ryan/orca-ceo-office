@@ -23,6 +23,42 @@ const PASSTHROUGH_WRAPPERS = new Set([
 const LOCAL_SHELL_WRAPPERS = new Set(['cmd', 'powershell', 'pwsh', 'bash', 'sh', 'zsh'])
 /** POSIX shells whose `-c` takes exactly one script argument (`bash -c codex`). */
 const POSIX_SCRIPT_SHELLS = new Set(['bash', 'sh', 'zsh'])
+/** Local-shell options that consume the next token as their operand (PowerShell
+ *  names compared case-insensitively; `-Command`/`-c` is the command itself). */
+const LOCAL_SHELL_OPERAND_OPTIONS: Record<string, ReadonlySet<string>> = {
+  powershell: new Set([
+    '-workingdirectory',
+    '-wd',
+    '-file',
+    '-f',
+    '-executionpolicy',
+    '-ex',
+    '-ep',
+    '-encodedcommand',
+    '-ec',
+    '-e',
+    '-encodedarguments',
+    '-ea',
+    '-inputformat',
+    '-if',
+    '-outputformat',
+    '-of',
+    '-windowstyle',
+    '-w',
+    '-version',
+    '-v',
+    '-psconsolefile',
+    '-psc',
+    '-configurationname',
+    '-config',
+    '-settingsfile',
+    '-custompipename'
+  ]),
+  bash: new Set(['-o', '+o', '-O', '+O', '--rcfile', '--init-file']),
+  sh: new Set(['-o', '+o']),
+  zsh: new Set(['-o', '+o'])
+}
+LOCAL_SHELL_OPERAND_OPTIONS.pwsh = LOCAL_SHELL_OPERAND_OPTIONS.powershell
 /** Passthrough-wrapper options that consume the next token as their operand. */
 const PASSTHROUGH_OPERAND_OPTIONS: Record<string, ReadonlySet<string>> = {
   env: new Set(['-u', '-C', '-S', '--unset', '--chdir', '--split-string']),
@@ -159,8 +195,14 @@ export function locateAgentExecutable(
   if (head === -1 || !LOCAL_SHELL_WRAPPERS.has(wrapper)) {
     return null
   }
+  const operandOptions = LOCAL_SHELL_OPERAND_OPTIONS[wrapper]
   for (let i = head + 1; i < tokens.length; i += 1) {
     const token = tokens[i]
+    if (operandOptions?.has(token.toLowerCase())) {
+      // Why: `pwsh -WorkingDirectory C:\tools\codex -Command claude` names a directory, not a program.
+      i += 1
+      continue
+    }
     if (isOptionToken(token, shell)) {
       continue
     }
@@ -172,9 +214,10 @@ export function locateAgentExecutable(
         insidePayload: false,
         // Why: the inner shell's grammar decides, whatever the outer pane shell is:
         // `bash -c codex` and `bash -c 'codex'` both run the token as the script.
-        // `-c` may ride in a cluster (`bash -lc`, `sh -ec`); the script is still one token.
+        // `-c` may ride anywhere in a short-flag cluster (`bash -lc`, `bash -cl`,
+        // `sh -ec`); the script is still one token.
         scriptArgument:
-          POSIX_SCRIPT_SHELLS.has(wrapper) && /^-[A-Za-z]*c$/.test(tokens[i - 1] ?? '')
+          POSIX_SCRIPT_SHELLS.has(wrapper) && /^-[A-Za-z]*c[A-Za-z]*$/.test(tokens[i - 1] ?? '')
       }
     }
     const payload = /^(["']?)([^\s"']+)\s/.exec(raw)

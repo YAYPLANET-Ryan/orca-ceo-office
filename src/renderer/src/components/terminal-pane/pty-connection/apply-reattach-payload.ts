@@ -328,6 +328,9 @@ export function createReattachPayloadHandlers(
     if (!reattachPtyId) {
       return
     }
+    // Why: whatever the payload was, a PTY is live in this pane now; a background
+    // in-place claim marked in flight for it has nothing left to protect.
+    releaseInPlaceRestore(session.cacheKey)
     if (!getFitOverrideForPty(reattachPtyId)) {
       const gridPush = session.createReattachGridPush(ctx.attemptGeneration, reattachPtyId)
       const fit = safeFitAndThen(session.pane, 'reattach-pty-resize', gridPush.continuation, {
@@ -349,7 +352,6 @@ export function createReattachPayloadHandlers(
         }
       }
     } else if (ctx.isCurrentReattachPayload() && !isRemoteRuntimePtyId(reattachPtyId)) {
-      releaseInPlaceRestore(session.cacheKey)
       window.api.pty.signal(reattachPtyId, 'SIGWINCH')
     }
   }

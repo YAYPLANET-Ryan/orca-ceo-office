@@ -276,6 +276,24 @@ describe('Codex --no-daemon launch contract', () => {
     expect(applyAgentLaunchArgsToCustomCommand('bash -c codex --no-daemon', 'posix', host)).toBe(
       "bash -c 'codex --no-daemon' --no-daemon"
     )
+    expect(applyAgentLaunchArgsToCustomCommand('bash -cl codex', 'posix', host)).toBe(
+      "bash -cl 'codex --no-daemon'"
+    )
+    // Why: a shell option's operand is not the command, whatever it is named.
+    expect(
+      applyAgentLaunchArgsToCustomCommand(
+        'pwsh -WorkingDirectory C:\\tools\\codex -Command claude',
+        'powershell',
+        host
+      )
+    ).toBe('pwsh -WorkingDirectory C:\\tools\\codex -Command claude')
+    expect(
+      applyAgentLaunchArgsToCustomCommand(
+        'powershell -ExecutionPolicy Bypass -Command codex',
+        'powershell',
+        host
+      )
+    ).toBe("powershell -ExecutionPolicy Bypass -Command codex '--no-daemon'")
     expect(applyAgentLaunchArgsToCustomCommand("& 'codex' -- prompt", 'powershell', host)).toBe(
       "& 'codex' '--no-daemon' -- prompt"
     )
