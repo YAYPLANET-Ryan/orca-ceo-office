@@ -21,6 +21,38 @@ function isWindowsStartupShell(shell: AgentStartupShell): shell is WindowsStartu
   return shell === 'powershell' || shell === 'cmd'
 }
 
+/** Index of the first token in command position that `isExecutable` accepts:
+ * index 0, right after a `--` terminator, behind PowerShell's leading `&` call
+ * operator, or preceded only by NAME=value assignments on sh-family shells. A
+ * token that merely looks like the executable elsewhere (an argument to a
+ * wrapper such as `bash -c "codex"`) is never matched. */
+export function findStartupCommandExecutableIndex(
+  tokens: readonly string[],
+  shell: AgentStartupShell,
+  isExecutable: (token: string) => boolean
+): number {
+  let commandPosition = true
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]
+    if (commandPosition) {
+      if (isExecutable(token)) {
+        return i
+      }
+      if (
+        (isPosixStartupShell(shell) && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) ||
+        (shell === 'powershell' && token === '&' && i === 0)
+      ) {
+        continue
+      }
+      commandPosition = false
+    }
+    if (token === '--') {
+      commandPosition = true
+    }
+  }
+  return -1
+}
+
 export type StartupCommandTokens =
   | { ok: true; tokens: string[]; spans: CommandTokenSpan[] }
   | { ok: false; error: string }

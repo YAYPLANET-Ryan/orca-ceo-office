@@ -5,6 +5,7 @@ import {
 import type { SessionOptionValue } from './native-chat-session-options'
 import { getTuiAgentLaunchCommand, TUI_AGENT_CONFIG } from './tui-agent-config'
 import {
+  findStartupCommandExecutableIndex,
   planAgentCliArgsSuffix,
   quoteStartupArg,
   tokenizeStartupCommand,
@@ -12,53 +13,85 @@ import {
 } from './tui-agent-startup-shell'
 import type { TuiAgent } from './tui-agent'
 
+/** True when the contract `launchArgs` apply: a native Windows host launch.
+ * Why: this custom build only certifies the pinned Codex CLI on the Windows
+ * host. SSH remotes and WSL run a CLI of unknown version, where an unsupported
+ * flag would stop the agent from starting at all; other host platforms keep
+ * upstream behavior until their CLI versions are verified. */
+export function launchArgsApply(args: { platform: NodeJS.Platform; isRemote?: boolean }): boolean {
+  return args.platform === 'win32' && !args.isRemote
+}
+
+function isAgentExecutableToken(agent: TuiAgent, token: string): boolean {
+  const base = (token.split(/[\\/]/).pop() ?? '').toLowerCase()
+  const names = new Set(
+    [TUI_AGENT_CONFIG[agent].launchCmd, TUI_AGENT_CONFIG[agent].detectCmd].map((name) =>
+      name.toLowerCase()
+    )
+  )
+  return names.has(base.replace(/\.(exe|cmd|bat|ps1)$/, ''))
+}
+
 /** Appends the agent's contract `launchArgs` (tui-agent-config.ts) unless the
  * command already carries each of them as its own option token. Used for the
  * fresh launch base and again at resume time, because a command captured before
  * the contract existed (or a user override) may lack them.
  *
- * Placement: options must stay before a `--` terminator, so the args are
- * spliced in front of the first terminator token when one exists; tokens after
- * it are positional and never count as the flag being present. Remote launches
- * are left untouched: the remote CLI version is unknown and an unsupported flag
- * would stop the agent from starting at all. */
+ * Placement: the args belong to the agent executable, so they are spliced in
+ * front of the first `--` terminator that follows the executable token; tokens
+ * after that terminator are positional and never count as the flag being
+ * present. When the executable cannot be located in command position (a wrapper
+ * such as `bash -c "codex"`), or a Windows token diverges from the shell's own
+ * parse, the args are appended at the end as before: a duplicate or unreachable
+ * flag is harmless, a cut inside unmodeled syntax is not. */
 export function appendAgentLaunchArgs(
   agent: TuiAgent,
   command: string,
   shell: AgentStartupShell,
-  options: { isRemote?: boolean } = {}
+  options: { skip?: boolean } = {}
 ): string {
   const launchArgs = TUI_AGENT_CONFIG[agent].launchArgs
-  if (!launchArgs?.length || options.isRemote) {
+  if (!launchArgs?.length || options.skip) {
     return command
   }
+  const quoted = (args: readonly string[]) =>
+    args.map((arg) => quoteStartupArg(arg, shell)).join(' ')
   const tokenized = tokenizeStartupCommand(command, shell)
   if (!tokenized.ok) {
-    // Why: a command this shell cannot tokenize still gets a whitespace-bounded
-    // check; for Codex a duplicate flag is harmless while a missing one re-opens
-    // the daemon attribution gap.
     const present = new Set(
       command.split(/\s+/).map((token) => token.replace(/^(['"])(.*)\1$/, '$2'))
     )
     const missing = launchArgs.filter((arg) => !present.has(arg))
-    return missing.length === 0
-      ? command
-      : `${command} ${missing.map((arg) => quoteStartupArg(arg, shell)).join(' ')}`
+    return missing.length === 0 ? command : `${command} ${quoted(missing)}`
   }
-  const terminatorIndex = tokenized.tokens.indexOf('--')
+  const executableIndex = findStartupCommandExecutableIndex(tokenized.tokens, shell, (token) =>
+    isAgentExecutableToken(agent, token)
+  )
+  const terminatorIndex =
+    executableIndex === -1 ? -1 : tokenized.tokens.indexOf('--', executableIndex + 1)
   const optionTokens =
-    terminatorIndex === -1 ? tokenized.tokens : tokenized.tokens.slice(0, terminatorIndex)
-  const present = new Set(optionTokens)
-  const missing = launchArgs.filter((arg) => !present.has(arg))
+    terminatorIndex === -1
+      ? tokenized.tokens.slice(Math.max(executableIndex, 0))
+      : tokenized.tokens.slice(executableIndex, terminatorIndex)
+  const missing = launchArgs.filter((arg) => !optionTokens.includes(arg))
   if (missing.length === 0) {
     return command
   }
-  const inserted = missing.map((arg) => quoteStartupArg(arg, shell)).join(' ')
-  if (terminatorIndex === -1) {
-    return `${command} ${inserted}`
+  // Why: PowerShell's leading call operator is the one divergent token the tokenizer models safely (see agent-resume-launch-command.ts).
+  const spliceable =
+    terminatorIndex !== -1 &&
+    !tokenized.spans
+      .slice(0, terminatorIndex + 1)
+      .some(
+        (span, index) =>
+          span.divergesFromShell &&
+          !(shell === 'powershell' && index === 0 && tokenized.tokens[0] === '&')
+      )
+  if (!spliceable) {
+    return `${command} ${quoted(missing)}`
   }
   const cut = tokenized.spans[terminatorIndex].start
-  return `${command.slice(0, cut)}${inserted} ${command.slice(cut)}`
+  return `${command.slice(0, cut)}${quoted(missing)} ${command.slice(cut)}`
 }
 
 export type ResolvedAgentLaunchCommand =
@@ -90,7 +123,7 @@ export function resolveAgentLaunchCommand(args: {
         isRemote: args.isRemote
       }),
     args.shell,
-    { isRemote: args.isRemote }
+    { skip: !launchArgsApply({ platform: args.platform, isRemote: args.isRemote }) }
   )
   const suffix = planAgentCliArgsSuffix(args.agentArgs, args.shell)
   if (!suffix.ok) {

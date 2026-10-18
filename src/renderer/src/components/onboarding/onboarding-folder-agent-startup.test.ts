@@ -14,11 +14,11 @@ describe('buildOnboardingFolderAgentStartup', () => {
     })
 
     expect(startup).toEqual({
-      command: "codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox'",
+      command: "codex '--dangerously-bypass-approvals-and-sandbox'",
       env: {},
       launchAgent: 'codex',
       launchConfig: {
-        agentCommand: "codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox'",
+        agentCommand: "codex '--dangerously-bypass-approvals-and-sandbox'",
         agentArgs: '--dangerously-bypass-approvals-and-sandbox',
         agentEnv: {}
       },
@@ -137,13 +137,11 @@ describe('buildOnboardingFolderAgentStartup', () => {
         false
       )
     ).toEqual({
-      command:
-        "echo onboarding-folder-agent '--no-daemon' '--dangerously-bypass-approvals-and-sandbox'",
+      command: "echo onboarding-folder-agent '--dangerously-bypass-approvals-and-sandbox'",
       env: {},
       launchAgent: 'codex',
       launchConfig: {
-        agentCommand:
-          "echo onboarding-folder-agent '--no-daemon' '--dangerously-bypass-approvals-and-sandbox'",
+        agentCommand: "echo onboarding-folder-agent '--dangerously-bypass-approvals-and-sandbox'",
         agentArgs: '--dangerously-bypass-approvals-and-sandbox',
         agentEnv: {}
       },

@@ -32,7 +32,11 @@ describe('dropAgentResumeArgvFromCommand', () => {
           agent: 'codex',
           providerSession: CODEX_SESSION
         })
-      ).toEqual({ status: 'dropped', command: "codex '--no-daemon'" })
+      ).toEqual({
+        status: 'dropped',
+        // Why: the Codex --no-daemon contract applies to native Windows launches only.
+        command: platform === 'win32' ? "codex '--no-daemon'" : 'codex'
+      })
     }
   })
 
@@ -43,7 +47,7 @@ describe('dropAgentResumeArgvFromCommand', () => {
         agent: 'codex',
         providerSession: CODEX_SESSION
       })
-    ).toEqual({ status: 'dropped', command: "codex '--no-daemon' '--search'" })
+    ).toEqual({ status: 'dropped', command: "codex '--search'" })
   })
 
   it('drops an unquoted resume argv from a legacy persisted command', () => {

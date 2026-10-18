@@ -218,8 +218,7 @@ describe('connectPanePty', () => {
       expect(transport.connect).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
-          command:
-            "codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'",
+          command: "codex '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'",
           commandDelivery: 'provider',
           startupCommandDelivery: 'shell-ready',
           env: expect.objectContaining({
@@ -232,7 +231,7 @@ describe('connectPanePty', () => {
         })
       )
       expect(transport.sendInput).not.toHaveBeenCalledWith(
-        "codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'\r"
+        "codex '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'\r"
       )
     } finally {
       globalThis.setTimeout = originalSetTimeout
@@ -321,8 +320,7 @@ describe('connectPanePty', () => {
       expect(transport.connect).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
-          command:
-            "codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'",
+          command: "codex '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'",
           env: expect.objectContaining({
             ORCA_PANE_KEY: paneKey,
             ORCA_AGENT_LAUNCH_TOKEN: expect.stringMatching(new RegExp(`^${UUID_RE}$`))

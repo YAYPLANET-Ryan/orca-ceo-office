@@ -121,11 +121,10 @@ describe('launchAgentInNewTab paired web runtime', () => {
       activate: true,
       agentSessionKind: 'fresh',
       launchAgent: 'codex',
-      command:
-        "codex '--no-daemon' '--model' 'gpt-5' '--reasoning-effort' 'high' 'fix the spinner'",
+      command: "codex '--model' 'gpt-5' '--reasoning-effort' 'high' 'fix the spinner'",
       env: { CODEX_PROFILE: 'captured' },
       launchConfig: {
-        agentCommand: "codex '--no-daemon' '--model' 'gpt-5' '--reasoning-effort' 'high'",
+        agentCommand: "codex '--model' 'gpt-5' '--reasoning-effort' 'high'",
         agentArgs: '--model gpt-5 --reasoning-effort high',
         agentEnv: { CODEX_PROFILE: 'captured' }
       },

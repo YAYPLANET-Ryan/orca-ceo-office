@@ -151,7 +151,7 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
     }
 
     await expect(launch()).resolves.toBe(
-      `codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
+      `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
     )
   })
 })

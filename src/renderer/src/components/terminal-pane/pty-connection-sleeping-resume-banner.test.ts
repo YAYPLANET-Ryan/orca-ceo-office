@@ -200,8 +200,7 @@ describe('connectPanePty', () => {
     expect(transport.connect).toHaveBeenCalledTimes(1)
     expect(transport.connect).toHaveBeenCalledWith(
       expect.objectContaining({
-        command:
-          "codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'",
+        command: "codex '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'",
         launchAgent: 'codex',
         env: expect.objectContaining({
           ORCA_PANE_KEY: paneKey,
@@ -218,7 +217,7 @@ describe('connectPanePty', () => {
     expect(mockStoreState.registerAgentLaunchConfig).toHaveBeenCalledWith(
       paneKey,
       {
-        agentCommand: "codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox'",
+        agentCommand: "codex '--dangerously-bypass-approvals-and-sandbox'",
         agentArgs: '--dangerously-bypass-approvals-and-sandbox',
         agentEnv: {}
       },

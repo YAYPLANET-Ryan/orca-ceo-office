@@ -18,7 +18,8 @@ describe('Codex --no-daemon launch contract', () => {
       agent: 'codex',
       prompt: 'fix it',
       cmdOverrides: { codex: 'codex --no-daemon --profile work' },
-      platform: 'linux'
+      platform: 'win32',
+      shell: 'posix'
     })
 
     expect(plan?.launchCommand).toBe("codex --no-daemon --profile work 'fix it'")
@@ -46,7 +47,8 @@ describe('Codex --no-daemon launch contract', () => {
       providerSession: { key: 'session_id', id: 's1' },
       cmdOverrides: {},
       agentCommand: 'codex',
-      platform: 'linux'
+      platform: 'win32',
+      shell: 'posix'
     })
 
     expect(plan?.launchCommand).toBe("codex '--no-daemon' 'resume' 's1'")
@@ -59,7 +61,8 @@ describe('Codex --no-daemon launch contract', () => {
       providerSession: { key: 'session_id', id: 's1' },
       cmdOverrides: {},
       agentCommand: "codex '--no-daemon'",
-      platform: 'linux'
+      platform: 'win32',
+      shell: 'posix'
     })
 
     expect(plan?.launchCommand).toBe("codex '--no-daemon' 'resume' 's1'")
@@ -70,7 +73,8 @@ describe('Codex --no-daemon launch contract', () => {
       agent: 'codex',
       prompt: '',
       cmdOverrides: { codex: 'codex --profile work --' },
-      platform: 'linux',
+      platform: 'win32',
+      shell: 'posix',
       allowEmptyPromptLaunch: true
     })
 
@@ -83,11 +87,84 @@ describe('Codex --no-daemon launch contract', () => {
       agent: 'codex',
       prompt: '',
       cmdOverrides: { codex: 'codex -- --no-daemon' },
-      platform: 'linux',
+      platform: 'win32',
+      shell: 'posix',
       allowEmptyPromptLaunch: true
     })
 
     expect(plan?.launchCommand).toBe("codex '--no-daemon' -- --no-daemon")
+  })
+
+  it('anchors the terminator search on the agent executable, not a wrapper', () => {
+    const wrapped = buildAgentStartupPlan({
+      agent: 'codex',
+      prompt: '',
+      cmdOverrides: { codex: 'env -- codex' },
+      platform: 'win32',
+      shell: 'posix',
+      allowEmptyPromptLaunch: true
+    })
+    const unreachable = buildAgentStartupPlan({
+      agent: 'codex',
+      prompt: '',
+      cmdOverrides: { codex: 'bash -c codex -- x' },
+      platform: 'win32',
+      shell: 'posix',
+      allowEmptyPromptLaunch: true
+    })
+
+    // Why: `--` before the executable belongs to env; the flag goes after codex.
+    expect(wrapped?.launchCommand).toBe("env -- codex '--no-daemon'")
+    // Why: codex is an argument to bash here, so the args cannot be placed; they
+    // are appended as before and simply do not reach codex.
+    expect(unreachable?.launchCommand).toBe("bash -c codex -- x '--no-daemon'")
+  })
+
+  it('applies the contract through the PowerShell call operator', () => {
+    const plan = buildAgentStartupPlan({
+      agent: 'codex',
+      prompt: '',
+      cmdOverrides: { codex: "& 'codex' --profile work --" },
+      platform: 'win32',
+      shell: 'powershell',
+      allowEmptyPromptLaunch: true
+    })
+
+    expect(plan?.launchCommand).toBe("& 'codex' --profile work '--no-daemon' --")
+  })
+
+  it('falls back to appending when a cmd.exe token diverges from the shell parse', () => {
+    // Why: a cmd token with a lone single quote is not modelled by the tokenizer; splicing could cut live syntax.
+    const plan = buildAgentStartupPlan({
+      agent: 'codex',
+      prompt: '',
+      cmdOverrides: { codex: "codex --profile it's --" },
+      platform: 'win32',
+      shell: 'cmd',
+      allowEmptyPromptLaunch: true
+    })
+
+    expect(plan?.launchCommand).toBe('codex --profile it\'s -- "--no-daemon"')
+  })
+
+  it('leaves WSL and other non-Windows host launches without the flag', () => {
+    // Why: a Linux platform on this build means WSL or another host whose Codex version is not pinned.
+    const launch = buildAgentStartupPlan({
+      agent: 'codex',
+      prompt: 'fix it',
+      cmdOverrides: {},
+      platform: 'linux'
+    })
+    const resume = buildAgentResumeStartupPlan({
+      agent: 'codex',
+      providerSession: { key: 'session_id', id: 's1' },
+      cmdOverrides: {},
+      agentCommand: 'codex',
+      platform: 'linux'
+    })
+
+    expect(launch?.launchCommand).toBe("codex 'fix it'")
+    expect(resume?.launchCommand).toBe("codex 'resume' 's1'")
   })
 
   it('leaves remote Codex launches and resumes without the flag', () => {
@@ -96,14 +173,16 @@ describe('Codex --no-daemon launch contract', () => {
       agent: 'codex',
       prompt: 'fix it',
       cmdOverrides: {},
-      platform: 'linux',
+      platform: 'win32',
+      shell: 'posix',
       isRemote: true
     })
     const resume = buildAgentResumeStartupPlan({
       agent: 'codex',
       providerSession: { key: 'session_id', id: 's1' },
       cmdOverrides: {},
-      platform: 'linux',
+      platform: 'win32',
+      shell: 'posix',
       isRemote: true
     })
 
@@ -117,7 +196,8 @@ describe('Codex --no-daemon launch contract', () => {
       providerSession: { key: 'session_id', id: 's1' },
       cmdOverrides: {},
       agentCommand: 'claude',
-      platform: 'linux'
+      platform: 'win32',
+      shell: 'posix'
     })
 
     expect(plan?.launchCommand).toBe("claude '--resume' 's1'")

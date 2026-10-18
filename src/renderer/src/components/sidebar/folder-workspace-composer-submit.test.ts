@@ -309,7 +309,7 @@ describe('submitFolderWorkspaceCreate', () => {
       createdWithAgent: 'codex'
     })
     const startup = mocks.activateAndRevealFolderWorkspace.mock.calls[0]?.[1]?.startup
-    expect(startup?.command).toBe("codex '--no-daemon'")
+    expect(startup?.command).toBe('codex')
     expect(startup?.command).not.toContain(linkedWorkItem.url)
     expect(startup?.command).not.toContain('Review this before starting')
     expect(window.api.agentTrust?.markTrusted).toHaveBeenCalledWith({
@@ -321,7 +321,7 @@ describe('submitFolderWorkspaceCreate', () => {
       primaryTabId: 'tab-1',
       startup: expect.objectContaining({
         agent: 'codex',
-        launchCommand: "codex '--no-daemon'",
+        launchCommand: 'codex',
         followupPrompt: null,
         draftPrompt: `Review this before starting\n\n${linkedWorkItem.url}`
       })

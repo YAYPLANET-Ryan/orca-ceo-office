@@ -306,7 +306,7 @@ describe('ai vault resume command runtime', () => {
         }
       })
     ).toBe(
-      `cd '/home/alice/repo' && env -u CODEX_HOME -u ORCA_CODEX_HOME codex '--no-daemon' 'resume' 'session one'`
+      `cd '/home/alice/repo' && env -u CODEX_HOME -u ORCA_CODEX_HOME codex 'resume' 'session one'`
     )
   })
 
@@ -327,7 +327,7 @@ describe('ai vault resume command runtime', () => {
     })
 
     expect(command).toBe(
-      "cd '/home/alice/repo' && CODEX_HOME='/home/alice/custom-codex' codex '--no-daemon' 'resume' 'session one'"
+      "cd '/home/alice/repo' && CODEX_HOME='/home/alice/custom-codex' codex 'resume' 'session one'"
     )
     expect(command).not.toContain('unset CODEX_HOME')
   })
@@ -488,7 +488,7 @@ describe('ai vault resume command runtime', () => {
           codexHome: '\\\\wsl.localhost\\Ubuntu\\home\\alice\\.codex'
         }
       })
-    ).toBe("CODEX_HOME='/home/alice/.codex' codex '--no-daemon' 'resume' 'session one'")
+    ).toBe("CODEX_HOME='/home/alice/.codex' codex 'resume' 'session one'")
   })
 
   it('converts WSL UNC OMP transcript paths before building Linux resume commands', () => {
@@ -551,7 +551,7 @@ describe('ai vault resume command runtime', () => {
         }
       })
     ).toMatchObject({
-      command: "codex '--no-daemon' 'resume' 'session one'",
+      command: "codex 'resume' 'session one'",
       cwd: '/home/alice/repo',
       envToDelete: ['CODEX_HOME', 'ORCA_CODEX_HOME'],
       providerSession: { key: 'session_id', id: 'session one' }
@@ -576,7 +576,7 @@ describe('ai vault resume command runtime', () => {
           resumeCommand: "CODEX_HOME='/root/.codex' codex resume 'session one'"
         }
       })
-    ).toBe("codex '--no-daemon' 'resume' 'session one'")
+    ).toBe("codex 'resume' 'session one'")
   })
 
   it('copies remote real-home Codex commands with explicit environment cleanup', () => {
@@ -598,7 +598,7 @@ describe('ai vault resume command runtime', () => {
     })
 
     expect(command).toBe(
-      `cd '/home/alice/repo' && env -u CODEX_HOME -u ORCA_CODEX_HOME codex '--no-daemon' 'resume' 'session one'`
+      `cd '/home/alice/repo' && env -u CODEX_HOME -u ORCA_CODEX_HOME codex 'resume' 'session one'`
     )
     expect(command).not.toContain('/retired/shared-home')
   })
@@ -621,7 +621,7 @@ describe('ai vault resume command runtime', () => {
           resumeCommand: "CODEX_HOME='/root/.codex' codex resume 'session one'"
         }
       })
-    ).toBe("my-codex '--no-daemon' 'resume' 'session one'")
+    ).toBe("my-codex 'resume' 'session one'")
   })
 
   it('rebuilds overridden remote commands with the recorded remote host platform', () => {
@@ -705,6 +705,6 @@ describe('ai vault resume command runtime', () => {
           resumeCommand: "CODEX_HOME='/root/.codex' codex resume 'session one'"
         }
       })
-    ).toBe("codex '--no-daemon' 'resume' 'session one'")
+    ).toBe("codex 'resume' 'session one'")
   })
 })

@@ -62,12 +62,12 @@ export function buildAgentResumeLaunchCommand(
   baseCommand: string,
   resumeArgv: readonly string[],
   shell: AgentStartupShell,
-  options: { isRemote?: boolean } = {}
+  options: { skipLaunchArgs?: boolean } = {}
 ): string {
   const argv = resumeArgv.slice(1)
   // Why: the base may be a launch command captured before the agent's contract
   // launchArgs existed; a resume must not re-open the gap those args close.
-  const base = appendAgentLaunchArgs(agent, baseCommand, shell, options)
+  const base = appendAgentLaunchArgs(agent, baseCommand, shell, { skip: options.skipLaunchArgs })
   if (agent === 'claude') {
     return buildClaudeResumeLaunchCommand(base, argv, shell)
   }
