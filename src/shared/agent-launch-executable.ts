@@ -257,11 +257,18 @@ export function locateAgentExecutable(
         scriptArgument: sawScriptFlag
       }
     }
-    const payload = /^(["']?)([^\s"']+)\s/.exec(raw)
-    if (payload && isAgentExecutableToken(agent, payload[2])) {
+    // Why: inside a PowerShell payload the command may be called through `&`
+    // (`pwsh -Command "& codex -m x"`); the executable is still the first word run.
+    const payload = /^(["']?)(&\s*)?([^\s"']+)\s/.exec(raw)
+    if (
+      payload &&
+      (!payload[2] || wrapper === 'powershell' || wrapper === 'pwsh') &&
+      isAgentExecutableToken(agent, payload[3])
+    ) {
       return {
         index: i,
-        insertAt: spans[i].start + payload[1].length + payload[2].length,
+        insertAt:
+          spans[i].start + payload[1].length + (payload[2]?.length ?? 0) + payload[3].length,
         insidePayload: true,
         scriptArgument: false
       }
