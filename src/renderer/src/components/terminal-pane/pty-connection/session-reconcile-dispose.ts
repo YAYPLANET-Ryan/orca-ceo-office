@@ -1,4 +1,5 @@
 import { useAppStore } from '@/store'
+import { lapseInPlaceRestore } from '@/lib/in-place-restore-claims'
 import {
   shouldReconcileDeadSession,
   shouldReconcileMissingSession,
@@ -176,6 +177,10 @@ export function installSessionReconcileDispose(session: ConnectPanePtySession): 
       session.spawnedFreshPtyId === ptyId && !Number.isFinite(session.lastTerminalInputAt),
     dispose() {
       session.disposed = true
+      // Why: a disposed pane will never consume its sleeping record; a background
+      // in-place claim marked in flight for it would otherwise renew forever.
+      // Lapsing hands the record to the sweep (a no-op when no claim exists).
+      lapseInPlaceRestore(session.cacheKey)
       // Why: a detached client stops observing the pane's bytes, so it must cede
       // agent-status authority back to the host on the next mirrored snapshot.
       session.releaseRendererOwnedAgentStatusPane?.()

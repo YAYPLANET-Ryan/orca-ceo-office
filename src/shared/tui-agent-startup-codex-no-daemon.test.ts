@@ -279,6 +279,20 @@ describe('Codex --no-daemon launch contract', () => {
     expect(applyAgentLaunchArgsToCustomCommand('bash -cl codex', 'posix', host)).toBe(
       "bash -cl 'codex --no-daemon'"
     )
+    expect(applyAgentLaunchArgsToCustomCommand('bash -c -l codex', 'posix', host)).toBe(
+      "bash -c -l 'codex --no-daemon'"
+    )
+    // Why: a script file is the command; its positional `codex` is the script's argument.
+    expect(
+      applyAgentLaunchArgsToCustomCommand('pwsh -File run.ps1 codex', 'powershell', host)
+    ).toBe('pwsh -File run.ps1 codex')
+    expect(
+      applyAgentLaunchArgsToCustomCommand(
+        'powershell -EncodedCommand Y29kZXg= codex',
+        'powershell',
+        host
+      )
+    ).toBe('powershell -EncodedCommand Y29kZXg= codex')
     // Why: a shell option's operand is not the command, whatever it is named.
     expect(
       applyAgentLaunchArgsToCustomCommand(

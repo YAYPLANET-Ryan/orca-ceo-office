@@ -59,6 +59,9 @@ const LOCAL_SHELL_OPERAND_OPTIONS: Record<string, ReadonlySet<string>> = {
   zsh: new Set(['-o', '+o'])
 }
 LOCAL_SHELL_OPERAND_OPTIONS.pwsh = LOCAL_SHELL_OPERAND_OPTIONS.powershell
+/** Local-shell options whose operand IS the command (a script file or an encoded
+ *  command): anything after it is that script's argument, never the agent. */
+const LOCAL_SHELL_SCRIPT_OPTIONS = new Set(['-file', '-f', '-encodedcommand', '-ec', '-e'])
 /** Passthrough-wrapper options that consume the next token as their operand. */
 const PASSTHROUGH_OPERAND_OPTIONS: Record<string, ReadonlySet<string>> = {
   env: new Set(['-u', '-C', '-S', '--unset', '--chdir', '--split-string']),
@@ -196,14 +199,26 @@ export function locateAgentExecutable(
     return null
   }
   const operandOptions = LOCAL_SHELL_OPERAND_OPTIONS[wrapper]
+  const posixScriptShell = POSIX_SCRIPT_SHELLS.has(wrapper)
+  let sawScriptFlag = false
   for (let i = head + 1; i < tokens.length; i += 1) {
     const token = tokens[i]
+    if (
+      (wrapper === 'powershell' || wrapper === 'pwsh') &&
+      LOCAL_SHELL_SCRIPT_OPTIONS.has(token.toLowerCase())
+    ) {
+      // Why: `pwsh -File script.ps1 codex` runs the script; `codex` is its argument.
+      return null
+    }
     if (operandOptions?.has(token.toLowerCase())) {
       // Why: `pwsh -WorkingDirectory C:\tools\codex -Command claude` names a directory, not a program.
       i += 1
       continue
     }
     if (isOptionToken(token, shell)) {
+      // Why: `-c` may ride anywhere among the wrapper's options (`bash -c -l codex`,
+      // `bash -lc`, `bash -cl`); the script is still the first plain token.
+      sawScriptFlag ||= posixScriptShell && /^-[A-Za-z]*c[A-Za-z]*$/.test(token)
       continue
     }
     const raw = command.slice(spans[i].start, spans[i].end)
@@ -214,10 +229,7 @@ export function locateAgentExecutable(
         insidePayload: false,
         // Why: the inner shell's grammar decides, whatever the outer pane shell is:
         // `bash -c codex` and `bash -c 'codex'` both run the token as the script.
-        // `-c` may ride anywhere in a short-flag cluster (`bash -lc`, `bash -cl`,
-        // `sh -ec`); the script is still one token.
-        scriptArgument:
-          POSIX_SCRIPT_SHELLS.has(wrapper) && /^-[A-Za-z]*c[A-Za-z]*$/.test(tokens[i - 1] ?? '')
+        scriptArgument: sawScriptFlag
       }
     }
     const payload = /^(["']?)([^\s"']+)\s/.exec(raw)
