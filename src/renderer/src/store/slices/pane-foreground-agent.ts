@@ -33,6 +33,27 @@ export type PaneForegroundAgentSlice = {
   clearPaneForegroundAgentByWorktree: (worktreeId: string) => void
 }
 
+// Why: main's hook server resolves nested-hook identity with the same evidence the
+// renderer holds; without this report the two sides disagree on which agent and
+// which provider session a pane keeps when a child CLI posts hooks from inside it.
+function reportPaneForegroundToMain(paneKey: string, entry: PaneForegroundAgentEntry | null): void {
+  try {
+    const report = globalThis.window?.api?.agentHooks?.reportPaneForeground
+    report?.(
+      paneKey,
+      entry
+        ? {
+            agent: entry.agent,
+            shellForeground: entry.shellForeground,
+            ...(entry.routingRevoked ? { routingRevoked: true } : {})
+          }
+        : null
+    )
+  } catch {
+    // Why: the report is advisory; a missing preload bridge (tests, web client) must not break the slice.
+  }
+}
+
 export const createPaneForegroundAgentSlice: StateCreator<
   AppState,
   [],
@@ -41,6 +62,7 @@ export const createPaneForegroundAgentSlice: StateCreator<
 > = (set) => ({
   paneForegroundAgentByPaneKey: {},
   setPaneForegroundAgent: (paneKey, entry) => {
+    let changed = false
     set((s) => {
       const current = s.paneForegroundAgentByPaneKey[paneKey]
       if (
@@ -53,20 +75,29 @@ export const createPaneForegroundAgentSlice: StateCreator<
       ) {
         return s
       }
+      changed = true
       return {
         paneForegroundAgentByPaneKey: { ...s.paneForegroundAgentByPaneKey, [paneKey]: entry }
       }
     })
+    if (changed) {
+      reportPaneForegroundToMain(paneKey, entry)
+    }
   },
   clearPaneForegroundAgent: (paneKey) => {
+    let changed = false
     set((s) => {
       if (!(paneKey in s.paneForegroundAgentByPaneKey)) {
         return s
       }
+      changed = true
       const next = { ...s.paneForegroundAgentByPaneKey }
       delete next[paneKey]
       return { paneForegroundAgentByPaneKey: next }
     })
+    if (changed) {
+      reportPaneForegroundToMain(paneKey, null)
+    }
   },
   clearPaneForegroundAgentByTabPrefix: (tabIdPrefix) => {
     set(

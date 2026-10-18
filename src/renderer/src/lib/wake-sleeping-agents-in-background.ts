@@ -13,6 +13,7 @@ import {
   recordPaneIsOwnedByPreservedPane,
   recordPaneIsRestorablePreservedPane
 } from './sleeping-agent-pane-ownership'
+import { claimInPlaceRestore } from './in-place-restore-claims'
 
 type BackgroundSleepingAgentWakeDispatcherOptions = {
   isWorkspaceSessionReady?: () => boolean
@@ -210,7 +211,7 @@ export function wakeSleepingAgentsForWorktreeInBackground(worktreeId: string): v
   }
   const inPlaceClaimKeys = new Set<string>()
   const ownershipState = useAppStore.getState()
-  for (const record of backgroundWakeRecords) {
+  for (const record of worktreeRecords) {
     if (
       isPassiveCompletedHibernationEvidence(record) ||
       record.requiresManualResume ||
@@ -222,6 +223,12 @@ export function wakeSleepingAgentsForWorktreeInBackground(worktreeId: string): v
     if (wokenClaimKeys.has(claimKey) || inPlaceClaimKeys.has(claimKey)) {
       continue
     }
+    if (record.restoreOnTabOpenOnly === true) {
+      // Why: an explicit workspace sleep resumes only when its tab is opened; the
+      // generic sweep must not fork it into a fresh tab on a background wake.
+      inPlaceClaimKeys.add(claimKey)
+      continue
+    }
     if (!recordPaneIsRestorablePreservedPane(record, ownershipState)) {
       continue
     }
@@ -230,6 +237,7 @@ export function wakeSleepingAgentsForWorktreeInBackground(worktreeId: string): v
       continue
     }
     passiveTabIds.add(tabId)
+    claimInPlaceRestore(tabId)
     inPlaceClaimKeys.add(claimKey)
   }
   if (passiveTabIds.size > 0 || hasUntargetablePassiveRecord) {

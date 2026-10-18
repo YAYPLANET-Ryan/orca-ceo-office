@@ -25,6 +25,8 @@ export function createAgentHooksApi(): NonNullable<Partial<PreloadApi>['agentHoo
       detail: 'Agent hook status is only available on the Orca server.'
     } as const)
   return {
+    // Why: the web client has no process table to report; main keeps its hook-only rule.
+    reportPaneForeground: () => {},
     claudeStatus: () => status('claude'),
     openClaudeStatus: () => status('openclaude'),
     codexStatus: () => status('codex'),

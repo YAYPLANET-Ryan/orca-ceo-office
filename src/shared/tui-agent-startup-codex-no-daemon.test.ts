@@ -79,7 +79,7 @@ describe('Codex --no-daemon launch contract', () => {
       allowEmptyPromptLaunch: true
     })
 
-    expect(plan?.launchCommand).toBe("codex --profile work '--no-daemon' --")
+    expect(plan?.launchCommand).toBe("codex '--no-daemon' --profile work --")
   })
 
   it('does not count a flag that sits after the terminator as present', () => {
@@ -116,9 +116,9 @@ describe('Codex --no-daemon launch contract', () => {
 
     // Why: `--` before the executable belongs to env; the flag goes after codex.
     expect(wrapped?.launchCommand).toBe("env -- codex '--no-daemon'")
-    // Why: codex is an argument to bash here, so the args cannot be placed; they
-    // are appended as before and simply do not reach codex.
-    expect(unreachable?.launchCommand).toBe("bash -c codex -- x '--no-daemon'")
+    // Why: codex is bash's -c script here; the flag lands as the script's $0 and
+    // never reaches codex, which is harmless. Only remoting wrappers are refused.
+    expect(unreachable?.launchCommand).toBe("bash -c codex '--no-daemon' -- x")
   })
 
   it('applies the contract through the PowerShell call operator', () => {
@@ -131,7 +131,7 @@ describe('Codex --no-daemon launch contract', () => {
       allowEmptyPromptLaunch: true
     })
 
-    expect(plan?.launchCommand).toBe("& 'codex' --profile work '--no-daemon' --")
+    expect(plan?.launchCommand).toBe("& 'codex' '--no-daemon' --profile work --")
   })
 
   it('falls back to appending when a cmd.exe token diverges from the shell parse', () => {
@@ -191,6 +191,32 @@ describe('Codex --no-daemon launch contract', () => {
     expect(resume?.launchCommand).toBe("codex 'resume' 's1'")
   })
 
+  it('treats a terminator positional like `codex -- wsl` as data, not a wrapper', () => {
+    const plan = buildAgentStartupPlan({
+      agent: 'codex',
+      prompt: '',
+      cmdOverrides: { codex: 'codex -- wsl' },
+      platform: 'win32',
+      shell: 'posix',
+      allowEmptyPromptLaunch: true
+    })
+
+    expect(plan?.launchCommand).toBe("codex '--no-daemon' -- wsl")
+  })
+
+  it('reaches Codex behind a local shell wrapper but not behind a remoting one', () => {
+    const host = { platform: 'win32' as const }
+    expect(applyAgentLaunchArgsToCustomCommand('cmd /c codex --', 'powershell', host)).toBe(
+      "cmd /c codex '--no-daemon' --"
+    )
+    expect(
+      applyAgentLaunchArgsToCustomCommand('powershell -Command codex', 'powershell', host)
+    ).toBe("powershell -Command codex '--no-daemon'")
+    expect(applyAgentLaunchArgsToCustomCommand('cmd /c wsl codex', 'powershell', host)).toBe(
+      'cmd /c wsl codex'
+    )
+  })
+
   it('never follows a remoting wrapper such as wsl or ssh', () => {
     const wsl = buildAgentStartupPlan({
       agent: 'codex',
@@ -216,13 +242,13 @@ describe('Codex --no-daemon launch contract', () => {
   it('applies the contract to user-authored Codex commands on a native Windows host only', () => {
     const host = { platform: 'win32' as const }
     expect(applyAgentLaunchArgsToCustomCommand('codex --model gpt-5.5', 'powershell', host)).toBe(
-      "codex --model gpt-5.5 '--no-daemon'"
+      "codex '--no-daemon' --model gpt-5.5"
     )
     expect(applyAgentLaunchArgsToCustomCommand('codex exec -m x "do it"', 'cmd', host)).toBe(
-      'codex exec -m x "do it" "--no-daemon"'
+      'codex "--no-daemon" exec -m x "do it"'
     )
     expect(applyAgentLaunchArgsToCustomCommand("codex 'resume' 'abc'", 'posix', host)).toBe(
-      "codex 'resume' 'abc' '--no-daemon'"
+      "codex '--no-daemon' 'resume' 'abc'"
     )
     // untouched: other agents, wrappers, already present, remote/linux hosts
     expect(applyAgentLaunchArgsToCustomCommand('claude --resume abc', 'powershell', host)).toBe(

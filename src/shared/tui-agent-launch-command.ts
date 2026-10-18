@@ -6,6 +6,7 @@ import type { SessionOptionValue } from './native-chat-session-options'
 import { getTuiAgentLaunchCommand, TUI_AGENT_CONFIG } from './tui-agent-config'
 import {
   findStartupCommandExecutableIndex,
+  isPosixStartupShell,
   planAgentCliArgsSuffix,
   quoteStartupArg,
   tokenizeStartupCommand,
@@ -24,15 +25,36 @@ export function launchArgsApply(args: { platform: NodeJS.Platform; isRemote?: bo
 
 const REMOTING_WRAPPERS = new Set(['wsl', 'ssh', 'docker', 'kubectl'])
 
-/** True when the command position holds a wrapper that runs the rest somewhere
- * else (`wsl codex`, `ssh host codex`): the local CLI contract must not follow. */
-function startsWithRemotingWrapper(tokens: readonly string[], shell: AgentStartupShell): boolean {
-  const index = findStartupCommandExecutableIndex(tokens, shell, (token) =>
-    REMOTING_WRAPPERS.has(
-      (token.split(/[\\/]/).pop() ?? '').toLowerCase().replace(/\.(exe|cmd|bat)$/, '')
-    )
-  )
-  return index !== -1
+function executableBaseName(token: string): string {
+  return (token.split(/[\\/]/).pop() ?? '').toLowerCase().replace(/\.(exe|cmd|bat|ps1)$/, '')
+}
+
+/** True when a remoting wrapper (`wsl`, `ssh`, ...) sits in the real command
+ * chain before `limit`: the first token and tokens behind a PowerShell `&` or
+ * sh assignments count as the command head, so `codex -- wsl` (a Codex
+ * positional) is not a wrapper, while `cmd /c wsl codex` is. */
+function hasRemotingWrapperBefore(
+  tokens: readonly string[],
+  shell: AgentStartupShell,
+  limit: number
+): boolean {
+  for (let i = 0; i < Math.min(limit, tokens.length); i += 1) {
+    const token = tokens[i]
+    if (
+      (isPosixStartupShell(shell) && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) ||
+      (shell === 'powershell' && token === '&' && i === 0)
+    ) {
+      continue
+    }
+    if (token === '--') {
+      // Why: everything after a terminator is positional data for the program before it.
+      return false
+    }
+    if (REMOTING_WRAPPERS.has(executableBaseName(token))) {
+      return true
+    }
+  }
+  return false
 }
 
 /** Applies the launch contract of whichever agent sits in command position of a
@@ -54,10 +76,9 @@ export function applyAgentLaunchArgsToCustomCommand(
     if (!TUI_AGENT_CONFIG[agent].launchArgs?.length) {
       continue
     }
-    const index = findStartupCommandExecutableIndex(tokenized.tokens, shell, (token) =>
-      isAgentExecutableToken(agent, token)
-    )
-    if (index !== -1) {
+    // Why: a local shell wrapper (`cmd /c codex`) still reaches the agent; appendAgentLaunchArgs
+    // decides placement and refuses remoting wrappers itself.
+    if (tokenized.tokens.some((token) => isAgentExecutableToken(agent, token))) {
       return appendAgentLaunchArgs(agent, command, shell)
     }
   }
@@ -106,38 +127,48 @@ export function appendAgentLaunchArgs(
     const missing = launchArgs.filter((arg) => !present.has(arg))
     return missing.length === 0 ? command : `${command} ${quoted(missing)}`
   }
-  if (startsWithRemotingWrapper(tokenized.tokens, shell)) {
+  const { tokens, spans } = tokenized
+  // Why: the executable may sit in command position (`codex`, `& 'codex'`) or be
+  // handed to a local shell wrapper (`cmd /c codex --`, `powershell -Command codex`);
+  // both reach Codex on this host. A remoting wrapper before it does not.
+  let executableIndex = findStartupCommandExecutableIndex(tokens, shell, (token) =>
+    isAgentExecutableToken(agent, token)
+  )
+  if (executableIndex === -1) {
+    executableIndex = tokens.findIndex((token) => isAgentExecutableToken(agent, token))
+  }
+  if (executableIndex === -1) {
+    const missing = launchArgs.filter((arg) => !tokens.includes(arg))
+    return missing.length === 0 ? command : `${command} ${quoted(missing)}`
+  }
+  if (hasRemotingWrapperBefore(tokens, shell, executableIndex)) {
     // Why: `wsl codex` / `ssh host codex` run a CLI whose version this host cannot vouch for.
     return command
   }
-  const executableIndex = findStartupCommandExecutableIndex(tokenized.tokens, shell, (token) =>
-    isAgentExecutableToken(agent, token)
-  )
-  const terminatorIndex =
-    executableIndex === -1 ? -1 : tokenized.tokens.indexOf('--', executableIndex + 1)
+  const terminatorIndex = tokens.indexOf('--', executableIndex + 1)
   const optionTokens =
     terminatorIndex === -1
-      ? tokenized.tokens.slice(Math.max(executableIndex, 0))
-      : tokenized.tokens.slice(executableIndex, terminatorIndex)
+      ? tokens.slice(executableIndex)
+      : tokens.slice(executableIndex, terminatorIndex)
   const missing = launchArgs.filter((arg) => !optionTokens.includes(arg))
   if (missing.length === 0) {
     return command
   }
-  // Why: PowerShell's leading call operator is the one divergent token the tokenizer models safely (see agent-resume-launch-command.ts).
-  const spliceable =
-    terminatorIndex !== -1 &&
-    !tokenized.spans
-      .slice(0, terminatorIndex + 1)
-      .some(
-        (span, index) =>
-          span.divergesFromShell &&
-          !(shell === 'powershell' && index === 0 && tokenized.tokens[0] === '&')
-      )
-  if (!spliceable) {
+  // Why: insert right after the executable token so the args stay options even
+  // when a `--` terminator or a positional prompt follows; a Windows token that
+  // diverges from the shell's own parse up to there falls back to appending,
+  // except PowerShell's leading call operator which the tokenizer models.
+  const diverges = spans
+    .slice(0, executableIndex + 1)
+    .some(
+      (span, index) =>
+        span.divergesFromShell && !(shell === 'powershell' && index === 0 && tokens[0] === '&')
+    )
+  if (diverges) {
     return `${command} ${quoted(missing)}`
   }
-  const cut = tokenized.spans[terminatorIndex].start
-  return `${command.slice(0, cut)}${quoted(missing)} ${command.slice(cut)}`
+  const insertAt = spans[executableIndex].end
+  return `${command.slice(0, insertAt)} ${quoted(missing)}${command.slice(insertAt)}`
 }
 
 export type ResolvedAgentLaunchCommand =

@@ -1,4 +1,7 @@
 import { getAppEnvironment } from '../../../../shared/app-environment'
+import { isNativeWindowsLocalPtySpawn } from '../../../runtime/terminal-model-query-authority'
+import { applyAgentLaunchArgsToCustomCommand } from '../../../../shared/tui-agent-launch-command'
+import { resolveLocalWindowsAgentStartupShell } from '../../../../shared/windows-terminal-shell'
 import type { PtySpawnResult } from '../../../providers/types'
 import { LocalPtyProvider } from '../../../providers/local-pty-provider'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
@@ -129,6 +132,28 @@ export async function prepareRuntimePtySpawn(
   // Why: the drop still applies here, but this controller's result has no field for
   // notifyResumeUnavailable — runtime/relay panes start fresh without the notice.
   ctx.launchCommand = codexResumeLaunch.command
+  if (
+    ctx.launchCommand &&
+    !isTuiAgent(args.launchAgent) &&
+    isNativeWindowsLocalPtySpawn({
+      connectionId: args.connectionId,
+      cwd: ctx.cwd,
+      shellOverride: ctx.daemonShellOverride
+    })
+  ) {
+    // Why: same contract as the IPC spawn path (spawn-env-codex.ts); runtime-created
+    // terminals carry user-authored commands too.
+    ctx.launchCommand = applyAgentLaunchArgsToCustomCommand(
+      ctx.launchCommand,
+      resolveLocalWindowsAgentStartupShell({
+        platform: 'win32',
+        isRemote: false,
+        terminalWindowsShell:
+          ctx.daemonShellOverride ?? ctx.deps.getSettings?.()?.terminalWindowsShell ?? null
+      }) ?? 'powershell',
+      { platform: 'win32', isRemote: false }
+    )
+  }
   ctx.claudeAuth =
     ctx.isClaudeLaunch && ctx.deps.prepareClaudeAuth
       ? await ctx.deps.prepareClaudeAuth(ctx.codexSelectionTarget)

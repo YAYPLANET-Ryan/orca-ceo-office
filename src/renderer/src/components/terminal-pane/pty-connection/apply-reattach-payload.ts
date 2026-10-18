@@ -286,6 +286,10 @@ export function createReattachPayloadHandlers(
         session.clearSleepingRecordAfterColdRestoreSpawn(preparedStartup)
       } else if (ctx.coldRestoreAgentResumeRequired) {
         session.showSessionRestoredBanner('resume-required')
+        // Why: no resume could be prepared, so the background in-place claim must
+        // lapse now and let the sweep recover the record elsewhere (a null startup
+        // only releases the claim; there is no record to clear).
+        session.clearSleepingRecordAfterColdRestoreSpawn(null)
       }
       // Why: cold-restore spawned a fresh shell; reset mode bytes a crashed TUI (e.g. Claude's \e[?1004h) left in scrollback that no live TUI now consumes.
       session.writeReplayData(POST_REPLAY_MODE_RESET)

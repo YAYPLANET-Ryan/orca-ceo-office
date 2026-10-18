@@ -7,6 +7,7 @@ import type {
 } from '../../../shared/terminal-tab-types'
 import { parseLegacyNumericPaneKey, parsePaneKey } from '../../../shared/stable-pane-id'
 import { isWebTerminalSurfaceTabId } from '../../../shared/terminal-surface-id'
+import { hasInPlaceRestoreClaim } from './in-place-restore-claims'
 
 type AppStoreState = ReturnType<typeof useAppStore.getState>
 
@@ -192,7 +193,9 @@ export function recordPaneIsOwnedByPreservedPane(
       return true
     }
     // Why: active sessions rely on pane-level cold restore. A preserved leaf
-    // without a PTY/session id can repaint scrollback but cannot resume.
+    // without a PTY/session id can repaint scrollback but cannot resume. A
+    // background wake that mounted this very pane holds a bounded claim so the
+    // sweep (and its mirror replay) does not fork the session meanwhile.
     return (
       hasRestorableStablePanePty(
         tab,
@@ -200,7 +203,9 @@ export function recordPaneIsOwnedByPreservedPane(
         stable.leafId,
         state.ptyIdsByTabId,
         state.terminalLayoutsByTabId
-      ) && paneWillConnectOnActivation(record.worktreeId, tabId, state)
+      ) &&
+      (paneWillConnectOnActivation(record.worktreeId, tabId, state) ||
+        hasInPlaceRestoreClaim(tabId))
     )
   }
 

@@ -707,6 +707,40 @@ export class AgentHookServer {
   private endpointFileWritten = false
   // Why: per-instance (not module-level) so tests can spin up multiple servers without state cross-contamination.
   private state: HookListenerState = createHookListenerState()
+  /** Renderer-reported process-table foreground per pane (see pane-foreground-agent slice). */
+  private paneForegroundByPaneKey = new Map<
+    string,
+    { agent: string | null; shellForeground: boolean; routingRevoked?: boolean }
+  >()
+
+  recordPaneForeground(paneKey: string, evidence: unknown): void {
+    if (evidence === null) {
+      this.paneForegroundByPaneKey.delete(paneKey)
+      return
+    }
+    if (typeof evidence !== 'object') {
+      return
+    }
+    const record = evidence as {
+      agent?: unknown
+      shellForeground?: unknown
+      routingRevoked?: unknown
+    }
+    const agent = typeof record.agent === 'string' ? record.agent : null
+    if (typeof record.shellForeground !== 'boolean') {
+      return
+    }
+    // Why: bounded like the status maps; a pane that goes away sends null, and a
+    // runaway client cannot grow this past a few thousand panes.
+    if (this.paneForegroundByPaneKey.size > 5_000 && !this.paneForegroundByPaneKey.has(paneKey)) {
+      return
+    }
+    this.paneForegroundByPaneKey.set(paneKey, {
+      agent,
+      shellForeground: record.shellForeground,
+      ...(record.routingRevoked === true ? { routingRevoked: true } : {})
+    })
+  }
   private onTransportInterference: ((report: HookTransportInterferenceReport) => void) | null = null
   private transportInterference = createHookTransportInterferenceTracker((report) => {
     console.warn(describeHookTransportInterference(report))
@@ -1488,7 +1522,8 @@ export class AgentHookServer {
           }
         : undefined,
       incoming: rootContextPreservingPayload.payload.agentType,
-      now
+      now,
+      foreground: this.paneForegroundByPaneKey.get(payload.paneKey) ?? null
     })
     if (
       previous &&

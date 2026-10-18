@@ -22,6 +22,8 @@ type AgentIdentityResolution = {
 export type PaneForegroundEvidence = {
   agent: AgentType | null
   shellForeground: boolean
+  /** Exit/input evidence revoked the foreground identity until the provider confirms it again. */
+  routingRevoked?: boolean
 }
 
 export function shouldSuppressInheritedTerminalStatus(args: {
@@ -71,6 +73,15 @@ export function resolveAgentStatusIdentity(args: {
       inheritedFromActivePane: false
     }
   }
+  if (args.foreground?.shellForeground === true) {
+    return {
+      // Why: the shell is proven back in the foreground (OSC 133;D), so the
+      // previous agent is gone even if its row still looks active (a nested
+      // child's `working` was merged onto it); the next agent owns the pane.
+      agentType: incomingAgentType,
+      inheritedFromActivePane: false
+    }
+  }
   if (isActiveExistingIdentity(args.existing, args.now, staleAfterMs)) {
     return {
       // Why: child agent CLIs inherit ORCA_PANE_KEY from their parent terminal.
@@ -83,7 +94,8 @@ export function resolveAgentStatusIdentity(args: {
   if (
     args.foreground?.agent &&
     args.foreground.agent === existingAgentType &&
-    !args.foreground.shellForeground
+    !args.foreground.shellForeground &&
+    args.foreground.routingRevoked !== true
   ) {
     return {
       // Why: an idle parent (Claude sitting at its prompt) still owns the PTY

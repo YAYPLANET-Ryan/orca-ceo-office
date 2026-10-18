@@ -14757,7 +14757,7 @@ describe('OrcaRuntimeService', () => {
 
     const spawnCall = spawn.mock.calls[0]?.[0] as { command?: string } | undefined
     expect(spawnCall?.command).toBe(
-      "codex --profile work '--no-daemon' '--dangerously-bypass-approvals-and-sandbox'"
+      "codex '--no-daemon' --profile work '--dangerously-bypass-approvals-and-sandbox'"
     )
   })
 
@@ -46262,7 +46262,7 @@ describe('OrcaRuntimeService', () => {
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/tmp/workspaces/runtime-startup-draft',
-        command: "codex --profile work '--no-daemon' '--dangerously-bypass-approvals-and-sandbox'",
+        command: "codex '--no-daemon' --profile work '--dangerously-bypass-approvals-and-sandbox'",
         worktreeId: result.worktree.id
       })
     )

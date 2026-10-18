@@ -1,4 +1,5 @@
 import { useAppStore } from '@/store'
+import { releaseInPlaceRestore } from '@/lib/in-place-restore-claims'
 import type { PtyReplayDataMeta } from '../pty-transport'
 import { INITIAL_MODE_2031_REPLY_SCAN_STATE } from '../../../../../shared/terminal-color-scheme-protocol'
 import { waitForTerminalOutputParsed } from '@/lib/pane-manager/pane-terminal-output-scheduler'
@@ -38,6 +39,9 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
   session.clearSleepingRecordAfterColdRestoreSpawn = (
     startup: ColdRestoreAgentResumeStartup | null
   ): void => {
+    // Why: the pane has now decided its own cold restore; a background in-place
+    // claim held for it (wake-sleeping-agents-in-background) must not outlive that.
+    releaseInPlaceRestore(session.deps.tabId)
     if (startup && !startup.useLiveEntry && startup.sleepingRecordEntry) {
       session.clearSleepingRecordProviderDuplicates(
         useAppStore.getState(),

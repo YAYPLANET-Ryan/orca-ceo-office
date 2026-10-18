@@ -1,6 +1,7 @@
 import { getAppEnvironment } from '../../../../shared/app-environment'
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import { applyAgentLaunchArgsToCustomCommand } from '../../../../shared/tui-agent-launch-command'
+import { SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV } from '../../../../shared/setup-agent-sequencing'
 import { resolveLocalWindowsAgentStartupShell } from '../../../../shared/windows-terminal-shell'
 import { isAgentStatusHooksEnabled } from '../../../agent-hooks/managed-agent-hook-controls'
 import { isSafePtySessionId } from '../../../daemon/pty-session-id'
@@ -65,6 +66,19 @@ export async function assemblePtyIpcSpawnCodexEnv(ctx: PtyIpcSpawnState): Promis
     )
   }
   ctx.baseEnv = ctx.deps.stripSequencedStartupResumeArgv(ctx.baseEnv, ctx.codexResumeLaunch)
+  const sequencedStartup = ctx.baseEnv?.[SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV]
+  if (sequencedStartup && ctx.nativeWindowsConptySpawn && !isTuiAgent(args.launchAgent)) {
+    // Why: buildPtyHostEnv prefers the sequenced command and `eval`s it in sh, so the
+    // contract has to reach it too, with POSIX quoting.
+    ctx.baseEnv = {
+      ...ctx.baseEnv,
+      [SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV]: applyAgentLaunchArgsToCustomCommand(
+        sequencedStartup,
+        'posix',
+        { platform: 'win32', isRemote: false }
+      )
+    }
+  }
   // Why: declared after the strip so a local-provider spawn cannot capture the
   // pre-strip env — only the daemon branch below re-derives this from baseEnv.
   ctx.env = ctx.baseEnv

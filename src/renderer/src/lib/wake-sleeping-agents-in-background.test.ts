@@ -23,6 +23,9 @@ vi.mock('./resume-sleeping-agent-session', () => ({
 // the gating, not the predicate internals.
 const isPassiveSpy = vi.fn()
 const isRestorablePreservedSpy = vi.fn((_record: unknown) => false)
+vi.mock('./in-place-restore-claims', () => ({
+  claimInPlaceRestore: vi.fn()
+}))
 vi.mock('./sleeping-agent-pane-ownership', () => ({
   isPassiveCompletedHibernationEvidence: (record: unknown) => isPassiveSpy(record),
   recordPaneIsOwnedByPreservedPane: () => false,
@@ -379,6 +382,27 @@ describe('wakeSleepingAgentsForWorktreeInBackground', () => {
     // resumes the session; a fresh "Terminal N" tab would strand that tab with a new agent.
     expect(rec.events).toEqual(['wake:wt-1', 'mount:wt-1'])
     expect(rec.mountDetails[0]?.tabIds).toEqual(['tab-a'])
+    const options = resumeSpy.mock.calls[0]?.[1]
+    expect(options?.skipClaimKeys?.has('wt-1\0agent\0session_id\0session')).toBe(true)
+  })
+
+  it('keeps an explicit workspace-sleep record out of the sweep without mounting it', () => {
+    sleepingRecords = {
+      k1: {
+        worktreeId: 'wt-1',
+        paneKey: 'tab-a:leaf-1',
+        tabId: 'tab-a',
+        restoreOnTabOpenOnly: true
+      } as never
+    }
+    isPassiveSpy.mockReturnValue(false)
+    isRestorablePreservedSpy.mockReturnValue(true)
+    const rec = recordEvents()
+
+    wakeSleepingAgentsForWorktreeInBackground('wt-1')
+
+    rec.stop()
+    expect(rec.events).toEqual(['wake:wt-1'])
     const options = resumeSpy.mock.calls[0]?.[1]
     expect(options?.skipClaimKeys?.has('wt-1\0agent\0session_id\0session')).toBe(true)
   })

@@ -2206,7 +2206,8 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           foreground: foregroundEvidence
             ? {
                 agent: foregroundEvidence.agent,
-                shellForeground: foregroundEvidence.shellForeground
+                shellForeground: foregroundEvidence.shellForeground,
+                ...(foregroundEvidence.routingRevoked ? { routingRevoked: true } : {})
               }
             : undefined
         })

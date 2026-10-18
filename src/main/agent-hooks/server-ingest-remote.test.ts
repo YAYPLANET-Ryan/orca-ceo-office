@@ -193,6 +193,73 @@ describe('AgentHookServer ingestRemote', () => {
     )
   })
 
+  it('uses renderer foreground evidence so an idle parent keeps its identity and session in main too', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          providerSession: { key: 'session_id', id: 'claude-parent' },
+          payload: { state: 'done', prompt: 'idle claude', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+      server.recordPaneForeground(PANE, { agent: 'claude', shellForeground: false })
+      vi.setSystemTime(1_100)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          providerSession: { key: 'session_id', id: 'codex-child' },
+          payload: {
+            state: 'working',
+            prompt: 'codex exec from an idle claude',
+            agentType: 'codex'
+          }
+        },
+        'conn-1'
+      )
+
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: PANE,
+          agentType: 'claude',
+          providerSession: { key: 'session_id', id: 'claude-parent' }
+        })
+      ])
+
+      // Why: the shell returning is the proof the parent exited; the next agent takes over.
+      server.recordPaneForeground(PANE, { agent: null, shellForeground: true })
+      vi.setSystemTime(1_200)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          providerSession: { key: 'session_id', id: 'codex-new' },
+          payload: { state: 'working', prompt: 'fresh codex', agentType: 'codex' }
+        },
+        'conn-1'
+      )
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          agentType: 'codex',
+          providerSession: { key: 'session_id', id: 'codex-new' }
+        })
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps the parent provider session when a nested hook of another agent carries its own', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)

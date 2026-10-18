@@ -49,6 +49,40 @@ describe('nested hooks under a foreground parent', () => {
     expect(entry?.providerSession).toEqual(claudeSession)
   })
 
+  it('does not trust revoked foreground evidence to keep a stale identity', () => {
+    const store = createTestStore()
+    store.getState().setPaneForegroundAgent('tab-1:leaf-1', {
+      agent: 'claude',
+      shellForeground: false,
+      routingRevoked: true
+    })
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'done', prompt: 'idle at prompt', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 10, stateStartedAt: 10 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'claude-parent' } }
+      )
+
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'codex after a crashed claude', agentType: 'codex' },
+        'Codex',
+        { updatedAt: 20, stateStartedAt: 20 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'codex-new' } }
+      )
+
+    const entry = store.getState().agentStatusByPaneKey['tab-1:leaf-1']
+    expect(entry?.agentType).toBe('codex')
+    expect(entry?.providerSession).toEqual({ key: 'session_id', id: 'codex-new' })
+  })
+
   it('lets a new agent take the pane once the shell foreground proves the parent exited', () => {
     const store = createTestStore()
     store
