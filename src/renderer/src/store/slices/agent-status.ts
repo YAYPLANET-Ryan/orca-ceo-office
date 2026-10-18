@@ -2191,6 +2191,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           }
         }
 
+        const foregroundEvidence = s.paneForegroundAgentByPaneKey[paneKey]
         const identity = resolveAgentStatusIdentity({
           existing: existing
             ? {
@@ -2201,7 +2202,13 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
               }
             : undefined,
           incoming: payload.agentType,
-          now: updatedAt
+          now: updatedAt,
+          foreground: foregroundEvidence
+            ? {
+                agent: foregroundEvidence.agent,
+                shellForeground: foregroundEvidence.shellForeground
+              }
+            : undefined
         })
         // Why: Command Code has no UserPromptSubmit; a fresh transcript prompt while still `working` is the smart-sort turn boundary.
         const commandCodeNewTurn =
@@ -2264,9 +2271,13 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         const canReuseExistingProviderSession =
           existing?.agentType === identity.agentType &&
           (existing.state !== 'done' || payload.state === 'done')
+        // Why: a nested hook (see resolveAgentStatusIdentity) carries the child's session id;
+        // the pane keeps the parent's, or a later cold restore would resume the wrong agent.
         const providerSession =
-          metadata?.providerSession ??
-          (canReuseExistingProviderSession ? existing.providerSession : undefined)
+          identity.inheritedFromActivePane && existing?.providerSession
+            ? existing.providerSession
+            : (metadata?.providerSession ??
+              (canReuseExistingProviderSession ? existing.providerSession : undefined))
         const existingProviderSession = canReuseExistingProviderSession
           ? existing.providerSession
           : undefined

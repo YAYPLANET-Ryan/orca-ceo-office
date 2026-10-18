@@ -1504,6 +1504,12 @@ export class AgentHookServer {
         ? rootContextPreservingPayload
         : {
             ...rootContextPreservingPayload,
+            // Why: a nested child's session id is not the pane's resumable session;
+            // keeping the parent's id with the parent's identity is what lets a
+            // cold restore bring back the agent the user actually runs here.
+            ...(identity.inheritedFromActivePane && previous?.providerSession
+              ? { providerSession: previous.providerSession }
+              : {}),
             payload: {
               ...rootContextPreservingPayload.payload,
               agentType: identity.agentType

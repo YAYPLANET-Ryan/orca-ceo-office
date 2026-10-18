@@ -129,6 +129,38 @@ function paneWillConnectOnActivation(
   return !isWebTerminalSurfaceTabId(tabId)
 }
 
+/** True when the record's own pane still exists with a layout leaf that can
+ * cold-restore the session (a saved leaf PTY id or a single-leaf tab binding),
+ * regardless of whether the worktree is active right now. Used by the
+ * background wake to mount that pane instead of forking the session into a
+ * fresh tab, which left the original tab to start a new agent later. */
+export function recordPaneIsRestorablePreservedPane(
+  record: SleepingAgentSessionRecord,
+  state: AppStoreState
+): boolean {
+  const stable = parsePaneKey(record.paneKey)
+  if (!stable || (record.tabId && record.tabId !== stable.tabId)) {
+    return false
+  }
+  const tabId = record.tabId ?? stable.tabId
+  const tab = (state.tabsByWorktree[record.worktreeId] ?? []).find(
+    (candidate) => candidate.id === tabId
+  )
+  if (!tab || isWebTerminalSurfaceTabId(tabId)) {
+    return false
+  }
+  return (
+    hasMatchingStablePaneLayout(tabId, stable.leafId, state.terminalLayoutsByTabId) &&
+    hasRestorableStablePanePty(
+      tab,
+      tabId,
+      stable.leafId,
+      state.ptyIdsByTabId,
+      state.terminalLayoutsByTabId
+    )
+  )
+}
+
 export function recordPaneIsOwnedByPreservedPane(
   record: SleepingAgentSessionRecord,
   state: AppStoreState

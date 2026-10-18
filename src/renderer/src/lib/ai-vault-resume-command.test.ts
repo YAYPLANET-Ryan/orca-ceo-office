@@ -647,7 +647,7 @@ describe('ai vault resume command runtime', () => {
             'cmd /d /s /c "cd /d ""C:/Users/alice/repo"" && set ""CODEX_HOME=C:/Users/alice/.codex"" && codex resume ""session one"""'
         }
       })
-    ).toBe("$env:CODEX_HOME='C:/Users/alice/.codex'; my-codex '--no-daemon' 'resume' 'session one'")
+    ).toBe("$env:CODEX_HOME='C:/Users/alice/.codex'; my-codex 'resume' 'session one'")
   })
 
   it('applies the user default args to local Copilot AI Vault resumes', () => {

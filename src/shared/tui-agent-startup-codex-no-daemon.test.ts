@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildAgentResumeStartupPlan, buildAgentStartupPlan } from './tui-agent-startup'
 import { TUI_AGENT_CONFIG } from './tui-agent-config'
+import { applyAgentLaunchArgsToCustomCommand } from './tui-agent-launch-command'
 
 // Why: Codex 0.162+ runs a shared app-server daemon that executes the agent
 // hooks with the environment of whichever pane started it, so every other
@@ -188,6 +189,58 @@ describe('Codex --no-daemon launch contract', () => {
 
     expect(launch?.launchCommand).toBe("codex 'fix it'")
     expect(resume?.launchCommand).toBe("codex 'resume' 's1'")
+  })
+
+  it('never follows a remoting wrapper such as wsl or ssh', () => {
+    const wsl = buildAgentStartupPlan({
+      agent: 'codex',
+      prompt: '',
+      cmdOverrides: { codex: 'wsl codex' },
+      platform: 'win32',
+      shell: 'posix',
+      allowEmptyPromptLaunch: true
+    })
+    const ssh = buildAgentStartupPlan({
+      agent: 'codex',
+      prompt: '',
+      cmdOverrides: { codex: 'ssh devbox codex' },
+      platform: 'win32',
+      shell: 'posix',
+      allowEmptyPromptLaunch: true
+    })
+
+    expect(wsl?.launchCommand).toBe('wsl codex')
+    expect(ssh?.launchCommand).toBe('ssh devbox codex')
+  })
+
+  it('applies the contract to user-authored Codex commands on a native Windows host only', () => {
+    const host = { platform: 'win32' as const }
+    expect(applyAgentLaunchArgsToCustomCommand('codex --model gpt-5.5', 'powershell', host)).toBe(
+      "codex --model gpt-5.5 '--no-daemon'"
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('codex exec -m x "do it"', 'cmd', host)).toBe(
+      'codex exec -m x "do it" "--no-daemon"'
+    )
+    expect(applyAgentLaunchArgsToCustomCommand("codex 'resume' 'abc'", 'posix', host)).toBe(
+      "codex 'resume' 'abc' '--no-daemon'"
+    )
+    // untouched: other agents, wrappers, already present, remote/linux hosts
+    expect(applyAgentLaunchArgsToCustomCommand('claude --resume abc', 'powershell', host)).toBe(
+      'claude --resume abc'
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('wsl codex', 'powershell', host)).toBe('wsl codex')
+    expect(applyAgentLaunchArgsToCustomCommand('codex --no-daemon', 'powershell', host)).toBe(
+      'codex --no-daemon'
+    )
+    expect(
+      applyAgentLaunchArgsToCustomCommand('codex', 'powershell', {
+        platform: 'win32',
+        isRemote: true
+      })
+    ).toBe('codex')
+    expect(applyAgentLaunchArgsToCustomCommand('codex', 'posix', { platform: 'linux' })).toBe(
+      'codex'
+    )
   })
 
   it('leaves agents without a contract untouched on resume', () => {

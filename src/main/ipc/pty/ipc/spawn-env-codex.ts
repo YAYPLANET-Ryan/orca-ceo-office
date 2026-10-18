@@ -1,5 +1,7 @@
 import { getAppEnvironment } from '../../../../shared/app-environment'
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
+import { applyAgentLaunchArgsToCustomCommand } from '../../../../shared/tui-agent-launch-command'
+import { resolveLocalWindowsAgentStartupShell } from '../../../../shared/windows-terminal-shell'
 import { isAgentStatusHooksEnabled } from '../../../agent-hooks/managed-agent-hook-controls'
 import { isSafePtySessionId } from '../../../daemon/pty-session-id'
 import { isNativeWindowsLocalPtySpawn } from '../../../runtime/terminal-model-query-authority'
@@ -47,6 +49,21 @@ export async function assemblePtyIpcSpawnCodexEnv(ctx: PtyIpcSpawnState): Promis
     : ctx.deps.noCodexResumeLaunch(ctx.preAdoptedStablePane ? undefined : args.command)
   const codexResumeHome = ctx.codexResumeLaunch.codexResumeHome
   ctx.launchCommand = ctx.codexResumeLaunch.command
+  if (ctx.launchCommand && ctx.nativeWindowsConptySpawn && !isTuiAgent(args.launchAgent)) {
+    // Why: user-authored commands (quick commands, CLI --command, pasted resume
+    // lines) bypass the shared startup builder; this is the one point every
+    // native Windows spawn passes, so the Codex launch contract is applied here.
+    ctx.launchCommand = applyAgentLaunchArgsToCustomCommand(
+      ctx.launchCommand,
+      resolveLocalWindowsAgentStartupShell({
+        platform: 'win32',
+        isRemote: false,
+        terminalWindowsShell:
+          ctx.effectiveShellOverride ?? ctx.deps.getSettings?.()?.terminalWindowsShell ?? null
+      }) ?? 'powershell',
+      { platform: 'win32', isRemote: false }
+    )
+  }
   ctx.baseEnv = ctx.deps.stripSequencedStartupResumeArgv(ctx.baseEnv, ctx.codexResumeLaunch)
   // Why: declared after the strip so a local-provider spawn cannot capture the
   // pre-strip env — only the daemon branch below re-derives this from baseEnv.

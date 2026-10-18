@@ -22,6 +22,48 @@ export function launchArgsApply(args: { platform: NodeJS.Platform; isRemote?: bo
   return args.platform === 'win32' && !args.isRemote
 }
 
+const REMOTING_WRAPPERS = new Set(['wsl', 'ssh', 'docker', 'kubectl'])
+
+/** True when the command position holds a wrapper that runs the rest somewhere
+ * else (`wsl codex`, `ssh host codex`): the local CLI contract must not follow. */
+function startsWithRemotingWrapper(tokens: readonly string[], shell: AgentStartupShell): boolean {
+  const index = findStartupCommandExecutableIndex(tokens, shell, (token) =>
+    REMOTING_WRAPPERS.has(
+      (token.split(/[\\/]/).pop() ?? '').toLowerCase().replace(/\.(exe|cmd|bat)$/, '')
+    )
+  )
+  return index !== -1
+}
+
+/** Applies the launch contract of whichever agent sits in command position of a
+ * user-authored command (quick commands, CLI `--command`, pasted lines). Returns
+ * the command unchanged when no contract agent is found there. */
+export function applyAgentLaunchArgsToCustomCommand(
+  command: string,
+  shell: AgentStartupShell,
+  host: { platform: NodeJS.Platform; isRemote?: boolean }
+): string {
+  if (!launchArgsApply(host) || !command.trim()) {
+    return command
+  }
+  const tokenized = tokenizeStartupCommand(command, shell)
+  if (!tokenized.ok) {
+    return command
+  }
+  for (const agent of Object.keys(TUI_AGENT_CONFIG) as TuiAgent[]) {
+    if (!TUI_AGENT_CONFIG[agent].launchArgs?.length) {
+      continue
+    }
+    const index = findStartupCommandExecutableIndex(tokenized.tokens, shell, (token) =>
+      isAgentExecutableToken(agent, token)
+    )
+    if (index !== -1) {
+      return appendAgentLaunchArgs(agent, command, shell)
+    }
+  }
+  return command
+}
+
 function isAgentExecutableToken(agent: TuiAgent, token: string): boolean {
   const base = (token.split(/[\\/]/).pop() ?? '').toLowerCase()
   const names = new Set(
@@ -63,6 +105,10 @@ export function appendAgentLaunchArgs(
     )
     const missing = launchArgs.filter((arg) => !present.has(arg))
     return missing.length === 0 ? command : `${command} ${quoted(missing)}`
+  }
+  if (startsWithRemotingWrapper(tokenized.tokens, shell)) {
+    // Why: `wsl codex` / `ssh host codex` run a CLI whose version this host cannot vouch for.
+    return command
   }
   const executableIndex = findStartupCommandExecutableIndex(tokenized.tokens, shell, (token) =>
     isAgentExecutableToken(agent, token)

@@ -29,7 +29,7 @@ const LOCAL_WINDOWS_ARGS: AgentResumeLaunchTargetArgs = {
 
 async function resolveWith(
   overrides: Partial<AgentResumeLaunchTargetArgs>
-): Promise<{ platform: NodeJS.Platform; shell: string | undefined }> {
+): Promise<{ platform: NodeJS.Platform; shell: string | undefined; isRemote: boolean }> {
   const { resolveAgentResumeLaunchTarget } = await import('./agent-resume-launch-target')
   return resolveAgentResumeLaunchTarget({
     ...LOCAL_WINDOWS_ARGS,
@@ -50,7 +50,7 @@ describe('resolveAgentResumeLaunchTarget on a Windows client', () => {
   })
 
   it('quotes for cmd.exe when the global Windows shell is cmd.exe', async () => {
-    await expect(resolveWith({ terminalWindowsShell: 'cmd.exe' })).resolves.toEqual({
+    await expect(resolveWith({ terminalWindowsShell: 'cmd.exe' })).resolves.toMatchObject({
       platform: 'win32',
       shell: 'cmd'
     })
@@ -62,18 +62,18 @@ describe('resolveAgentResumeLaunchTarget on a Windows client', () => {
         terminalWindowsShell: 'powershell.exe',
         tabShellOverride: 'C:\\WINDOWS\\system32\\cmd.exe'
       })
-    ).resolves.toEqual({ platform: 'win32', shell: 'cmd' })
+    ).resolves.toMatchObject({ platform: 'win32', shell: 'cmd' })
   })
 
   it('quotes for POSIX on a Git Bash tab', async () => {
-    await expect(resolveWith({ terminalWindowsShell: 'git-bash' })).resolves.toEqual({
+    await expect(resolveWith({ terminalWindowsShell: 'git-bash' })).resolves.toMatchObject({
       platform: 'win32',
       shell: 'posix'
     })
   })
 
   it('keeps PowerShell quoting when no Windows shell is configured', async () => {
-    await expect(resolveWith({})).resolves.toEqual({
+    await expect(resolveWith({})).resolves.toMatchObject({
       platform: 'win32',
       shell: 'powershell'
     })
@@ -86,7 +86,20 @@ describe('resolveAgentResumeLaunchTarget on a Windows client', () => {
         executionHostId: 'ssh:ssh-1',
         terminalWindowsShell: 'cmd.exe'
       })
-    ).resolves.toEqual({ platform: 'linux', shell: undefined })
+    ).resolves.toMatchObject({ platform: 'linux', shell: undefined })
+  })
+
+  it('marks SSH and paired remote execution hosts as remote, local hosts as not', async () => {
+    await expect(resolveWith({})).resolves.toMatchObject({ isRemote: false })
+    await expect(resolveWith({ executionHostId: null })).resolves.toMatchObject({
+      isRemote: false
+    })
+    await expect(resolveWith({ connectionId: 'ssh-1' })).resolves.toMatchObject({
+      isRemote: true
+    })
+    await expect(resolveWith({ executionHostId: 'runtime:prod-box' })).resolves.toMatchObject({
+      isRemote: true
+    })
   })
 
   it('does not describe a remote runtime host with the local Windows shell setting', async () => {
@@ -95,7 +108,7 @@ describe('resolveAgentResumeLaunchTarget on a Windows client', () => {
         executionHostId: 'runtime:prod-box',
         terminalWindowsShell: 'cmd.exe'
       })
-    ).resolves.toEqual({ platform: 'win32', shell: undefined })
+    ).resolves.toMatchObject({ platform: 'win32', shell: undefined })
   })
 
   it('keeps POSIX quoting for a WSL UNC worktree', async () => {
@@ -104,7 +117,7 @@ describe('resolveAgentResumeLaunchTarget on a Windows client', () => {
         worktreePath: '\\\\wsl.localhost\\Ubuntu\\home\\neil\\repo',
         terminalWindowsShell: 'cmd.exe'
       })
-    ).resolves.toEqual({ platform: 'linux', shell: undefined })
+    ).resolves.toMatchObject({ platform: 'linux', shell: undefined })
   })
 
   it('keeps POSIX quoting for a project pinned to a WSL runtime', async () => {
@@ -122,7 +135,7 @@ describe('resolveAgentResumeLaunchTarget on a Windows client', () => {
         } as AgentResumeLaunchTargetArgs['projectRuntime'],
         terminalWindowsShell: 'cmd.exe'
       })
-    ).resolves.toEqual({ platform: 'linux', shell: undefined })
+    ).resolves.toMatchObject({ platform: 'linux', shell: undefined })
   })
 })
 
@@ -144,6 +157,6 @@ describe('resolveAgentResumeLaunchTarget off Windows', () => {
         worktreePath: '/Users/neil/repo',
         terminalWindowsShell: 'cmd.exe'
       })
-    ).resolves.toEqual({ platform: 'darwin', shell: undefined })
+    ).resolves.toMatchObject({ platform: 'darwin', shell: undefined })
   })
 })
