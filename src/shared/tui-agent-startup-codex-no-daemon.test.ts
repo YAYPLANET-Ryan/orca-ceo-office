@@ -299,6 +299,21 @@ describe('Codex --no-daemon launch contract', () => {
     expect(applyAgentLaunchArgsToCustomCommand('cmd /c "codex.txt"', 'powershell', host)).toBe(
       'cmd /c "codex.txt"'
     )
+    // Why: a quoted path with spaces is one path, not a command line to split.
+    expect(
+      applyAgentLaunchArgsToCustomCommand(
+        'cmd /c "C:\\Tools\\Codex CLI\\codex.exe"',
+        'powershell',
+        host
+      )
+    ).toBe('cmd /c "C:\\Tools\\Codex CLI\\codex.exe"')
+    expect(
+      applyAgentLaunchArgsToCustomCommand(
+        'cmd /c "C:\\Tools\\codex.exe --profile p"',
+        'powershell',
+        host
+      )
+    ).toBe('cmd /c "C:\\Tools\\codex.exe --profile p"')
     // Why: without command mode a shell's first operand is a script file (or ignored).
     expect(applyAgentLaunchArgsToCustomCommand('bash ./codex', 'posix', host)).toBe('bash ./codex')
     expect(applyAgentLaunchArgsToCustomCommand('pwsh codex', 'powershell', host)).toBe('pwsh codex')

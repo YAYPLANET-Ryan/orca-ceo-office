@@ -264,9 +264,13 @@ export function locateAgentExecutable(
     // The payload may hold nothing but the executable (`cmd /c "codex"`); the
     // name then ends at the closing quote rather than at whitespace.
     const payload = /^(["']?)(&\s*)?([^\s"']+)(?=\s|["']$)/.exec(raw)
+    // Why: a quoted payload whose first word is a path is ambiguous — it may be one
+    // spaced path (`"C:\\Tools\\Codex CLI\\codex.exe"`) rather than a command line, and
+    // splitting it would corrupt the path; only a bare name is placed inside.
     if (
       payload &&
       (!payload[2] || wrapper === 'powershell' || wrapper === 'pwsh') &&
+      !/[\\/]/.test(payload[3]) &&
       isAgentExecutableToken(agent, payload[3])
     ) {
       return {
