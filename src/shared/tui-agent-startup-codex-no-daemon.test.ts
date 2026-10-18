@@ -289,6 +289,16 @@ describe('Codex --no-daemon launch contract', () => {
     expect(applyAgentLaunchArgsToCustomCommand("bash -c '& codex'", 'posix', host)).toBe(
       "bash -c '& codex'"
     )
+    // Why: a payload may hold nothing but the executable.
+    expect(applyAgentLaunchArgsToCustomCommand('pwsh -Command "& codex"', 'powershell', host)).toBe(
+      'pwsh -Command "& codex --no-daemon"'
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('cmd /c "codex"', 'powershell', host)).toBe(
+      'cmd /c "codex --no-daemon"'
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('cmd /c "codex.txt"', 'powershell', host)).toBe(
+      'cmd /c "codex.txt"'
+    )
     // Why: without command mode a shell's first operand is a script file (or ignored).
     expect(applyAgentLaunchArgsToCustomCommand('bash ./codex', 'posix', host)).toBe('bash ./codex')
     expect(applyAgentLaunchArgsToCustomCommand('pwsh codex', 'powershell', host)).toBe('pwsh codex')

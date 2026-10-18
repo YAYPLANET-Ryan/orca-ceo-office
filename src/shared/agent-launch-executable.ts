@@ -247,7 +247,9 @@ export function locateAgentExecutable(
       return null
     }
     const raw = command.slice(spans[i].start, spans[i].end)
-    if (isAgentExecutableToken(agent, token)) {
+    // Why: a quoted operand is one payload whatever it holds; inserting outside
+    // its quotes would hand the inner shell a separately quoted, wrong argument.
+    if (!/^["']/.test(raw) && isAgentExecutableToken(agent, token)) {
       return {
         index: i,
         insertAt: spans[i].end,
@@ -259,7 +261,9 @@ export function locateAgentExecutable(
     }
     // Why: inside a PowerShell payload the command may be called through `&`
     // (`pwsh -Command "& codex -m x"`); the executable is still the first word run.
-    const payload = /^(["']?)(&\s*)?([^\s"']+)\s/.exec(raw)
+    // The payload may hold nothing but the executable (`cmd /c "codex"`); the
+    // name then ends at the closing quote rather than at whitespace.
+    const payload = /^(["']?)(&\s*)?([^\s"']+)(?=\s|["']$)/.exec(raw)
     if (
       payload &&
       (!payload[2] || wrapper === 'powershell' || wrapper === 'pwsh') &&
