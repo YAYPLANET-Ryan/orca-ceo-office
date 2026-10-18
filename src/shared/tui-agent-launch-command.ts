@@ -42,7 +42,7 @@ export function applyAgentLaunchArgsToCustomCommand(
       continue
     }
     if (locateAgentExecutable(agent, command, tokenized.tokens, tokenized.spans, shell)) {
-      return appendAgentLaunchArgs(agent, command, shell, { requireLocated: true })
+      return appendAgentLaunchArgs(agent, command, shell)
     }
   }
   return command
@@ -50,7 +50,7 @@ export function applyAgentLaunchArgsToCustomCommand(
 
 const BARE_ARG = /^[A-Za-z0-9_.=:/-]+$/
 
-/** Appends the agent's contract `launchArgs` (tui-agent-config.ts) unless the
+/** Inserts the agent's contract `launchArgs` (tui-agent-config.ts) unless the
  * command already carries each of them as its own option token. Used for the
  * fresh launch base and again at resume time, because a command captured before
  * the contract existed (or a user override) may lack them.
@@ -59,18 +59,17 @@ const BARE_ARG = /^[A-Za-z0-9_.=:/-]+$/
  * right after it — in command position, behind a local shell wrapper, or as
  * bare words inside the wrapper's one quoted payload token — and tokens after
  * a `--` terminator are positional and never count as the flag being present.
- * A remoting wrapper (`wsl`, `ssh`) before the executable leaves the command
- * alone. When the executable cannot be located, the TUI launch path appends at
- * the end (the override IS the agent command by declaration; a duplicate or
- * unreachable flag is harmless) while `requireLocated` callers get the command
- * back unchanged (`echo codex` is not a Codex launch). A Windows token that
- * diverges from the shell's own parse also falls back to appending: a cut
- * inside unmodeled syntax is not harmless. */
+ * Whenever the executable cannot be located unambiguously (an unparseable
+ * command, a remoting wrapper, a Windows token that diverges from the shell's
+ * own parse, an ambiguous quoted payload) the command is returned unchanged:
+ * an appended flag can land in another command of a compound line
+ * (`… && echo done "--no-daemon"`), so an unprotected launch is the only safe
+ * fallback. */
 export function appendAgentLaunchArgs(
   agent: TuiAgent,
   command: string,
   shell: AgentStartupShell,
-  options: { skip?: boolean; requireLocated?: boolean } = {}
+  options: { skip?: boolean } = {}
 ): string {
   const launchArgs = TUI_AGENT_CONFIG[agent].launchArgs
   if (!launchArgs?.length || options.skip) {
@@ -80,24 +79,12 @@ export function appendAgentLaunchArgs(
     args.map((arg) => quoteStartupArg(arg, shell)).join(' ')
   const tokenized = tokenizeStartupCommand(command, shell)
   if (!tokenized.ok) {
-    if (options.requireLocated) {
-      return command
-    }
-    const present = new Set(
-      command.split(/\s+/).map((token) => token.replace(/^(['"])(.*)\1$/, '$2'))
-    )
-    const missing = launchArgs.filter((arg) => !present.has(arg))
-    return missing.length === 0 ? command : `${command} ${quoted(missing)}`
+    return command
   }
   const { tokens, spans } = tokenized
   const location = locateAgentExecutable(agent, command, tokens, spans, shell)
   if (!location) {
-    if (options.requireLocated || hasRemotingWrapperBefore(tokens, shell, tokens.length)) {
-      // Why: `wsl codex` / `ssh host codex` run a CLI whose version this host cannot vouch for.
-      return command
-    }
-    const missing = launchArgs.filter((arg) => !tokens.includes(arg))
-    return missing.length === 0 ? command : `${command} ${quoted(missing)}`
+    return command
   }
   if (hasRemotingWrapperBefore(tokens, shell, location.index)) {
     // Why: `wsl codex` / `ssh host codex` run a CLI whose version this host cannot vouch for.
@@ -137,7 +124,7 @@ export function appendAgentLaunchArgs(
         span.divergesFromShell && !(shell === 'powershell' && index === 0 && tokens[0] === '&')
     )
   if (diverges) {
-    return `${command} ${quoted(missing)}`
+    return command
   }
   if (location.scriptArgument) {
     // Why: `bash -c codex` runs the token as the script; a further token would be

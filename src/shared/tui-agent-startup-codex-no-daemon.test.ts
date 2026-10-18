@@ -134,8 +134,9 @@ describe('Codex --no-daemon launch contract', () => {
     expect(plan?.launchCommand).toBe("& 'codex' '--no-daemon' --profile work --")
   })
 
-  it('falls back to appending when a cmd.exe token diverges from the shell parse', () => {
-    // Why: a cmd token with a lone single quote is not modelled by the tokenizer; splicing could cut live syntax.
+  it('leaves a command alone when a cmd.exe token diverges from the shell parse', () => {
+    // Why: a cmd token with a lone single quote is not modelled by the tokenizer; splicing could
+    // cut live syntax and appending could land the flag in another command of a compound line.
     const plan = buildAgentStartupPlan({
       agent: 'codex',
       prompt: '',
@@ -145,7 +146,7 @@ describe('Codex --no-daemon launch contract', () => {
       allowEmptyPromptLaunch: true
     })
 
-    expect(plan?.launchCommand).toBe('codex --profile it\'s -- "--no-daemon"')
+    expect(plan?.launchCommand).toBe("codex --profile it's --")
   })
 
   it('leaves WSL and other non-Windows host launches without the flag', () => {
@@ -309,6 +310,18 @@ describe('Codex --no-daemon launch contract', () => {
     expect(
       applyAgentLaunchArgsToCustomCommand('cmd /c "Codex - Tools\\helper.exe"', 'powershell', host)
     ).toBe('cmd /c "Codex - Tools\\helper.exe"')
+    // Why: an override whose executable cannot be located is left alone, never appended to —
+    // the flag would land in another command of a compound line.
+    expect(
+      buildAgentStartupPlan({
+        agent: 'codex',
+        prompt: '',
+        cmdOverrides: { codex: 'cmd /c "codex --cd C:\\x" && echo done' },
+        platform: 'win32',
+        shell: 'cmd',
+        allowEmptyPromptLaunch: true
+      })?.launchCommand
+    ).toBe('cmd /c "codex --cd C:\\x" && echo done')
     // Why: a payload holding a path separator is never split, even behind a real option.
     expect(
       applyAgentLaunchArgsToCustomCommand('cmd /c "codex --cd C:\\x"', 'powershell', host)
