@@ -194,8 +194,9 @@ export function recordPaneIsOwnedByPreservedPane(
     }
     // Why: active sessions rely on pane-level cold restore. A preserved leaf
     // without a PTY/session id can repaint scrollback but cannot resume. A
-    // background wake that mounted this very pane holds a bounded claim so the
-    // sweep (and its mirror replay) does not fork the session meanwhile.
+    // background wake that mounted this very pane holds a bounded claim on its
+    // pane key so the sweep (and its mirror replay) does not fork the session
+    // meanwhile; a sibling pane of the same tab finishing does not release it.
     return (
       hasRestorableStablePanePty(
         tab,
@@ -205,7 +206,7 @@ export function recordPaneIsOwnedByPreservedPane(
         state.terminalLayoutsByTabId
       ) &&
       (paneWillConnectOnActivation(record.worktreeId, tabId, state) ||
-        hasInPlaceRestoreClaim(tabId))
+        hasInPlaceRestoreClaim(record.paneKey))
     )
   }
 

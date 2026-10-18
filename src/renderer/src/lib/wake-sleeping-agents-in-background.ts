@@ -237,7 +237,16 @@ export function wakeSleepingAgentsForWorktreeInBackground(worktreeId: string): v
       continue
     }
     passiveTabIds.add(tabId)
-    claimInPlaceRestore(tabId)
+    claimInPlaceRestore(record.paneKey, {
+      // Why: a mount that never cold-restores must not strand the session; once
+      // the claim lapses unreleased, the ordinary sweep recovers the record into
+      // a fresh tab, which is the pre-existing fallback for an unowned record.
+      onLapse: () =>
+        resumeSleepingAgentSessionsForWorktree(worktreeId, {
+          suppressNavigation: true,
+          onSessionLaunched: (launchedTabId) => dispatchBackgroundMount(worktreeId, [launchedTabId])
+        })
+    })
     inPlaceClaimKeys.add(claimKey)
   }
   if (passiveTabIds.size > 0 || hasUntargetablePassiveRecord) {

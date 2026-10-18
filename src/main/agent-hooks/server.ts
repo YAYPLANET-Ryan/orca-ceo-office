@@ -710,7 +710,7 @@ export class AgentHookServer {
   /** Renderer-reported process-table foreground per pane (see pane-foreground-agent slice). */
   private paneForegroundByPaneKey = new Map<
     string,
-    { agent: string | null; shellForeground: boolean; routingRevoked?: boolean }
+    { agent: string | null; shellForeground: boolean; routingRevoked?: boolean; observedAt: number }
   >()
 
   recordPaneForeground(paneKey: string, evidence: unknown): void {
@@ -725,6 +725,7 @@ export class AgentHookServer {
       agent?: unknown
       shellForeground?: unknown
       routingRevoked?: unknown
+      observedAt?: unknown
     }
     const agent = typeof record.agent === 'string' ? record.agent : null
     if (typeof record.shellForeground !== 'boolean') {
@@ -738,7 +739,13 @@ export class AgentHookServer {
     this.paneForegroundByPaneKey.set(paneKey, {
       agent,
       shellForeground: record.shellForeground,
-      ...(record.routingRevoked === true ? { routingRevoked: true } : {})
+      ...(record.routingRevoked === true ? { routingRevoked: true } : {}),
+      // Why: the renderer's stamp orders the observation against hook receipts
+      // (same clock, same machine); a report without one is dated on arrival.
+      observedAt:
+        typeof record.observedAt === 'number' && Number.isFinite(record.observedAt)
+          ? record.observedAt
+          : Date.now()
     })
   }
   private onTransportInterference: ((report: HookTransportInterferenceReport) => void) | null = null

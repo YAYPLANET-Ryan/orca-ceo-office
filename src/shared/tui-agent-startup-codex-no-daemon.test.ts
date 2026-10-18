@@ -217,6 +217,41 @@ describe('Codex --no-daemon launch contract', () => {
     )
   })
 
+  it('places the contract inside a wrapper payload and never mistakes an argument for the executable', () => {
+    const host = { platform: 'win32' as const }
+    // Why: cmd.exe hands the quoted payload to codex verbatim, so the flag goes in bare.
+    expect(
+      applyAgentLaunchArgsToCustomCommand('cmd /c "codex --profile p"', 'powershell', host)
+    ).toBe('cmd /c "codex --no-daemon --profile p"')
+    expect(applyAgentLaunchArgsToCustomCommand('bash -c "codex -- x"', 'posix', host)).toBe(
+      'bash -c "codex --no-daemon -- x"'
+    )
+    expect(
+      applyAgentLaunchArgsToCustomCommand('cmd /c "codex --no-daemon --profile p"', 'cmd', host)
+    ).toBe('cmd /c "codex --no-daemon --profile p"')
+    expect(applyAgentLaunchArgsToCustomCommand('echo codex', 'powershell', host)).toBe('echo codex')
+    expect(applyAgentLaunchArgsToCustomCommand('type codex.txt', 'cmd', host)).toBe(
+      'type codex.txt'
+    )
+    expect(applyAgentLaunchArgsToCustomCommand("& 'codex' -- prompt", 'powershell', host)).toBe(
+      "& 'codex' '--no-daemon' -- prompt"
+    )
+    expect(
+      applyAgentLaunchArgsToCustomCommand(
+        "& 'C:\\Program Files\\x\\codex.exe' --profile p",
+        'powershell',
+        host
+      )
+    ).toBe("& 'C:\\Program Files\\x\\codex.exe' '--no-daemon' --profile p")
+    expect(
+      applyAgentLaunchArgsToCustomCommand(
+        '"/c/Program Files/x/codex.exe" --profile p',
+        'posix',
+        host
+      )
+    ).toBe('"/c/Program Files/x/codex.exe" \'--no-daemon\' --profile p')
+  })
+
   it('never follows a remoting wrapper such as wsl or ssh', () => {
     const wsl = buildAgentStartupPlan({
       agent: 'codex',

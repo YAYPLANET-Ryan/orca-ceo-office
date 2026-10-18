@@ -39,6 +39,7 @@ export type PaneForegroundReport = {
   agent: string | null
   shellForeground: boolean
   routingRevoked?: boolean
+  observedAt?: number
 }
 
 export type AgentHooksApi = {

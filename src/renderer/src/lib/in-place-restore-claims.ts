@@ -5,34 +5,73 @@
  * Why: between the mount request and the pane's connect, the pane has no live
  * PTY, so the resume sweep (including the mirror-parked replay that drops
  * skipClaimKeys) would judge the record unowned and fork it into a fresh tab.
- * The claim keeps the record pane-owned for a bounded time; the pane releases
- * it when it consumes or declines the record, and expiry is the fallback when
- * the mount never connects, so the sweep can still recover the session.
+ * The claim is keyed by the record's stable pane key (one per pane, so a split
+ * tab's panes release independently); the pane releases it when it consumes or
+ * declines the record, or when its spawn fails. A claim nobody released by the
+ * TTL lapses and hands the record back to the sweep (`onLapse`), so a mount
+ * that never connects does not strand the session.
  */
-const claims = new Map<string, number>()
+type InPlaceRestoreClaim = {
+  expiresAt: number
+  timer: ReturnType<typeof setTimeout> | null
+}
+
+const claims = new Map<string, InPlaceRestoreClaim>()
 
 export const IN_PLACE_RESTORE_CLAIM_TTL_MS = 90_000
 
-export function claimInPlaceRestore(tabId: string, now = Date.now()): void {
-  claims.set(tabId, now + IN_PLACE_RESTORE_CLAIM_TTL_MS)
+export function claimInPlaceRestore(
+  paneKey: string,
+  options: { now?: number; onLapse?: () => void } = {}
+): void {
+  releaseInPlaceRestore(paneKey)
+  const now = options.now ?? Date.now()
+  const onLapse = options.onLapse
+  let timer: ReturnType<typeof setTimeout> | null = null
+  if (onLapse) {
+    const scheduled = setTimeout(() => {
+      // Why: still held at the TTL means the mounted pane never reached its cold
+      // restore; drop the claim first so the retry sweep sees the record unowned.
+      if (claims.get(paneKey)?.timer === scheduled) {
+        claims.delete(paneKey)
+        onLapse()
+      }
+    }, IN_PLACE_RESTORE_CLAIM_TTL_MS)
+    ;(scheduled as { unref?: () => void }).unref?.()
+    timer = scheduled
+  }
+  claims.set(paneKey, { expiresAt: now + IN_PLACE_RESTORE_CLAIM_TTL_MS, timer })
 }
 
-export function releaseInPlaceRestore(tabId: string): void {
-  claims.delete(tabId)
+export function releaseInPlaceRestore(paneKey: string): void {
+  const claim = claims.get(paneKey)
+  if (!claim) {
+    return
+  }
+  if (claim.timer) {
+    clearTimeout(claim.timer)
+  }
+  claims.delete(paneKey)
 }
 
-export function hasInPlaceRestoreClaim(tabId: string, now = Date.now()): boolean {
-  const expiresAt = claims.get(tabId)
-  if (expiresAt === undefined) {
+export function hasInPlaceRestoreClaim(paneKey: string, now = Date.now()): boolean {
+  const claim = claims.get(paneKey)
+  if (!claim) {
     return false
   }
-  if (expiresAt <= now) {
-    claims.delete(tabId)
+  if (claim.expiresAt <= now) {
+    // Why: the asking sweep recovers the record itself; no lapse retry needed.
+    releaseInPlaceRestore(paneKey)
     return false
   }
   return true
 }
 
 export function resetInPlaceRestoreClaimsForTests(): void {
+  for (const claim of claims.values()) {
+    if (claim.timer) {
+      clearTimeout(claim.timer)
+    }
+  }
   claims.clear()
 }

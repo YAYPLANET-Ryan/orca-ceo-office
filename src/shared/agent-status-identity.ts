@@ -24,6 +24,8 @@ export type PaneForegroundEvidence = {
   shellForeground: boolean
   /** Exit/input evidence revoked the foreground identity until the provider confirms it again. */
   routingRevoked?: boolean
+  /** When the evidence was observed; fences a shell return against the row's last hook. */
+  observedAt?: number
 }
 
 export function shouldSuppressInheritedTerminalStatus(args: {
@@ -73,11 +75,19 @@ export function resolveAgentStatusIdentity(args: {
       inheritedFromActivePane: false
     }
   }
-  if (args.foreground?.shellForeground === true) {
+  if (
+    args.foreground?.shellForeground === true &&
+    args.foreground.routingRevoked !== true &&
+    (args.foreground.observedAt === undefined ||
+      args.foreground.observedAt >= args.existing.updatedAt)
+  ) {
     return {
-      // Why: the shell is proven back in the foreground (OSC 133;D), so the
-      // previous agent is gone even if its row still looks active (a nested
-      // child's `working` was merged onto it); the next agent owns the pane.
+      // Why: the shell is proven back in the foreground (OSC 133;D) after the
+      // existing row's last hook, so the previous agent is gone even if its row
+      // still looks active (a nested child's `working` was merged onto it); the
+      // next agent owns the pane. A shell return observed BEFORE that hook is
+      // stale (the tracker missed the next command start) and proves nothing;
+      // revoked evidence never decides either way.
       agentType: incomingAgentType,
       inheritedFromActivePane: false
     }

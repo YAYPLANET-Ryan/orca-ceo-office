@@ -1,7 +1,10 @@
 import { getAppEnvironment } from '../../../../shared/app-environment'
 import { isNativeWindowsLocalPtySpawn } from '../../../runtime/terminal-model-query-authority'
-import { applyAgentLaunchArgsToCustomCommand } from '../../../../shared/tui-agent-launch-command'
-import { resolveLocalWindowsAgentStartupShell } from '../../../../shared/windows-terminal-shell'
+import {
+  applyCustomCommandContract,
+  applyCustomCommandContractToSequencedStartup,
+  resolveCustomCommandContractShell
+} from '../host-env/custom-command-contract'
 import type { PtySpawnResult } from '../../../providers/types'
 import { LocalPtyProvider } from '../../../providers/local-pty-provider'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
@@ -131,29 +134,19 @@ export async function prepareRuntimePtySpawn(
   const codexResumeHome = codexResumeLaunch.codexResumeHome
   // Why: the drop still applies here, but this controller's result has no field for
   // notifyResumeUnavailable — runtime/relay panes start fresh without the notice.
-  ctx.launchCommand = codexResumeLaunch.command
-  if (
-    ctx.launchCommand &&
-    !isTuiAgent(args.launchAgent) &&
-    isNativeWindowsLocalPtySpawn({
-      connectionId: args.connectionId,
-      cwd: ctx.cwd,
-      shellOverride: ctx.daemonShellOverride
-    })
-  ) {
-    // Why: same contract as the IPC spawn path (spawn-env-codex.ts); runtime-created
-    // terminals carry user-authored commands too.
-    ctx.launchCommand = applyAgentLaunchArgsToCustomCommand(
-      ctx.launchCommand,
-      resolveLocalWindowsAgentStartupShell({
-        platform: 'win32',
-        isRemote: false,
-        terminalWindowsShell:
-          ctx.daemonShellOverride ?? ctx.deps.getSettings?.()?.terminalWindowsShell ?? null
-      }) ?? 'powershell',
-      { platform: 'win32', isRemote: false }
-    )
-  }
+  // Why: same contract as the IPC spawn path (spawn-env-codex.ts); runtime-created
+  // terminals carry user-authored commands too.
+  const customCommandShell = resolveCustomCommandContractShell({
+    applies:
+      !isTuiAgent(args.launchAgent) &&
+      isNativeWindowsLocalPtySpawn({
+        connectionId: args.connectionId,
+        cwd: ctx.cwd,
+        shellOverride: ctx.daemonShellOverride
+      }),
+    terminalWindowsShell: ctx.daemonShellOverride ?? ctx.deps.getSettings?.()?.terminalWindowsShell
+  })
+  ctx.launchCommand = applyCustomCommandContract(codexResumeLaunch.command, customCommandShell)
   ctx.claudeAuth =
     ctx.isClaudeLaunch && ctx.deps.prepareClaudeAuth
       ? await ctx.deps.prepareClaudeAuth(ctx.codexSelectionTarget)
@@ -192,7 +185,12 @@ export async function prepareRuntimePtySpawn(
   ctx.requestedAgentTeamsPath = ctx.env?.ORCA_AGENT_TEAMS_TEAM_ID
     ? ctx.env[resolvePathEnvKey(ctx.env, process.platform)]
     : undefined
-  ctx.env = ctx.deps.stripSequencedStartupResumeArgv(ctx.env, codexResumeLaunch)
+  // Why: the sequenced startup command takes precedence over launchCommand in the
+  // host env, so the contract has to reach it here too.
+  ctx.env = applyCustomCommandContractToSequencedStartup(
+    ctx.deps.stripSequencedStartupResumeArgv(ctx.env, codexResumeLaunch),
+    customCommandShell
+  )
   if (args.preAllocatedHandle) {
     ctx.env = { ...ctx.env, ORCA_TERMINAL_HANDLE: args.preAllocatedHandle }
   }

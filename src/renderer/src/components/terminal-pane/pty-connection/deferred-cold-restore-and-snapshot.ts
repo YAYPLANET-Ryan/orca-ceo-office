@@ -41,7 +41,8 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
   ): void => {
     // Why: the pane has now decided its own cold restore; a background in-place
     // claim held for it (wake-sleeping-agents-in-background) must not outlive that.
-    releaseInPlaceRestore(session.deps.tabId)
+    // Keyed by this pane, so a split sibling still connecting keeps its own claim.
+    releaseInPlaceRestore(session.cacheKey)
     if (startup && !startup.useLiveEntry && startup.sleepingRecordEntry) {
       session.clearSleepingRecordProviderDuplicates(
         useAppStore.getState(),

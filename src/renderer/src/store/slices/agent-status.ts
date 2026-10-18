@@ -27,6 +27,11 @@ import {
   resolveAgentStatusIdentity,
   shouldSuppressInheritedTerminalStatus
 } from '../../../../shared/agent-status-identity'
+import {
+  getPaneForegroundObservedAt,
+  rebindPaneForegroundObservation,
+  reportPaneForegroundToMain
+} from './pane-foreground-agent'
 import { isCommandCodeNewTurnWhileWorking } from '../../../../shared/command-code-turn-boundary'
 import { agentEntryCompletionAt } from '../../../../shared/agent-completion-time'
 import type { TerminalPaneLayoutNode, TerminalTab } from '../../../../shared/terminal-tab-types'
@@ -1807,6 +1812,15 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         cacheTimerByKey: movePaneKeyedRecord(s.cacheTimerByKey, from, to),
         retentionSuppressedPaneKeys: movePaneKeyedRecord(s.retentionSuppressedPaneKeys, from, to)
       }))
+      // Why: main resolves nested-hook identity from the renderer's foreground
+      // report; the moved entry must follow the pane key there too, or main keeps
+      // judging the old key and holds nothing for the new one.
+      rebindPaneForegroundObservation(from, to)
+      reportPaneForegroundToMain(from, null)
+      const movedForeground = storeGet().paneForegroundAgentByPaneKey[to]
+      if (movedForeground) {
+        reportPaneForegroundToMain(to, movedForeground)
+      }
       if (typeof window !== 'undefined') {
         window.api?.agentStatus?.transferPaneAuthority?.({
           fromPaneKey: from,
@@ -2192,6 +2206,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         }
 
         const foregroundEvidence = s.paneForegroundAgentByPaneKey[paneKey]
+        const foregroundObservedAt = getPaneForegroundObservedAt(paneKey)
         const identity = resolveAgentStatusIdentity({
           existing: existing
             ? {
@@ -2207,7 +2222,8 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             ? {
                 agent: foregroundEvidence.agent,
                 shellForeground: foregroundEvidence.shellForeground,
-                ...(foregroundEvidence.routingRevoked ? { routingRevoked: true } : {})
+                ...(foregroundEvidence.routingRevoked ? { routingRevoked: true } : {}),
+                ...(foregroundObservedAt !== undefined ? { observedAt: foregroundObservedAt } : {})
               }
             : undefined
         })

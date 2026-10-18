@@ -83,6 +83,45 @@ describe('nested hooks under a foreground parent', () => {
     expect(entry?.providerSession).toEqual({ key: 'session_id', id: 'codex-new' })
   })
 
+  it("ignores a shell return observed before the parent's last hook, and revoked shell evidence", () => {
+    for (const evidence of [
+      { entry: { agent: null, shellForeground: true }, observedAt: 5 },
+      { entry: { agent: null, shellForeground: true, routingRevoked: true }, observedAt: 15 }
+    ]) {
+      const store = createTestStore()
+      store.getState().setPaneForegroundAgent('tab-1:leaf-1', evidence.entry, {
+        observedAt: evidence.observedAt
+      })
+      store
+        .getState()
+        .setAgentStatus(
+          'tab-1:leaf-1',
+          { state: 'working', prompt: 'claude turn', agentType: 'claude' },
+          'Claude',
+          { updatedAt: 10, stateStartedAt: 10 },
+          undefined,
+          { providerSession: { key: 'session_id', id: 'claude-parent' } }
+        )
+      store.getState().setAgentStatus(
+        'tab-1:leaf-1',
+        {
+          state: 'working',
+          prompt: 'codex exec from the active claude turn',
+          agentType: 'codex'
+        },
+        'Codex',
+        { updatedAt: 20, stateStartedAt: 20 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'codex-child' } }
+      )
+      // Why: a stale or revoked shell return must not hand an active parent's pane
+      // to its nested child; the parent turn rule still protects it.
+      const entry = store.getState().agentStatusByPaneKey['tab-1:leaf-1']
+      expect(entry?.agentType).toBe('claude')
+      expect(entry?.providerSession).toEqual({ key: 'session_id', id: 'claude-parent' })
+    }
+  })
+
   it('lets a new agent take the pane once the shell foreground proves the parent exited', () => {
     const store = createTestStore()
     store

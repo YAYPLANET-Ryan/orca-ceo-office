@@ -251,6 +251,9 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
         if (!resolvedPtyId) {
           clearPreSignaledSerializer()
           session.finishReattachLiveDataDeferral(false, outputCallbacks.generation)
+          // Why: no PTY came of this spawn, so a background in-place restore claim
+          // must lapse now and let the sweep recover the record elsewhere.
+          session.clearSleepingRecordAfterColdRestoreSpawn(null)
           return null
         }
         const gen = await preSignalPromise

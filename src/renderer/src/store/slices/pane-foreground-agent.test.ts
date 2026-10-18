@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTestStore } from './store-test-helpers'
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
+import { getPaneForegroundObservedAt } from './pane-foreground-agent'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 function terminalTab(id: string, worktreeId: string): TerminalTab {
   return {
@@ -16,6 +21,51 @@ function terminalTab(id: string, worktreeId: string): TerminalTab {
 }
 
 describe('pane foreground agent slice', () => {
+  it('reports every set, clear and bulk sweep to main with the observation stamp', () => {
+    const report = vi.fn()
+    vi.stubGlobal('window', { api: { agentHooks: { reportPaneForeground: report } } })
+    const store = createTestStore()
+    store.setState({
+      tabsByWorktree: { wt: [terminalTab('tab-1', 'wt'), terminalTab('tab-2', 'wt')] }
+    })
+
+    store
+      .getState()
+      .setPaneForegroundAgent(
+        'tab-1:leaf-1',
+        { agent: 'claude', shellForeground: false },
+        { observedAt: 7 }
+      )
+    expect(report).toHaveBeenLastCalledWith('tab-1:leaf-1', {
+      agent: 'claude',
+      shellForeground: false,
+      observedAt: 7
+    })
+    expect(getPaneForegroundObservedAt('tab-1:leaf-1')).toBe(7)
+    // Why: a value-equal republish is not a new observation and sends nothing.
+    store
+      .getState()
+      .setPaneForegroundAgent(
+        'tab-1:leaf-1',
+        { agent: 'claude', shellForeground: false },
+        { observedAt: 8 }
+      )
+    expect(report).toHaveBeenCalledTimes(1)
+    expect(getPaneForegroundObservedAt('tab-1:leaf-1')).toBe(7)
+
+    store.getState().setPaneForegroundAgent('tab-2:leaf-1', { agent: null, shellForeground: true })
+    store.getState().clearPaneForegroundAgentByWorktree('wt')
+    expect(report).toHaveBeenCalledWith('tab-1:leaf-1', null)
+    expect(report).toHaveBeenCalledWith('tab-2:leaf-1', null)
+    expect(getPaneForegroundObservedAt('tab-1:leaf-1')).toBeUndefined()
+
+    store
+      .getState()
+      .setPaneForegroundAgent('tab-1:leaf-1', { agent: 'codex', shellForeground: false })
+    store.getState().clearPaneForegroundAgentByTabPrefix('tab-1')
+    expect(report).toHaveBeenLastCalledWith('tab-1:leaf-1', null)
+  })
+
   it('sets, value-bails, and clears entries per pane key', () => {
     const store = createTestStore()
     store
