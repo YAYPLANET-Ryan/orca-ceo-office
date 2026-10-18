@@ -65,6 +65,52 @@ describe('Codex --no-daemon launch contract', () => {
     expect(plan?.launchCommand).toBe("codex '--no-daemon' 'resume' 's1'")
   })
 
+  it('places the flag before a -- terminator in a Codex override', () => {
+    const plan = buildAgentStartupPlan({
+      agent: 'codex',
+      prompt: '',
+      cmdOverrides: { codex: 'codex --profile work --' },
+      platform: 'linux',
+      allowEmptyPromptLaunch: true
+    })
+
+    expect(plan?.launchCommand).toBe("codex --profile work '--no-daemon' --")
+  })
+
+  it('does not count a flag that sits after the terminator as present', () => {
+    // Why: `codex -- --no-daemon` hands the flag to Codex as a positional prompt.
+    const plan = buildAgentStartupPlan({
+      agent: 'codex',
+      prompt: '',
+      cmdOverrides: { codex: 'codex -- --no-daemon' },
+      platform: 'linux',
+      allowEmptyPromptLaunch: true
+    })
+
+    expect(plan?.launchCommand).toBe("codex '--no-daemon' -- --no-daemon")
+  })
+
+  it('leaves remote Codex launches and resumes without the flag', () => {
+    // Why: the remote CLI version is unknown; an unsupported flag would block startup.
+    const launch = buildAgentStartupPlan({
+      agent: 'codex',
+      prompt: 'fix it',
+      cmdOverrides: {},
+      platform: 'linux',
+      isRemote: true
+    })
+    const resume = buildAgentResumeStartupPlan({
+      agent: 'codex',
+      providerSession: { key: 'session_id', id: 's1' },
+      cmdOverrides: {},
+      platform: 'linux',
+      isRemote: true
+    })
+
+    expect(launch?.launchCommand).toBe("codex 'fix it'")
+    expect(resume?.launchCommand).toBe("codex 'resume' 's1'")
+  })
+
   it('leaves agents without a contract untouched on resume', () => {
     const plan = buildAgentResumeStartupPlan({
       agent: 'claude',

@@ -13,30 +13,52 @@ import {
 import type { TuiAgent } from './tui-agent'
 
 /** Appends the agent's contract `launchArgs` (tui-agent-config.ts) unless the
- * command already carries each of them as its own token. Used for the fresh
- * launch base and again at resume time, because a command captured before the
- * contract existed (or a user override) may lack them. */
+ * command already carries each of them as its own option token. Used for the
+ * fresh launch base and again at resume time, because a command captured before
+ * the contract existed (or a user override) may lack them.
+ *
+ * Placement: options must stay before a `--` terminator, so the args are
+ * spliced in front of the first terminator token when one exists; tokens after
+ * it are positional and never count as the flag being present. Remote launches
+ * are left untouched: the remote CLI version is unknown and an unsupported flag
+ * would stop the agent from starting at all. */
 export function appendAgentLaunchArgs(
   agent: TuiAgent,
   command: string,
-  shell: AgentStartupShell
+  shell: AgentStartupShell,
+  options: { isRemote?: boolean } = {}
 ): string {
   const launchArgs = TUI_AGENT_CONFIG[agent].launchArgs
-  if (!launchArgs?.length) {
+  if (!launchArgs?.length || options.isRemote) {
     return command
   }
   const tokenized = tokenizeStartupCommand(command, shell)
-  const present = tokenized.ok
-    ? new Set(tokenized.tokens)
-    : // Why: a command this shell cannot tokenize still gets a whitespace-bounded
-      // check; for Codex a duplicate flag is harmless while a missing one re-opens
-      // the daemon attribution gap.
-      new Set(command.split(/\s+/).map((token) => token.replace(/^(['"])(.*)\1$/, '$2')))
+  if (!tokenized.ok) {
+    // Why: a command this shell cannot tokenize still gets a whitespace-bounded
+    // check; for Codex a duplicate flag is harmless while a missing one re-opens
+    // the daemon attribution gap.
+    const present = new Set(
+      command.split(/\s+/).map((token) => token.replace(/^(['"])(.*)\1$/, '$2'))
+    )
+    const missing = launchArgs.filter((arg) => !present.has(arg))
+    return missing.length === 0
+      ? command
+      : `${command} ${missing.map((arg) => quoteStartupArg(arg, shell)).join(' ')}`
+  }
+  const terminatorIndex = tokenized.tokens.indexOf('--')
+  const optionTokens =
+    terminatorIndex === -1 ? tokenized.tokens : tokenized.tokens.slice(0, terminatorIndex)
+  const present = new Set(optionTokens)
   const missing = launchArgs.filter((arg) => !present.has(arg))
   if (missing.length === 0) {
     return command
   }
-  return `${command} ${missing.map((arg) => quoteStartupArg(arg, shell)).join(' ')}`
+  const inserted = missing.map((arg) => quoteStartupArg(arg, shell)).join(' ')
+  if (terminatorIndex === -1) {
+    return `${command} ${inserted}`
+  }
+  const cut = tokenized.spans[terminatorIndex].start
+  return `${command.slice(0, cut)}${inserted} ${command.slice(cut)}`
 }
 
 export type ResolvedAgentLaunchCommand =
@@ -67,7 +89,8 @@ export function resolveAgentLaunchCommand(args: {
       getTuiAgentLaunchCommand(TUI_AGENT_CONFIG[args.agent], args.platform, {
         isRemote: args.isRemote
       }),
-    args.shell
+    args.shell,
+    { isRemote: args.isRemote }
   )
   const suffix = planAgentCliArgsSuffix(args.agentArgs, args.shell)
   if (!suffix.ok) {

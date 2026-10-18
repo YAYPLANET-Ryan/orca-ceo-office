@@ -225,7 +225,9 @@ export function buildAgentResumeStartupPlan(args: {
   })
   return {
     agent: args.agent,
-    launchCommand: buildAgentResumeLaunchCommand(args.agent, baseCommand.command, argv, shell),
+    launchCommand: buildAgentResumeLaunchCommand(args.agent, baseCommand.command, argv, shell, {
+      isRemote: args.isRemote
+    }),
     expectedProcess: config.expectedProcess,
     followupPrompt: null,
     launchConfig,
