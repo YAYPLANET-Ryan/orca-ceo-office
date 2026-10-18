@@ -224,7 +224,11 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
           } else if (coldRestoreOverride?.hasSleepingRecord) {
             session.showSessionRestoredBanner()
           }
-          session.clearSleepingRecordAfterColdRestoreSpawn(coldRestoreOverride)
+          // Why: a disposed session already lapsed its own claim and the key may
+          // belong to a newer session now; only a live session ends its claim here.
+          if (!session.disposed) {
+            session.clearSleepingRecordAfterColdRestoreSpawn(coldRestoreOverride)
+          }
         } else if (
           session.paneStartup?.launchConfig ||
           (startupOverride && 'launchConfig' in startupOverride)

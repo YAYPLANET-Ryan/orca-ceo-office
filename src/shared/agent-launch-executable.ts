@@ -210,9 +210,21 @@ export function locateAgentExecutable(
   }
   const operandOptions = LOCAL_SHELL_OPERAND_OPTIONS[wrapper]
   const posixScriptShell = POSIX_SCRIPT_SHELLS.has(wrapper)
+  // Why: a shell runs its first operand as a command line only in command mode —
+  // `bash -c`, `cmd /c|/k`, `pwsh -Command`; powershell.exe defaults to -Command.
+  // Otherwise the operand is a script file (`bash ./codex`, `pwsh codex`) or ignored.
+  let commandMode = wrapper === 'powershell'
   let sawScriptFlag = false
   for (let i = head + 1; i < tokens.length; i += 1) {
     const token = tokens[i]
+    const lower = token.toLowerCase()
+    if (
+      (wrapper === 'cmd' && (lower === '/c' || lower === '/k')) ||
+      ((wrapper === 'pwsh' || wrapper === 'powershell') && (lower === '-command' || lower === '-c'))
+    ) {
+      commandMode = true
+      continue
+    }
     if (
       (wrapper === 'powershell' || wrapper === 'pwsh') &&
       LOCAL_SHELL_SCRIPT_OPTIONS.has(token.toLowerCase())
@@ -230,6 +242,9 @@ export function locateAgentExecutable(
       // `bash -lc`, `bash -cl`); the script is still the first plain token.
       sawScriptFlag ||= posixScriptShell && /^-[A-Za-z]*c[A-Za-z]*$/.test(token)
       continue
+    }
+    if (!(commandMode || sawScriptFlag)) {
+      return null
     }
     const raw = command.slice(spans[i].start, spans[i].end)
     if (isAgentExecutableToken(agent, token)) {

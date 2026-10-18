@@ -282,6 +282,16 @@ describe('Codex --no-daemon launch contract', () => {
     expect(applyAgentLaunchArgsToCustomCommand('bash -c -l codex', 'posix', host)).toBe(
       "bash -c -l 'codex --no-daemon'"
     )
+    // Why: without command mode a shell's first operand is a script file (or ignored).
+    expect(applyAgentLaunchArgsToCustomCommand('bash ./codex', 'posix', host)).toBe('bash ./codex')
+    expect(applyAgentLaunchArgsToCustomCommand('pwsh codex', 'powershell', host)).toBe('pwsh codex')
+    expect(applyAgentLaunchArgsToCustomCommand('cmd codex', 'powershell', host)).toBe('cmd codex')
+    expect(applyAgentLaunchArgsToCustomCommand('cmd /k codex', 'powershell', host)).toBe(
+      "cmd /k codex '--no-daemon'"
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('powershell codex', 'powershell', host)).toBe(
+      "powershell codex '--no-daemon'"
+    )
     // Why: PowerShell runs a quoted name only behind `&`; bare it is a string expression.
     expect(applyAgentLaunchArgsToCustomCommand("'codex'", 'powershell', host)).toBe("'codex'")
     expect(
