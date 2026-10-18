@@ -256,8 +256,12 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
           clearPreSignaledSerializer()
           session.finishReattachLiveDataDeferral(false, outputCallbacks.generation)
           // Why: no PTY came of this spawn, so a background in-place restore claim
-          // must lapse now and let the sweep recover the record elsewhere.
-          session.clearSleepingRecordAfterColdRestoreSpawn(null)
+          // must lapse now and let the sweep recover the record elsewhere. A
+          // disposed session already lapsed its own claim; the same pane key may
+          // belong to a newer session by now, whose claim is not this one's to end.
+          if (!session.disposed) {
+            session.clearSleepingRecordAfterColdRestoreSpawn(null)
+          }
           return null
         }
         const gen = await preSignalPromise
@@ -292,9 +296,10 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
           session.clearRegisteredStartupLaunchConfig()
         }
         clearPreSignaledSerializer()
-        if (outputCallbacks.generation === session.transportStreamGeneration) {
+        if (!session.disposed && outputCallbacks.generation === session.transportStreamGeneration) {
           // Why: the spawn that owned the in-place restore claim failed outright; a
-          // superseded generation leaves the claim to the newer attempt instead.
+          // superseded generation leaves the claim to the newer attempt, and a
+          // disposed session leaves the key to whichever newer session holds it.
           session.clearSleepingRecordAfterColdRestoreSpawn(null)
         }
         return null

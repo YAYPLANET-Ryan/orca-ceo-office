@@ -185,6 +185,16 @@ export function locateAgentExecutable(
   const direct = findCommandPositionExecutable(tokens, shell, (token) =>
     isAgentExecutableToken(agent, token)
   )
+  if (
+    direct !== -1 &&
+    shell === 'powershell' &&
+    tokens[0] !== '&' &&
+    /^["']/.test(command.slice(spans[direct].start, spans[direct].end))
+  ) {
+    // Why: PowerShell evaluates `'codex'` or `"C:\x\codex.exe"` in command position
+    // as a string expression; only the call operator (`& 'codex'`) runs it.
+    return null
+  }
   if (direct !== -1) {
     return {
       index: direct,

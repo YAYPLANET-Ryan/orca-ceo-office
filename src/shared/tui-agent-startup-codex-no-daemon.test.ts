@@ -282,6 +282,11 @@ describe('Codex --no-daemon launch contract', () => {
     expect(applyAgentLaunchArgsToCustomCommand('bash -c -l codex', 'posix', host)).toBe(
       "bash -c -l 'codex --no-daemon'"
     )
+    // Why: PowerShell runs a quoted name only behind `&`; bare it is a string expression.
+    expect(applyAgentLaunchArgsToCustomCommand("'codex'", 'powershell', host)).toBe("'codex'")
+    expect(
+      applyAgentLaunchArgsToCustomCommand('"C:\\x\\codex.exe" --profile p', 'powershell', host)
+    ).toBe('"C:\\x\\codex.exe" --profile p')
     // Why: a script file is the command; its positional `codex` is the script's argument.
     expect(
       applyAgentLaunchArgsToCustomCommand('pwsh -File run.ps1 codex', 'powershell', host)
