@@ -122,6 +122,42 @@ describe('nested hooks under a foreground parent', () => {
     }
   })
 
+  it('applies the identity main resolved instead of resolving again from local evidence', () => {
+    const store = createTestStore()
+    store
+      .getState()
+      .setPaneForegroundAgent('tab-1:leaf-1', { agent: 'claude', shellForeground: false })
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'claude turn', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 10, stateStartedAt: 10 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'claude-parent' } }
+      )
+    // Why: locally this would be a nested child (active parent, Claude foreground);
+    // main saw the shell return in between and ruled a takeover. Its verdict wins.
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'codex after claude exited', agentType: 'codex' },
+        'Codex',
+        { updatedAt: 20, stateStartedAt: 20 },
+        undefined,
+        {
+          providerSession: { key: 'session_id', id: 'codex-new' },
+          resolvedIdentity: { agentType: 'codex', inheritedFromActivePane: false }
+        }
+      )
+
+    const entry = store.getState().agentStatusByPaneKey['tab-1:leaf-1']
+    expect(entry?.agentType).toBe('codex')
+    expect(entry?.providerSession).toEqual({ key: 'session_id', id: 'codex-new' })
+  })
+
   it('lets a new agent take the pane once the shell foreground proves the parent exited', () => {
     const store = createTestStore()
     store

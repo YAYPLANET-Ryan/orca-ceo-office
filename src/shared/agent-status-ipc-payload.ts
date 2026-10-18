@@ -7,8 +7,17 @@ import type { AgentProviderSessionMetadata } from './agent-session-resume'
 import type { WithAgentStatusObservation } from './agent-status-observation'
 import type {
   AgentStatusOrchestrationContext,
+  AgentType,
   ParsedAgentStatusPayload
 } from './agent-status-types'
+
+/** The pane identity main resolved for this event (nested-hook rule with the
+ *  pane's foreground evidence). The renderer applies it instead of resolving
+ *  again, so both sides keep the same agent and provider session for the pane. */
+export type ResolvedAgentStatusIdentity = {
+  agentType: AgentType
+  inheritedFromActivePane: boolean
+}
 
 /** A PTY the pane-key migration could not move, reported for operator triage. */
 export type MigrationUnsupportedPtyEntry = {
@@ -44,6 +53,7 @@ export type AgentStatusIpcPayload = ParsedAgentStatusPayload & {
   promptInteractionKey?: string
   /** See AgentStatusEntry.restoredUnconfirmed — hydrated nonterminal provenance. */
   restoredUnconfirmed?: boolean
+  resolvedIdentity?: ResolvedAgentStatusIdentity
 } & WithAgentStatusObservation
 
 /** Wire shape for ordinary pane teardown or a stamped SSH disconnect batch. */

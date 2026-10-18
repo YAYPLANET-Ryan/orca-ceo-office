@@ -1,5 +1,9 @@
 import { useAppStore } from '@/store'
-import { releaseInPlaceRestore } from '@/lib/in-place-restore-claims'
+import {
+  lapseInPlaceRestore,
+  markInPlaceRestoreInFlight,
+  releaseInPlaceRestore
+} from '@/lib/in-place-restore-claims'
 import type { PtyReplayDataMeta } from '../pty-transport'
 import { INITIAL_MODE_2031_REPLY_SCAN_STATE } from '../../../../../shared/terminal-color-scheme-protocol'
 import { waitForTerminalOutputParsed } from '@/lib/pane-manager/pane-terminal-output-scheduler'
@@ -42,7 +46,13 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
     // Why: the pane has now decided its own cold restore; a background in-place
     // claim held for it (wake-sleeping-agents-in-background) must not outlive that.
     // Keyed by this pane, so a split sibling still connecting keeps its own claim.
-    releaseInPlaceRestore(session.cacheKey)
+    // A consumed record releases quietly; no startup (none could be prepared, or
+    // the spawn yielded no PTY) lapses it so the sweep recovers the record now.
+    if (startup) {
+      releaseInPlaceRestore(session.cacheKey)
+    } else {
+      lapseInPlaceRestore(session.cacheKey)
+    }
     if (startup && !startup.useLiveEntry && startup.sleepingRecordEntry) {
       session.clearSleepingRecordProviderDuplicates(
         useAppStore.getState(),
@@ -68,6 +78,11 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
   ): Promise<string | null> => {
     session.applyColdRestoreAgentResumeStartup(startup)
     const resumeRequired = !startup && session.shouldRequireManualColdRestoreAgentResume()
+    if (startup) {
+      // Why: from here the spawn owns the record; a background claim must wait
+      // for this pane's verdict instead of lapsing into a replacement resume.
+      markInPlaceRestoreInFlight(session.cacheKey)
+    }
     return session.startFreshSpawn(startup, {
       ...options,
       ...(resumeRequired

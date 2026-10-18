@@ -3,6 +3,8 @@ import {
   IN_PLACE_RESTORE_CLAIM_TTL_MS,
   claimInPlaceRestore,
   hasInPlaceRestoreClaim,
+  lapseInPlaceRestore,
+  markInPlaceRestoreInFlight,
   releaseInPlaceRestore,
   resetInPlaceRestoreClaimsForTests
 } from './in-place-restore-claims'
@@ -41,6 +43,36 @@ describe('in-place restore claims', () => {
     expect(lapsed).toHaveBeenCalledTimes(1)
     expect(released).not.toHaveBeenCalled()
     expect(hasInPlaceRestoreClaim('tab-1:leaf-a')).toBe(false)
+  })
+
+  it('runs the recovery at once when the pane lapses a claim it could not fulfil', () => {
+    vi.useFakeTimers()
+    const recover = vi.fn()
+    claimInPlaceRestore('tab-1:leaf-a', { onLapse: recover })
+    lapseInPlaceRestore('tab-1:leaf-a')
+    expect(recover).toHaveBeenCalledTimes(1)
+    expect(hasInPlaceRestoreClaim('tab-1:leaf-a')).toBe(false)
+    // Why: a lapsed claim is gone; the TTL must not recover it a second time.
+    vi.advanceTimersByTime(IN_PLACE_RESTORE_CLAIM_TTL_MS + 1)
+    expect(recover).toHaveBeenCalledTimes(1)
+    // and a claim with no recovery hook just disappears
+    claimInPlaceRestore('tab-1:leaf-b')
+    lapseInPlaceRestore('tab-1:leaf-b')
+    expect(hasInPlaceRestoreClaim('tab-1:leaf-b')).toBe(false)
+  })
+
+  it('never lapses a claim whose spawn is in flight; the pane ends it', () => {
+    vi.useFakeTimers()
+    const recover = vi.fn()
+    claimInPlaceRestore('tab-1:leaf-a', { onLapse: recover })
+    markInPlaceRestoreInFlight('tab-1:leaf-a')
+    vi.advanceTimersByTime(IN_PLACE_RESTORE_CLAIM_TTL_MS * 3)
+    expect(recover).not.toHaveBeenCalled()
+    expect(hasInPlaceRestoreClaim('tab-1:leaf-a', Date.now())).toBe(true)
+    releaseInPlaceRestore('tab-1:leaf-a')
+    expect(hasInPlaceRestoreClaim('tab-1:leaf-a')).toBe(false)
+    vi.advanceTimersByTime(IN_PLACE_RESTORE_CLAIM_TTL_MS + 1)
+    expect(recover).not.toHaveBeenCalled()
   })
 
   it('re-claiming replaces the earlier lapse timer', () => {

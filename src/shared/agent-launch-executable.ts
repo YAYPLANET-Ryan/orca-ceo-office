@@ -1,9 +1,5 @@
 import { TUI_AGENT_CONFIG } from './tui-agent-config'
-import {
-  findStartupCommandExecutableIndex,
-  isPosixStartupShell,
-  type AgentStartupShell
-} from './tui-agent-startup-shell'
+import { isPosixStartupShell, type AgentStartupShell } from './tui-agent-startup-shell'
 import type { TuiAgent } from './tui-agent'
 
 /**
@@ -12,9 +8,33 @@ import type { TuiAgent } from './tui-agent'
  * ORCA's own launches and for user-authored commands.
  */
 const REMOTING_WRAPPERS = new Set(['wsl', 'ssh', 'docker', 'kubectl'])
+/** Wrappers that run their first plain argument as the command (after their own options). */
+const PASSTHROUGH_WRAPPERS = new Set([
+  'env',
+  'sudo',
+  'nice',
+  'nohup',
+  'command',
+  'exec',
+  'time',
+  'call'
+])
+/** Local shells that run a later token, or one quoted payload token, as a command line. */
+const LOCAL_SHELL_WRAPPERS = new Set(['cmd', 'powershell', 'pwsh', 'bash', 'sh', 'zsh'])
 
 function executableBaseName(token: string): string {
   return (token.split(/[\\/]/).pop() ?? '').toLowerCase().replace(/\.(exe|cmd|bat|ps1)$/, '')
+}
+
+function isAssignmentToken(token: string, shell: AgentStartupShell): boolean {
+  return isPosixStartupShell(shell) && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)
+}
+
+function isOptionToken(token: string, shell: AgentStartupShell): boolean {
+  return (
+    token !== '--' &&
+    (token.startsWith('-') || (!isPosixStartupShell(shell) && token.startsWith('/')))
+  )
 }
 
 /** True when a remoting wrapper (`wsl`, `ssh`, ...) sits in the real command
@@ -28,10 +48,7 @@ export function hasRemotingWrapperBefore(
 ): boolean {
   for (let i = 0; i < Math.min(limit, tokens.length); i += 1) {
     const token = tokens[i]
-    if (
-      (isPosixStartupShell(shell) && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) ||
-      (shell === 'powershell' && token === '&' && i === 0)
-    ) {
+    if (isAssignmentToken(token, shell) || (shell === 'powershell' && token === '&' && i === 0)) {
       continue
     }
     if (token === '--') {
@@ -45,28 +62,43 @@ export function hasRemotingWrapperBefore(
   return false
 }
 
-const LOCAL_SHELL_WRAPPERS = new Set([
-  'cmd',
-  'powershell',
-  'pwsh',
-  'bash',
-  'sh',
-  'zsh',
-  'env',
-  'call'
-])
-
 /** Index of the first token in command position (after sh assignments / a leading PowerShell `&`). */
 function commandHeadIndex(tokens: readonly string[], shell: AgentStartupShell): number {
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i]
-    if (
-      (isPosixStartupShell(shell) && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) ||
-      (shell === 'powershell' && token === '&' && i === 0)
-    ) {
+    if (isAssignmentToken(token, shell) || (shell === 'powershell' && token === '&' && i === 0)) {
       continue
     }
     return i
+  }
+  return -1
+}
+
+/** The executable in command position: the head itself, or — only behind a
+ * passthrough wrapper such as `env`/`sudo` — the first plain token after the
+ * wrapper's options and assignments (`env -- codex`, `env FOO=1 codex`). A `--`
+ * after anything else (`echo -- codex`) does not reopen command position. */
+function findCommandPositionExecutable(
+  tokens: readonly string[],
+  shell: AgentStartupShell,
+  isExecutable: (token: string) => boolean
+): number {
+  const head = commandHeadIndex(tokens, shell)
+  if (head === -1) {
+    return -1
+  }
+  if (isExecutable(tokens[head])) {
+    return head
+  }
+  if (!PASSTHROUGH_WRAPPERS.has(executableBaseName(tokens[head]))) {
+    return -1
+  }
+  for (let i = head + 1; i < tokens.length; i += 1) {
+    const token = tokens[i]
+    if (token === '--' || isAssignmentToken(token, shell) || isOptionToken(token, shell)) {
+      continue
+    }
+    return isExecutable(token) ? i : -1
   }
   return -1
 }
@@ -77,13 +109,18 @@ export type AgentExecutableLocation = {
   insertAt: number
   /** The executable is the first word inside one quoted payload token (`cmd /c "codex --profile p"`). */
   insidePayload: boolean
+  /** The executable is the bare script argument of a POSIX `-c` (`bash -c codex`): args
+   *  appended as further tokens would become the script's `$0`, so the token itself must
+   *  be rewritten into a quoted script. */
+  scriptArgument: boolean
 }
 
 /** Locates the agent executable this command runs on the local host: in command
- * position (`codex`, `& 'codex'`, `env -- codex`), or handed to a local shell
- * wrapper (`cmd /c codex --`, `powershell -Command codex`, `bash -c "codex -m x"`).
- * A name that is merely an argument of something else (`echo codex`) is not an
- * executable: the head is neither the agent nor a shell. */
+ * position (`codex`, `& 'codex'`, `env -- codex`), or as the command a local
+ * shell wrapper runs — its first plain token after the wrapper's options
+ * (`cmd /c codex --`, `powershell -NoProfile -Command codex`) or the first word
+ * of its one quoted payload token (`bash -c "codex -m x"`). A name that is an
+ * argument of something else (`echo codex`, `cmd /c echo codex`) is never one. */
 export function locateAgentExecutable(
   agent: TuiAgent,
   command: string,
@@ -91,29 +128,47 @@ export function locateAgentExecutable(
   spans: readonly { start: number; end: number }[],
   shell: AgentStartupShell
 ): AgentExecutableLocation | null {
-  const direct = findStartupCommandExecutableIndex(tokens, shell, (token) =>
+  const direct = findCommandPositionExecutable(tokens, shell, (token) =>
     isAgentExecutableToken(agent, token)
   )
   if (direct !== -1) {
-    return { index: direct, insertAt: spans[direct].end, insidePayload: false }
+    return {
+      index: direct,
+      insertAt: spans[direct].end,
+      insidePayload: false,
+      scriptArgument: false
+    }
   }
   const head = commandHeadIndex(tokens, shell)
   if (head === -1 || !LOCAL_SHELL_WRAPPERS.has(executableBaseName(tokens[head]))) {
     return null
   }
   for (let i = head + 1; i < tokens.length; i += 1) {
-    if (isAgentExecutableToken(agent, tokens[i])) {
-      return { index: i, insertAt: spans[i].end, insidePayload: false }
+    const token = tokens[i]
+    if (isOptionToken(token, shell)) {
+      continue
     }
     const raw = command.slice(spans[i].start, spans[i].end)
+    if (isAgentExecutableToken(agent, token)) {
+      return {
+        index: i,
+        insertAt: spans[i].end,
+        insidePayload: false,
+        scriptArgument: isPosixStartupShell(shell) && tokens[i - 1] === '-c' && raw === token
+      }
+    }
     const payload = /^(["']?)([^\s"']+)\s/.exec(raw)
     if (payload && isAgentExecutableToken(agent, payload[2])) {
       return {
         index: i,
         insertAt: spans[i].start + payload[1].length + payload[2].length,
-        insidePayload: true
+        insidePayload: true,
+        scriptArgument: false
       }
     }
+    // Why: the wrapper's command is its first plain token; anything the agent
+    // name appears in after that is that command's argument.
+    return null
   }
   return null
 }

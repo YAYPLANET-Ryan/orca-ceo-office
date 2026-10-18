@@ -184,18 +184,23 @@ export function createAgentStatusEventApplicator(args: {
     const statusPayloadWithObservation = data.observation
       ? { ...statusPayloadWithProvenance, observation: data.observation }
       : statusPayloadWithProvenance
-    const identity = resolveAgentStatusIdentity({
-      existing: existingStatus
-        ? {
-            agentType: existingStatus.agentType,
-            state: existingStatus.state,
-            updatedAt: existingStatus.updatedAt,
-            restoredUnconfirmed: existingStatus.restoredUnconfirmed
-          }
-        : undefined,
-      incoming: statusPayload.agentType,
-      now: data.receivedAt
-    })
+    // Why: main resolved the pane identity with the pane's foreground evidence;
+    // re-deriving it here from a status store that may have moved on is how the
+    // two sides diverged. Only events without a verdict (older senders) resolve locally.
+    const identity =
+      data.resolvedIdentity ??
+      resolveAgentStatusIdentity({
+        existing: existingStatus
+          ? {
+              agentType: existingStatus.agentType,
+              state: existingStatus.state,
+              updatedAt: existingStatus.updatedAt,
+              restoredUnconfirmed: existingStatus.restoredUnconfirmed
+            }
+          : undefined,
+        incoming: statusPayload.agentType,
+        now: data.receivedAt
+      })
     if (
       existingStatus &&
       shouldSuppressInheritedTerminalStatus({
@@ -234,10 +239,11 @@ export function createAgentStatusEventApplicator(args: {
         ...(ownershipConnectionId !== undefined ? { connectionId: ownershipConnectionId } : {})
       },
       metadata:
-        data.providerSession || data.launchToken
+        data.providerSession || data.launchToken || data.resolvedIdentity
           ? {
               ...(data.providerSession ? { providerSession: data.providerSession } : {}),
-              ...(data.launchToken ? { launchToken: data.launchToken } : {})
+              ...(data.launchToken ? { launchToken: data.launchToken } : {}),
+              ...(data.resolvedIdentity ? { resolvedIdentity: data.resolvedIdentity } : {})
             }
           : undefined
     }

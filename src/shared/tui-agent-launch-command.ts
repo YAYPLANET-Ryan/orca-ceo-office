@@ -135,6 +135,16 @@ export function appendAgentLaunchArgs(
   if (diverges) {
     return `${command} ${quoted(missing)}`
   }
+  if (location.scriptArgument) {
+    // Why: `bash -c codex` runs the token as the script; a further token would be
+    // the script's `$0`, so the script itself is rewritten to carry the args.
+    if (!missing.every((arg) => BARE_ARG.test(arg))) {
+      return command
+    }
+    const span = spans[location.index]
+    const script = quoteStartupArg(`${tokens[location.index]} ${missing.join(' ')}`, shell)
+    return `${command.slice(0, span.start)}${script}${command.slice(span.end)}`
+  }
   if (location.insidePayload) {
     // Why: inside the wrapper's quoted payload the inner shell sees the words
     // verbatim, so only quote-free args can be placed there; anything else is

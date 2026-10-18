@@ -27,6 +27,7 @@ import {
   resolveAgentStatusIdentity,
   shouldSuppressInheritedTerminalStatus
 } from '../../../../shared/agent-status-identity'
+import type { ResolvedAgentStatusIdentity } from '../../../../shared/agent-status-ipc-payload'
 import {
   getPaneForegroundObservedAt,
   rebindPaneForegroundObservation,
@@ -138,6 +139,8 @@ export type AgentStatusMetadata = {
   providerSession?: AgentProviderSessionMetadata
   launchConfig?: SleepingAgentLaunchConfig
   launchToken?: string
+  /** Main's verdict for this event; applied instead of resolving again (see agent-status-ipc-payload.ts). */
+  resolvedIdentity?: ResolvedAgentStatusIdentity
 }
 
 export type AgentStatusUpdate = {
@@ -2207,26 +2210,30 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
 
         const foregroundEvidence = s.paneForegroundAgentByPaneKey[paneKey]
         const foregroundObservedAt = getPaneForegroundObservedAt(paneKey)
-        const identity = resolveAgentStatusIdentity({
-          existing: existing
-            ? {
-                agentType: existing.agentType,
-                state: existing.state,
-                updatedAt: existing.updatedAt,
-                restoredUnconfirmed: existing.restoredUnconfirmed
-              }
-            : undefined,
-          incoming: payload.agentType,
-          now: updatedAt,
-          foreground: foregroundEvidence
-            ? {
-                agent: foregroundEvidence.agent,
-                shellForeground: foregroundEvidence.shellForeground,
-                ...(foregroundEvidence.routingRevoked ? { routingRevoked: true } : {}),
-                ...(foregroundObservedAt !== undefined ? { observedAt: foregroundObservedAt } : {})
-              }
-            : undefined
-        })
+        const identity =
+          metadata?.resolvedIdentity ??
+          resolveAgentStatusIdentity({
+            existing: existing
+              ? {
+                  agentType: existing.agentType,
+                  state: existing.state,
+                  updatedAt: existing.updatedAt,
+                  restoredUnconfirmed: existing.restoredUnconfirmed
+                }
+              : undefined,
+            incoming: payload.agentType,
+            now: updatedAt,
+            foreground: foregroundEvidence
+              ? {
+                  agent: foregroundEvidence.agent,
+                  shellForeground: foregroundEvidence.shellForeground,
+                  ...(foregroundEvidence.routingRevoked ? { routingRevoked: true } : {}),
+                  ...(foregroundObservedAt !== undefined
+                    ? { observedAt: foregroundObservedAt }
+                    : {})
+                }
+              : undefined
+          })
         // Why: Command Code has no UserPromptSubmit; a fresh transcript prompt while still `working` is the smart-sort turn boundary.
         const commandCodeNewTurn =
           existing !== undefined &&

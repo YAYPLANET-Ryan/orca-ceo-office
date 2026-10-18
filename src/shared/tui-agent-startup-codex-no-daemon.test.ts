@@ -116,9 +116,9 @@ describe('Codex --no-daemon launch contract', () => {
 
     // Why: `--` before the executable belongs to env; the flag goes after codex.
     expect(wrapped?.launchCommand).toBe("env -- codex '--no-daemon'")
-    // Why: codex is bash's -c script here; the flag lands as the script's $0 and
-    // never reaches codex, which is harmless. Only remoting wrappers are refused.
-    expect(unreachable?.launchCommand).toBe("bash -c codex '--no-daemon' -- x")
+    // Why: codex is bash's -c script here; a further token would be the script's
+    // $0, so the script itself is rewritten to carry the flag.
+    expect(unreachable?.launchCommand).toBe("bash -c 'codex --no-daemon' -- x")
   })
 
   it('applies the contract through the PowerShell call operator', () => {
@@ -232,6 +232,26 @@ describe('Codex --no-daemon launch contract', () => {
     expect(applyAgentLaunchArgsToCustomCommand('echo codex', 'powershell', host)).toBe('echo codex')
     expect(applyAgentLaunchArgsToCustomCommand('type codex.txt', 'cmd', host)).toBe(
       'type codex.txt'
+    )
+    // Why: a wrapper runs its first plain token; a later `codex` is that command's argument.
+    expect(applyAgentLaunchArgsToCustomCommand('cmd /c echo codex', 'powershell', host)).toBe(
+      'cmd /c echo codex'
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('echo -- codex', 'posix', host)).toBe(
+      'echo -- codex'
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('env FOO=1 codex -m x', 'posix', host)).toBe(
+      "env FOO=1 codex '--no-daemon' -m x"
+    )
+    expect(
+      applyAgentLaunchArgsToCustomCommand(
+        'powershell -NoProfile -Command codex',
+        'powershell',
+        host
+      )
+    ).toBe("powershell -NoProfile -Command codex '--no-daemon'")
+    expect(applyAgentLaunchArgsToCustomCommand('sh -c codex', 'posix', host)).toBe(
+      "sh -c 'codex --no-daemon'"
     )
     expect(applyAgentLaunchArgsToCustomCommand("& 'codex' -- prompt", 'powershell', host)).toBe(
       "& 'codex' '--no-daemon' -- prompt"

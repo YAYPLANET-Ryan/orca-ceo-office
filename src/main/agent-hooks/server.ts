@@ -132,6 +132,8 @@ type EnrichedAgentHookEventPayload = AgentHookEventPayload & {
   retainedForLiveness?: true
   /** Persisted proof that a lead boundary was held working only by child agents. */
   claudeLeadBoundaryChildOnly?: true
+  /** Live-only: the identity this server resolved, applied verbatim by the renderer. */
+  resolvedIdentity?: { agentType: AgentType; inheritedFromActivePane: boolean }
 }
 
 type NormalizedLocalHook = {
@@ -148,6 +150,7 @@ type PersistedAgentHookEventPayload = Omit<
   // Why: revision counters are in-memory and the authority id is regenerated per process, so
   // a stored observation could only rehydrate as a stale ordering claim from a dead authority.
   | 'observation'
+  | 'resolvedIdentity'
 > & {
   launchTokenHash?: string
 }
@@ -1601,7 +1604,13 @@ export class AgentHookServer {
     }
     const enriched = {
       ...this.attachStatusTiming(boundaryAwarePayload, now),
-      observation: this.stampObservation(boundaryAwarePayload, origin, now)
+      observation: this.stampObservation(boundaryAwarePayload, origin, now),
+      // Why: the renderer must not re-derive the nested-hook identity from
+      // evidence that may have moved on since this server resolved it.
+      resolvedIdentity: {
+        agentType: identity.agentType,
+        inheritedFromActivePane: identity.inheritedFromActivePane
+      }
     }
     if (
       typeof enriched.payload.turnCompletedAt === 'number' &&
