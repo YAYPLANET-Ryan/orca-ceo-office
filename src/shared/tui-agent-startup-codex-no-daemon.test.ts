@@ -301,6 +301,16 @@ describe('Codex --no-daemon launch contract', () => {
     )
     // Why: a quoted path with spaces is one path, not a command line to split.
     expect(
+      applyAgentLaunchArgsToCustomCommand('cmd /c "Codex CLI\\codex.exe"', 'powershell', host)
+    ).toBe('cmd /c "Codex CLI\\codex.exe"')
+    expect(
+      applyAgentLaunchArgsToCustomCommand('cmd /c "Codex Tools\\helper.exe"', 'powershell', host)
+    ).toBe('cmd /c "Codex Tools\\helper.exe"')
+    // and a quoted payload whose second word is not an option is left alone too
+    expect(
+      applyAgentLaunchArgsToCustomCommand('cmd /c "codex resume abc"', 'powershell', host)
+    ).toBe('cmd /c "codex resume abc"')
+    expect(
       applyAgentLaunchArgsToCustomCommand(
         'cmd /c "C:\\Tools\\Codex CLI\\codex.exe"',
         'powershell',

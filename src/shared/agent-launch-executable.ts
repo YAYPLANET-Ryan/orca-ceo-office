@@ -261,9 +261,11 @@ export function locateAgentExecutable(
     }
     // Why: inside a PowerShell payload the command may be called through `&`
     // (`pwsh -Command "& codex -m x"`); the executable is still the first word run.
-    // The payload may hold nothing but the executable (`cmd /c "codex"`); the
-    // name then ends at the closing quote rather than at whitespace.
-    const payload = /^(["']?)(&\s*)?([^\s"']+)(?=\s|["']$)/.exec(raw)
+    // The payload may hold nothing but the executable (`cmd /c "codex"`), or the
+    // executable followed by options; a second word that is not an option
+    // (`"Codex CLI\\codex.exe"`, `"Codex Tools\\helper.exe"`) means the words are
+    // one spaced path, which must never be split.
+    const payload = /^(["']?)(&\s*)?([^\s"']+)(?=\s+-|\s*["']?$)/.exec(raw)
     // Why: a quoted payload whose first word is a path is ambiguous — it may be one
     // spaced path (`"C:\\Tools\\Codex CLI\\codex.exe"`) rather than a command line, and
     // splitting it would corrupt the path; only a bare name is placed inside.
