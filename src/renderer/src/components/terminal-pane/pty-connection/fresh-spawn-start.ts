@@ -288,6 +288,11 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
           session.clearRegisteredStartupLaunchConfig()
         }
         clearPreSignaledSerializer()
+        if (outputCallbacks.generation === session.transportStreamGeneration) {
+          // Why: the spawn that owned the in-place restore claim failed outright; a
+          // superseded generation leaves the claim to the newer attempt instead.
+          session.clearSleepingRecordAfterColdRestoreSpawn(null)
+        }
         return null
       })
       .finally(() => {

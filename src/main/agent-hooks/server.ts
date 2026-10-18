@@ -466,6 +466,7 @@ function toAgentStatusIpcPayload(entry: EnrichedAgentHookEventPayload): AgentSta
     ...(entry.promptInteractionKey ? { promptInteractionKey: entry.promptInteractionKey } : {}),
     ...(entry.restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
     ...(entry.observation ? { observation: entry.observation } : {}),
+    ...(entry.resolvedIdentity ? { resolvedIdentity: entry.resolvedIdentity } : {}),
     ...entry.payload
   }
 }
@@ -3381,6 +3382,8 @@ export class AgentHookServer {
         restoredUnconfirmed: _restoredUnconfirmed,
         // Why: same — the sequencer that issued it dies with the process (see PersistedAgentHookEventPayload).
         observation: _observation,
+        // Why: a verdict is for the event it rode on; hydrate resolves afresh.
+        resolvedIdentity: _resolvedIdentity,
         launchToken,
         ...persistedPayload
       } = enrichedPayload

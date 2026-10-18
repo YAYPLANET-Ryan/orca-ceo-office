@@ -253,6 +253,22 @@ describe('Codex --no-daemon launch contract', () => {
     expect(applyAgentLaunchArgsToCustomCommand('sh -c codex', 'posix', host)).toBe(
       "sh -c 'codex --no-daemon'"
     )
+    // Why: the inner shell's grammar decides, whatever the pane shell quotes with.
+    expect(applyAgentLaunchArgsToCustomCommand("bash -c 'codex'", 'posix', host)).toBe(
+      "bash -c 'codex --no-daemon'"
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('bash -c codex', 'powershell', host)).toBe(
+      "bash -c 'codex --no-daemon'"
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('bash -c codex', 'cmd', host)).toBe(
+      'bash -c "codex --no-daemon"'
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('env -u codex echo', 'posix', host)).toBe(
+      'env -u codex echo'
+    )
+    expect(applyAgentLaunchArgsToCustomCommand('sudo -u me codex', 'posix', host)).toBe(
+      "sudo -u me codex '--no-daemon'"
+    )
     expect(applyAgentLaunchArgsToCustomCommand("& 'codex' -- prompt", 'powershell', host)).toBe(
       "& 'codex' '--no-daemon' -- prompt"
     )

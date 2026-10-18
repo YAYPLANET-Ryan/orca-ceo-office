@@ -2297,8 +2297,13 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           (existing.state !== 'done' || payload.state === 'done')
         // Why: a nested hook (see resolveAgentStatusIdentity) carries the child's session id;
         // the pane keeps the parent's, or a later cold restore would resume the wrong agent.
+        // When main's verdict rides on the event, main already substituted the parent's
+        // session for an inherited hook, so its field is the pane's session — preferring
+        // this store's own row here is what let the two sides disagree.
         const providerSession =
-          identity.inheritedFromActivePane && existing?.providerSession
+          identity.inheritedFromActivePane &&
+          existing?.providerSession &&
+          !metadata?.resolvedIdentity
             ? existing.providerSession
             : (metadata?.providerSession ??
               (canReuseExistingProviderSession ? existing.providerSession : undefined))

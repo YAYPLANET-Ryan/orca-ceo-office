@@ -231,7 +231,9 @@ describe('AgentHookServer ingestRemote', () => {
         expect.objectContaining({
           paneKey: PANE,
           agentType: 'claude',
-          providerSession: { key: 'session_id', id: 'claude-parent' }
+          providerSession: { key: 'session_id', id: 'claude-parent' },
+          // Why: the renderer applies this verdict verbatim instead of resolving again.
+          resolvedIdentity: { agentType: 'claude', inheritedFromActivePane: true }
         })
       ])
 
@@ -252,7 +254,8 @@ describe('AgentHookServer ingestRemote', () => {
       expect(server.getStatusSnapshot()).toEqual([
         expect.objectContaining({
           agentType: 'codex',
-          providerSession: { key: 'session_id', id: 'codex-new' }
+          providerSession: { key: 'session_id', id: 'codex-new' },
+          resolvedIdentity: { agentType: 'codex', inheritedFromActivePane: false }
         })
       ])
     } finally {

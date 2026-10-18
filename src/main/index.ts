@@ -1681,6 +1681,7 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
       promptInteractionKey,
       restoredUnconfirmed,
       observation,
+      resolvedIdentity,
       isReplay
     }) => {
       if (mainWindow?.isDestroyed()) {
@@ -1731,6 +1732,9 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
         ...(promptInteractionKey ? { promptInteractionKey } : {}),
         ...(restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
         ...(observation ? { observation } : {}),
+        // Why: the renderer applies this verdict instead of resolving the nested-hook
+        // identity again; dropping it here is how main and renderer diverged.
+        ...(resolvedIdentity ? { resolvedIdentity } : {}),
         ...(orchestration ? { orchestration } : {})
       }
       mainWindow?.webContents.send('agentStatus:set', statusEvent)

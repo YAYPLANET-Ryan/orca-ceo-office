@@ -158,6 +158,39 @@ describe('nested hooks under a foreground parent', () => {
     expect(entry?.providerSession).toEqual({ key: 'session_id', id: 'codex-new' })
   })
 
+  it('takes the provider session main supplied with an inherited verdict, not its own stale row', () => {
+    const store = createTestStore()
+    // Why: this store believes a fresh Codex/B owns the pane; main (which holds Claude/A)
+    // ruled the next Claude event inherited and already substituted A for it.
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'codex turn', agentType: 'codex' },
+        'Codex',
+        { updatedAt: 10, stateStartedAt: 10 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'codex-b' } }
+      )
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'claude turn', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 20, stateStartedAt: 20 },
+        undefined,
+        {
+          providerSession: { key: 'session_id', id: 'claude-a' },
+          resolvedIdentity: { agentType: 'claude', inheritedFromActivePane: true }
+        }
+      )
+
+    const entry = store.getState().agentStatusByPaneKey['tab-1:leaf-1']
+    expect(entry?.agentType).toBe('claude')
+    expect(entry?.providerSession).toEqual({ key: 'session_id', id: 'claude-a' })
+  })
+
   it('lets a new agent take the pane once the shell foreground proves the parent exited', () => {
     const store = createTestStore()
     store

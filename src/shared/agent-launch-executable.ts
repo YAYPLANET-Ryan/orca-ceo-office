@@ -21,6 +21,14 @@ const PASSTHROUGH_WRAPPERS = new Set([
 ])
 /** Local shells that run a later token, or one quoted payload token, as a command line. */
 const LOCAL_SHELL_WRAPPERS = new Set(['cmd', 'powershell', 'pwsh', 'bash', 'sh', 'zsh'])
+/** POSIX shells whose `-c` takes exactly one script argument (`bash -c codex`). */
+const POSIX_SCRIPT_SHELLS = new Set(['bash', 'sh', 'zsh'])
+/** Passthrough-wrapper options that consume the next token as their operand. */
+const PASSTHROUGH_OPERAND_OPTIONS: Record<string, ReadonlySet<string>> = {
+  env: new Set(['-u', '-C', '-S', '--unset', '--chdir', '--split-string']),
+  sudo: new Set(['-u', '-g', '-p', '-C', '-D', '-r', '-t', '-h', '--user', '--group']),
+  nice: new Set(['-n', '--adjustment'])
+}
 
 function executableBaseName(token: string): string {
   return (token.split(/[\\/]/).pop() ?? '').toLowerCase().replace(/\.(exe|cmd|bat|ps1)$/, '')
@@ -90,11 +98,18 @@ function findCommandPositionExecutable(
   if (isExecutable(tokens[head])) {
     return head
   }
-  if (!PASSTHROUGH_WRAPPERS.has(executableBaseName(tokens[head]))) {
+  const wrapper = executableBaseName(tokens[head])
+  if (!PASSTHROUGH_WRAPPERS.has(wrapper)) {
     return -1
   }
+  const operandOptions = PASSTHROUGH_OPERAND_OPTIONS[wrapper]
   for (let i = head + 1; i < tokens.length; i += 1) {
     const token = tokens[i]
+    if (operandOptions?.has(token)) {
+      // Why: `env -u codex echo` names a variable, not a program.
+      i += 1
+      continue
+    }
     if (token === '--' || isAssignmentToken(token, shell) || isOptionToken(token, shell)) {
       continue
     }
@@ -140,7 +155,8 @@ export function locateAgentExecutable(
     }
   }
   const head = commandHeadIndex(tokens, shell)
-  if (head === -1 || !LOCAL_SHELL_WRAPPERS.has(executableBaseName(tokens[head]))) {
+  const wrapper = head === -1 ? '' : executableBaseName(tokens[head])
+  if (head === -1 || !LOCAL_SHELL_WRAPPERS.has(wrapper)) {
     return null
   }
   for (let i = head + 1; i < tokens.length; i += 1) {
@@ -154,7 +170,9 @@ export function locateAgentExecutable(
         index: i,
         insertAt: spans[i].end,
         insidePayload: false,
-        scriptArgument: isPosixStartupShell(shell) && tokens[i - 1] === '-c' && raw === token
+        // Why: the inner shell's grammar decides, whatever the outer pane shell is:
+        // `bash -c codex` and `bash -c 'codex'` both run the token as the script.
+        scriptArgument: POSIX_SCRIPT_SHELLS.has(wrapper) && tokens[i - 1] === '-c'
       }
     }
     const payload = /^(["']?)([^\s"']+)\s/.exec(raw)
