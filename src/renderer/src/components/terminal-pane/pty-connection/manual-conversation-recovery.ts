@@ -42,6 +42,7 @@ export function installManualConversationRecovery(session: ConnectPanePtySession
       !session.isForegroundTrackingAllowed(ptyId) ||
       !session.transport.sendInputAccepted ||
       !saved?.record ||
+      (saved.record.resumeTargetPaneKey && saved.record.resumeTargetPaneKey !== session.cacheKey) ||
       saved.record.automaticResumeBlockedBy ||
       session.pendingStartupCommand
     ) {

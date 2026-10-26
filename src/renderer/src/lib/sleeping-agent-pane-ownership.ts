@@ -51,7 +51,7 @@ function getLegacyProviderSessionKeysForTab(
   return keys
 }
 
-function layoutContainsLeaf(
+export function layoutContainsLeaf(
   node: TerminalPaneLayoutNode | null | undefined,
   leafId: string
 ): boolean {

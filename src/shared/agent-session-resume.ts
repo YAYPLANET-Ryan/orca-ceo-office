@@ -68,6 +68,11 @@ export type SleepingAgentSessionRecord = {
   automaticResumeBlockedBy?: 'legacy-orchestration-worker'
   /** A confirmed return to shell does not prove exit intent; retain history without auto-relaunch. */
   requiresManualResume?: boolean
+  /** Durable destination of a submitted recovery. Absence of live status or a
+   *  lost runtime claim must never authorize a second automatic launch. */
+  resumeTargetPaneKey?: string
+  /** Provider-confirmed destination; keep its backup out of the pending UI. */
+  resumeConfirmedAt?: number
   /** Set on a finished pane captured by an explicit workspace sleep. Its
    *  `--resume` is issued by the pane's own cold restore when its tab is
    *  opened, so a mobile wake must not background-mount every such tab and

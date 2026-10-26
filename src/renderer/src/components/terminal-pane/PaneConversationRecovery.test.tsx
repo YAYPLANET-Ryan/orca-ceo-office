@@ -8,7 +8,12 @@ const { state, recover } = vi.hoisted(() => ({
   state: {
     sleepingAgentSessionsByPaneKey: {} as Record<
       string,
-      { requiresManualResume: boolean; prompt?: string; lastAssistantMessage?: string }
+      {
+        requiresManualResume: boolean
+        prompt?: string
+        lastAssistantMessage?: string
+        resumeTargetPaneKey?: string
+      }
     >,
     paneForegroundAgentByPaneKey: {} as Record<
       string,
@@ -59,6 +64,17 @@ it('removes the recovery overlay when foreground evidence reports an agent', asy
   state.paneForegroundAgentByPaneKey['tab:leaf'] = { shellForeground: false, agent: 'codex' }
   await render()
   expect(container.textContent).toBe('')
+})
+
+it('distinguishes the pending destination from its redirected source', async () => {
+  state.sleepingAgentSessionsByPaneKey['tab:leaf']!.resumeTargetPaneKey = 'tab:leaf'
+  await render()
+  expect(container.textContent).toContain('retry here')
+  expect(container.querySelector('button')!.disabled).toBe(false)
+  state.sleepingAgentSessionsByPaneKey['tab:leaf']!.resumeTargetPaneKey = 'other:leaf'
+  await render()
+  expect(container.textContent).toContain('in its recovery tab')
+  expect(container.querySelector('button')!.disabled).toBe(true)
 })
 it('allows a new recovery after a later conversation checkpoint replaces the old one', async () => {
   await render()

@@ -1,5 +1,9 @@
 {
   "sessionRecovery": {
+    "pendingHere": "Recovery is not confirmed. Your conversation is saved; you can retry here when the terminal is ready.",
+    "pendingLabel": "Recovery needs checking",
+    "missingTarget": "The recovery pane is unavailable. The saved conversation is retained. Its previous execution must be checked before starting it again.",
+    "pending": "Recovery is not confirmed. Your conversation is saved; continue in its recovery tab.",
     "context": "Last saved context",
     "contextNote": "Saved excerpts, not a complete handoff. Check the task checkpoint before continuing work.",
     "uncertain": "Delivery could not be confirmed. Check the terminal before retrying.",

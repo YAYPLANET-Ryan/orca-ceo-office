@@ -1,6 +1,7 @@
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import { isValidHostTerminalTabId } from '../../../../shared/terminal-tab-id'
-import { emptyLayoutSnapshot } from '../slices/terminal-helpers'
+import { emptyLayoutSnapshot, singlePaneLayoutSnapshot } from '../slices/terminal-helpers'
+import { makePaneKey } from '../../../../shared/stable-pane-id'
 import {
   buildOrphanTerminalCleanupPatch,
   getOrphanTerminalIds
@@ -190,8 +191,32 @@ export function createTerminalTabCreationActions(
         const nextActiveTabIdForWorktree = shouldActivate
           ? tab.id
           : (cleanedActiveTabIdForWorktree ?? cleanedGroupActiveTabId ?? tab.id)
+        const recoveryRecord = options?.recoveryRecord
+        const recoveryLeafId = recoveryRecord ? createBrowserUuid() : undefined
+        const recoveryPaneKey = recoveryLeafId ? makePaneKey(tab.id, recoveryLeafId) : undefined
+        // Publish the tab, stable leaf and both recovery pointers together. A
+        // persisted snapshot cannot contain a new resume tab without its identity.
+        const sleeping =
+          recoveryRecord && recoveryPaneKey
+            ? {
+                ...s.sleepingAgentSessionsByPaneKey,
+                [recoveryRecord.paneKey]: {
+                  ...recoveryRecord,
+                  resumeTargetPaneKey: recoveryPaneKey,
+                  requiresManualResume: true
+                },
+                [recoveryPaneKey]: {
+                  ...recoveryRecord,
+                  paneKey: recoveryPaneKey,
+                  tabId: tab.id,
+                  resumeTargetPaneKey: recoveryPaneKey,
+                  requiresManualResume: true
+                }
+              }
+            : undefined
         return {
           ...orphanCleanupPatch,
+          ...(sleeping ? { sleepingAgentSessionsByPaneKey: sleeping } : {}),
           tabsByWorktree: {
             ...orphanCleanupPatch.tabsByWorktree,
             [worktreeId]: [...existing, tab]
@@ -230,7 +255,9 @@ export function createTerminalTabCreationActions(
           },
           terminalLayoutsByTabId: {
             ...orphanCleanupPatch.terminalLayoutsByTabId,
-            [tab.id]: emptyLayoutSnapshot()
+            [tab.id]: recoveryLeafId
+              ? singlePaneLayoutSnapshot(recoveryLeafId)
+              : emptyLayoutSnapshot()
           }
         }
       })

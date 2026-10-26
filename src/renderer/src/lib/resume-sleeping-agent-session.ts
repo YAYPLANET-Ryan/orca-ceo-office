@@ -3,7 +3,6 @@ import {
   agentProviderSessionsEqual,
   type SleepingAgentSessionRecord
 } from '../../../shared/agent-session-resume'
-import { AGENT_STATUS_STALE_AFTER_MS } from '../../../shared/agent-status-types'
 import {
   getProviderSessionClaimKey,
   isPassiveCompletedHibernationEvidence,
@@ -85,7 +84,7 @@ function activeOrQueuedResumeClaimsProviderSession(
   record: SleepingAgentSessionRecord,
   state: ReturnType<typeof useAppStore.getState>,
   samePaneOwnsRecovery: boolean
-): 'active' | 'queued' | null {
+): boolean {
   const worktreeTabIds = new Set(
     (state.tabsByWorktree[record.worktreeId] ?? []).map((tab) => tab.id)
   )
@@ -98,10 +97,9 @@ function activeOrQueuedResumeClaimsProviderSession(
       worktreeTabIds.has(getAgentStatusTabId(entry) ?? '') &&
       entry.worktreeId === record.worktreeId &&
       entry.agentType === record.agent &&
-      entry.state !== 'done' &&
       agentProviderSessionsEqual(record.agent, entry.providerSession, record.providerSession)
     ) {
-      return 'active'
+      return true
     }
   }
 
@@ -115,7 +113,7 @@ function activeOrQueuedResumeClaimsProviderSession(
         record.providerSession
       )
     ) {
-      return 'queued'
+      return true
     }
   }
 
@@ -126,21 +124,17 @@ function activeOrQueuedResumeClaimsProviderSession(
       claim.launchAgent === record.agent &&
       agentProviderSessionsEqual(record.agent, claim.providerSession, record.providerSession)
     ) {
-      return 'queued'
+      return true
     }
   }
-  return null
+  return false
 }
 
 // Why: an interrupted turn is still resumable — `claude --resume` reopens the transcript at the
 // prompt — so discarding those records only stranded the session across wake and restart.
 function isInvalidWorktreeActivationRecord(record: SleepingAgentSessionRecord): boolean {
-  if (!record.origin && record.state === 'done') {
-    return true
-  }
-  return (
-    record.state !== 'done' && record.capturedAt - record.updatedAt > AGENT_STATUS_STALE_AFTER_MS
-  )
+  // Status age is not evidence that the saved provider conversation is invalid.
+  return !record.origin && record.state === 'done'
 }
 
 function parkWorktreeResumeSweepUntilHostMirrorHydrates(
@@ -199,12 +193,13 @@ export function resumeSleepingAgentSessionsForWorktree(
     }
     if (
       record.automaticResumeBlockedBy === 'legacy-orchestration-worker' ||
+      record.resumeTargetPaneKey ||
       record.requiresManualResume
     ) {
       continue
     }
     if (isInvalidWorktreeActivationRecord(record)) {
-      state.clearSleepingAgentSession(record.paneKey)
+      // Legacy completed records are passive history, not disposable identity.
       continue
     }
     const unhydratedMirror = findUnhydratedHostMirrorForPane(record, currentState)
@@ -234,10 +229,8 @@ export function resumeSleepingAgentSessionsForWorktree(
       isPaneOwned
     )
     if (providerClaim) {
-      // A queued launch suppresses duplicates but does not prove recovery succeeded.
-      if (providerClaim === 'active') {
-        state.clearSleepingAgentSession(record.paneKey)
-      }
+      // Neither queued startup nor a status row proves durable replacement.
+      // Keep the recovery identity even when a stale row suppresses a launch.
       continue
     }
     const paneOwnedClaimKeys = getCurrentPaneOwnedClaimKeys(activeWorktreeRecords)

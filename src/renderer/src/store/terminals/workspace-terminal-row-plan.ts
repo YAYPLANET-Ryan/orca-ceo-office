@@ -85,7 +85,7 @@ export function buildWorkspaceTerminalRowPlan(
   if (releasedPaneKeys.size > 0) {
     sleepingAgentSessionsByPaneKey = Object.fromEntries(
       Object.entries(sleepingAgentSessionsByPaneKey).filter(
-        ([paneKey]) => !releasedPaneKeys.has(paneKey)
+        ([paneKey, record]) => record.resumeTargetPaneKey || !releasedPaneKeys.has(paneKey)
       )
     )
   }

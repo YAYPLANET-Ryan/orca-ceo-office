@@ -5,6 +5,7 @@ import type { WorkspaceSessionState } from '../../../../shared/workspace-session
 import type { SetupSplitDirection } from '../../../../shared/worktree/launch-types'
 import type {
   AgentProviderSessionMetadata,
+  SleepingAgentSessionRecord,
   SleepingAgentLaunchConfig
 } from '../../../../shared/agent-session-resume'
 import type { DirectSshAuthority } from '../../../../shared/ssh-types'
@@ -70,6 +71,8 @@ export type TerminalActions = {
       recordInteraction?: boolean
       id?: string
       launchAgent?: TuiAgent
+      /** Atomically bind a saved conversation to the newly created stable leaf. */
+      recoveryRecord?: SleepingAgentSessionRecord
       quickCommandLabel?: string | null
       viewMode?: Tab['viewMode']
       startupCwd?: string

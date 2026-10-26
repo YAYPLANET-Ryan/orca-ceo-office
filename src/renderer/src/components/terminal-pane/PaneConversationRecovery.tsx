@@ -24,6 +24,7 @@ export function PaneConversationRecovery({
   } | null>(null)
   const result =
     attempt?.record === record && attempt?.foreground === foreground ? attempt?.result : null
+  const redirected = Boolean(record?.resumeTargetPaneKey && record.resumeTargetPaneKey !== paneKey)
   if (
     !record?.requiresManualResume ||
     !foreground?.shellForeground ||
@@ -57,7 +58,17 @@ export function PaneConversationRecovery({
                 'sessionRecovery.unavailable',
                 'Cannot safely resume here yet. Your saved conversation is retained.'
               )
-            : translate('sessionRecovery.ready', 'Agent exited. Your conversation is saved.')
+            : record.resumeTargetPaneKey
+              ? redirected
+                ? translate(
+                    'sessionRecovery.pending',
+                    'Recovery is not confirmed. Your conversation is saved; continue in its recovery tab.'
+                  )
+                : translate(
+                    'sessionRecovery.pendingHere',
+                    'Recovery is not confirmed. Your conversation is saved; you can retry here when the terminal is ready.'
+                  )
+              : translate('sessionRecovery.ready', 'Agent exited. Your conversation is saved.')
   return (
     <div
       data-conversation-recovery
@@ -89,7 +100,13 @@ export function PaneConversationRecovery({
       <Button
         size="sm"
         variant="secondary"
-        disabled={pending || result === 'submitted' || result === 'busy' || result === 'uncertain'}
+        disabled={
+          redirected ||
+          pending ||
+          result === 'submitted' ||
+          result === 'busy' ||
+          result === 'uncertain'
+        }
         onClick={() => void recover()}
       >
         {translate('sessionRecovery.continue', 'Continue conversation')}

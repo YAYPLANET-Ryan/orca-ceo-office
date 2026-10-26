@@ -18,6 +18,7 @@ beforeEach(() => {
 })
 function setup() {
   const record = {
+    resumeTargetPaneKey: undefined as string | undefined,
     requiresManualResume: true,
     agent: 'codex',
     providerSession: { key: 'session_id', id: 'exact-id' }
@@ -58,6 +59,13 @@ it('does not append a resume command to user input', async () => {
   const f = setup()
   f.session.lastTerminalInputAt = 2
   expect(await recoverPaneConversation('manual:leaf')).toBe('changed')
+  expect(f.send).not.toHaveBeenCalled()
+})
+
+it('does not resume a redirected source in the wrong pane', async () => {
+  const f = setup()
+  f.record.resumeTargetPaneKey = 'another:leaf'
+  expect(await recoverPaneConversation('manual:leaf')).toBe('unavailable')
   expect(f.send).not.toHaveBeenCalled()
 })
 it.each([null, 'claude.exe', 'node.exe'])(

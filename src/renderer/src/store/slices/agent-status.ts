@@ -1,5 +1,9 @@
 /* eslint-disable max-lines -- Why: the agent-status slice co-locates live map, retained snapshots, retention-suppression, and tab-prefix sweep so the teardown contract stays readable end-to-end. Splitting across files would scatter the drop/remove/retain interactions that must stay in lockstep. */
 import type { StateCreator } from 'zustand'
+import {
+  confirmRecoverySources,
+  remapRecoveryTargets
+} from '../../../../shared/agent-recovery-target'
 import type { AppState } from '../types'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
@@ -690,6 +694,10 @@ function carryOverAutomaticResumeBlock(
   if (previous?.requiresManualResume && recoveryRecordTargetsSameSession(previous, record)) {
     record.requiresManualResume = true
   }
+  if (previous?.resumeTargetPaneKey && recoveryRecordTargetsSameSession(previous, record)) {
+    record.resumeTargetPaneKey = previous.resumeTargetPaneKey
+    record.resumeConfirmedAt = previous.resumeConfirmedAt
+  }
   if (
     previous?.automaticResumeBlockedBy === 'legacy-orchestration-worker' &&
     previous.agent === record.agent &&
@@ -901,6 +909,8 @@ function sleepingRecordsEquivalentIgnoringCaptureTime(
     existing.interrupted === next.interrupted &&
     existing.origin === next.origin &&
     existing.requiresManualResume === next.requiresManualResume &&
+    existing.resumeTargetPaneKey === next.resumeTargetPaneKey &&
+    existing.resumeConfirmedAt === next.resumeConfirmedAt &&
     launchConfigsEqual(existing.launchConfig, next.launchConfig)
   )
 }
@@ -921,6 +931,8 @@ function recoveryRecordMatches(
     existing.state === next.state &&
     existing.interrupted === next.interrupted &&
     existing.requiresManualResume === next.requiresManualResume &&
+    existing.resumeTargetPaneKey === next.resumeTargetPaneKey &&
+    existing.resumeConfirmedAt === next.resumeConfirmedAt &&
     agentProviderSessionsEqual(existing.agent, existing.providerSession, next.providerSession) &&
     launchConfigsEqual(existing.launchConfig, next.launchConfig)
   )
@@ -948,6 +960,20 @@ function copyLaunchConfig(config: SleepingAgentLaunchConfig): SleepingAgentLaunc
     agentEnv: { ...config.agentEnv },
     ...(config.ompResumeFilePath ? { ompResumeFilePath: config.ompResumeFilePath } : {})
   }
+}
+
+// A redirected source is a backup, and a different provider cannot confirm a
+// pending destination. In either case keep the only known recovery identity.
+function preservePendingRecovery(
+  existing: SleepingAgentSessionRecord | undefined,
+  next: SleepingAgentSessionRecord | null
+): boolean {
+  return Boolean(
+    existing?.resumeTargetPaneKey &&
+    (existing.resumeTargetPaneKey !== existing.paneKey ||
+      !next ||
+      !recoveryRecordTargetsSameSession(existing, next))
+  )
 }
 
 function launchConfigsEqual(
@@ -1792,11 +1818,14 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             tab: targetTabId ? { ...retained.tab, id: targetTabId } : retained.tab
           })
         ),
-        sleepingAgentSessionsByPaneKey: movePaneKeyedRecord(
-          s.sleepingAgentSessionsByPaneKey,
+        sleepingAgentSessionsByPaneKey: remapRecoveryTargets(
+          movePaneKeyedRecord(s.sleepingAgentSessionsByPaneKey, from, to, (record) => ({
+            ...record,
+            paneKey: to,
+            tabId: targetTabId
+          })),
           from,
-          to,
-          (record) => ({ ...record, paneKey: to, tabId: targetTabId })
+          to
         ),
         agentLaunchConfigByPaneKey: movePaneKeyedRecord(
           s.agentLaunchConfigByPaneKey,
@@ -1955,7 +1984,11 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
                 origin: existingSleepingRecord.origin
               })
             : null
-          if (refreshedRecord) {
+          if (
+            refreshedRecord &&
+            !preservePendingRecovery(existingSleepingRecord, refreshedRecord)
+          ) {
+            carryOverAutomaticResumeBlock(refreshedRecord, existingSleepingRecord)
             nextSleepingAgentSessions = {
               ...s.sleepingAgentSessionsByPaneKey,
               [paneKey]: {
@@ -2116,10 +2149,14 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         return {
           agentStatusByPaneKey: nextLive,
           retainedAgentsByPaneKey: nextRetained,
-          sleepingAgentSessionsByPaneKey: {
-            ...s.sleepingAgentSessionsByPaneKey,
-            [paneKey]: record
-          },
+          sleepingAgentSessionsByPaneKey: confirmRecoverySources(
+            {
+              ...s.sleepingAgentSessionsByPaneKey,
+              [paneKey]: preservePendingRecovery(existingRecord, record) ? existingRecord! : record
+            },
+            existingRecord,
+            record
+          ),
           agentLaunchConfigByPaneKey: nextLaunchConfigs,
           acknowledgedAgentsByPaneKey: removePaneKeys(
             s.acknowledgedAgentsByPaneKey,
@@ -2576,7 +2613,9 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           nextLaunchConfigs = { ...s.agentLaunchConfigByPaneKey }
           delete nextLaunchConfigs[paneKey]
         }
-        if (liveRecoveryRecord) {
+        if (preservePendingRecovery(existingSleepingRecord, liveRecoveryRecord)) {
+          // Keep the saved conversation until this destination reports the same provider.
+        } else if (liveRecoveryRecord) {
           if (!recoveryRecordMatches(existingSleepingRecord, liveRecoveryRecord)) {
             nextSleepingAgentSessions = {
               ...s.sleepingAgentSessionsByPaneKey,
@@ -2587,6 +2626,11 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           nextSleepingAgentSessions = { ...s.sleepingAgentSessionsByPaneKey }
           delete nextSleepingAgentSessions[paneKey]
         }
+        nextSleepingAgentSessions = confirmRecoverySources(
+          nextSleepingAgentSessions,
+          existingSleepingRecord,
+          liveRecoveryRecord
+        )
         const nextLive = { ...s.agentStatusByPaneKey, [paneKey]: entry }
         // Why: cap the live map so a huge map's per-ping spread copy can't OOM the renderer (#9872).
         const evictedPaneKeys = capLiveAgentStatusesInPlace(
@@ -3286,6 +3330,10 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             origin
           })
           const existing = next[entry.paneKey]
+          if (existing?.resumeTargetPaneKey) {
+            // Periodic/quit capture is not provider confirmation and must not erase the fence.
+            continue
+          }
           if (record) {
             carryOverAutomaticResumeBlock(record, existing)
           }

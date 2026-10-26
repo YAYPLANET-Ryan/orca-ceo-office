@@ -229,6 +229,9 @@ export function closeTerminalTabInWorkspaceSession(
     delete next.activeGroupIdByWorktree![worktreeId]
   }
   for (const [paneKey, record] of Object.entries(next.sleepingAgentSessionsByPaneKey ?? {})) {
+    if (record.resumeTargetPaneKey) {
+      continue
+    }
     if (paneKey.startsWith(`${tabId}:`) || record.tabId === tabId) {
       delete next.sleepingAgentSessionsByPaneKey![paneKey]
     }

@@ -67,6 +67,14 @@ export function launchSleepingAgentSession(
   options?: ResumeSleepingAgentSessionsOptions
 ): boolean {
   const state = useAppStore.getState()
+  // A prior submission may still be running on its execution host, even when
+  // the renderer lost every ephemeral claim. Recovery continues in that pane.
+  if (
+    record.resumeTargetPaneKey ||
+    state.sleepingAgentSessionsByPaneKey[record.paneKey] !== record
+  ) {
+    return false
+  }
   const launchConfig = record.launchConfig
   const resumeTarget = getResumeLaunchTarget(record.worktreeId)
   const startupPlan = buildAgentResumeStartupPlan({
@@ -101,6 +109,7 @@ export function launchSleepingAgentSession(
 
   const tab = state.createTab(record.worktreeId, undefined, undefined, {
     launchAgent: record.agent,
+    recoveryRecord: { ...record, launchConfig: record.launchConfig ?? startupPlan.launchConfig },
     ...(options?.suppressNavigation ? { activate: false, recordInteraction: false } : {})
   })
   state.queueTabStartupCommand(tab.id, {
@@ -113,7 +122,8 @@ export function launchSleepingAgentSession(
     ...(startupPlan.startupCommandDelivery
       ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
       : {}),
-    showSessionRestoredBanner: true,
+    // Delivery is not confirmation that the original provider session resumed.
+    showSessionRestoredBanner: false,
     telemetry: {
       agent_kind: tuiAgentToAgentKind(record.agent),
       launch_source: 'sidebar',

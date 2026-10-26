@@ -457,9 +457,9 @@ describe('connectPanePty', () => {
     )
     // A shell spawn is not provider confirmation; retain the exact recovery identity.
     expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
-    expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]?.providerSession.id).toBe(
-      'codex-session-1'
-    )
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
+      providerSession: { id: 'codex-session-1' }
+    })
   })
 
   it('marks the pane as freshly started when main declined an unverifiable resume', async () => {
@@ -565,9 +565,9 @@ describe('connectPanePty', () => {
 
     expect(deps.onShowSessionRestoredBanner).not.toHaveBeenCalled()
     expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
-    expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]?.providerSession.id).toBe(
-      'codex-session-1'
-    )
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
+      providerSession: { id: 'codex-session-1' }
+    })
     expect(transport.sendInput).not.toHaveBeenCalled()
     expect(deps.onPtyErrorRef.current).toHaveBeenCalledWith(
       1,
@@ -650,12 +650,12 @@ describe('connectPanePty', () => {
       })
     )
     expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
-    expect(mockStoreState.sleepingAgentSessionsByPaneKey[legacyPaneKey]?.providerSession.id).toBe(
-      'codex-session-1'
-    )
-    expect(
-      mockStoreState.sleepingAgentSessionsByPaneKey[duplicateLegacyPaneKey]?.providerSession.id
-    ).toBe('codex-session-1')
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[legacyPaneKey]).toMatchObject({
+      providerSession: { id: 'codex-session-1' }
+    })
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[duplicateLegacyPaneKey]).toMatchObject({
+      providerSession: { id: 'codex-session-1' }
+    })
   })
 
   it('does not choose a non-exact legacy record when same-tab provider sessions differ', async () => {

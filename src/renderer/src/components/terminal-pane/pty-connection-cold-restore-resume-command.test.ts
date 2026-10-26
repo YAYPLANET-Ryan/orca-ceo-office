@@ -333,9 +333,9 @@ describe('connectPanePty', () => {
       expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenCalledWith(2, 'restored-session')
       expect(deps.syncPanePtyLayoutBinding).toHaveBeenCalledWith(2, 'fresh-resume-pty')
       expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
-      expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]?.providerSession.id).toBe(
-        'codex-session-1'
-      )
+      expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
+        providerSession: { id: 'codex-session-1' }
+      })
       expect(window.api.pty.clearPendingPaneSerializer).toHaveBeenCalledWith(paneKey, 1)
     } finally {
       globalThis.setTimeout = originalSetTimeout

@@ -753,8 +753,8 @@ describe('connectPanePty', () => {
     expect(deps.onShowSessionRestoredBanner).toHaveBeenCalledTimes(1)
     expect(deps.onShowSessionRestoredBanner).toHaveBeenCalledWith(2, 'restored')
     expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
-    expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]?.providerSession.id).toBe(
-      'codex-session-1'
-    )
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
+      providerSession: { id: 'codex-session-1' }
+    })
   })
 })

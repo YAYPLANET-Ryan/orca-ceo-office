@@ -186,6 +186,7 @@ export function renderTabBarSurface({
         </div>
       </SortableContext>
       <FoldedConversationTabs
+        worktreeId={worktreeId}
         items={itemProjection.foldedItems}
         showAll={itemProjection.showAll}
         onShowAll={itemProjection.setShowAll}

@@ -1,6 +1,49 @@
 import { test, expect } from './helpers/orca-app'
 import { focusActiveTerminalInput, waitForPaneIdentitySnapshot } from './helpers/terminal'
 
+test('a missing recovery pane remains accessible without launching another agent', async ({
+  orcaPage
+}) => {
+  await orcaPage.evaluate(async () => {
+    const store = window.__store!
+    await store.getState().updateSettings({ uiLanguage: 'ko' })
+    const state = store.getState()
+    store.setState({
+      sleepingAgentSessionsByPaneKey: {
+        ...state.sleepingAgentSessionsByPaneKey,
+        'missing-source:leaf': {
+          paneKey: 'missing-source:leaf',
+          tabId: 'missing-source',
+          worktreeId: state.activeWorktreeId!,
+          agent: 'codex',
+          providerSession: { key: 'session_id', id: 'orphan-fixture-do-not-launch' },
+          prompt: 'Preserved orphan request',
+          state: 'working',
+          capturedAt: Date.now(),
+          updatedAt: Date.now(),
+          origin: 'quit',
+          requiresManualResume: true,
+          resumeTargetPaneKey: 'missing-target:leaf'
+        }
+      }
+    })
+  })
+  const before = await orcaPage.evaluate(
+    () => Object.values(window.__store!.getState().tabsByWorktree).flat().length
+  )
+  await orcaPage.getByRole('button', { name: /저장된 대화/ }).click()
+  await orcaPage.getByRole('menuitem', { name: /복원 확인 필요/ }).click()
+  const dialog = orcaPage.getByRole('dialog')
+  await expect(dialog).toContainText('Preserved orphan request')
+  await expect(dialog).toContainText('orphan-fixture-do-not-launch')
+  await expect(dialog).toContainText('이전 실행 상태를 확인')
+  expect(
+    await orcaPage.evaluate(
+      () => Object.values(window.__store!.getState().tabsByWorktree).flat().length
+    )
+  ).toBe(before)
+})
+
 test('saved conversation retains context, protects a draft and folds reversibly', async ({
   orcaPage
 }) => {

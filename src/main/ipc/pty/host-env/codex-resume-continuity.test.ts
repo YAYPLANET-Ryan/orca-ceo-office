@@ -5,7 +5,7 @@ import {
   resolveCodexResumeLaunch
 } from './codex-resume'
 
-const providerSession = { key: 'session_id', id: 'synthetic-session' }
+const providerSession = { key: 'session_id' as const, id: 'synthetic-session' }
 
 describe('Codex resume continuity boundaries', () => {
   it.each([

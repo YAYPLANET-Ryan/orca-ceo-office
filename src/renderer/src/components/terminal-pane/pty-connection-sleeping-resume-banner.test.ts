@@ -244,7 +244,8 @@ describe('connectPanePty', () => {
 
     expect(deps.onShowSessionRestoredBanner).toHaveBeenCalledTimes(1)
     expect(deps.onShowSessionRestoredBanner).toHaveBeenCalledWith(2, 'restored')
-    expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledWith(paneKey)
+    expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toBeDefined()
   })
 
   it('says the fresh-spawn resume started fresh when main declined it', async () => {
@@ -478,5 +479,43 @@ describe('connectPanePty', () => {
       command: "codex 'resume' 'codex-session-1'",
       resumeProviderSession: providerSession
     })
+  })
+
+  it('delivers explicit queued resume despite a durable manual-recovery fence', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('pty-1')
+    transportFactoryQueue.push(transport)
+    const pane = createPane(1)
+    const paneKey = makePaneKey('tab-1', pane.leafId)
+    const providerSession = { key: 'session_id', id: 'pending-fixture' } as const
+    mockStoreState.sleepingAgentSessionsByPaneKey[paneKey] = {
+      paneKey,
+      tabId: 'tab-1',
+      worktreeId: 'wt-1',
+      agent: 'codex',
+      providerSession,
+      prompt: '',
+      state: 'working',
+      capturedAt: 1,
+      updatedAt: 1,
+      requiresManualResume: true,
+      resumeTargetPaneKey: paneKey
+    }
+    const deps = createDeps({
+      startup: {
+        command: "codex 'resume' 'pending-fixture'",
+        resumeProviderSession: providerSession,
+        showSessionRestoredBanner: false
+      }
+    })
+    connectPanePty(pane as never, createManager(1) as never, deps as never)
+    await flushAsyncTicks(10)
+    expect(transport.connect).toHaveBeenCalledTimes(1)
+    expect(createdTransportOptions[0]).toMatchObject({
+      command: "codex 'resume' 'pending-fixture'",
+      resumeProviderSession: providerSession
+    })
+    expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+    expect(deps.onShowSessionRestoredBanner).not.toHaveBeenCalled()
   })
 })

@@ -233,6 +233,11 @@ export function removeSleepingAgentSessionsForTab(
 ): Record<string, SleepingAgentSessionRecord> {
   let next = records
   for (const [paneKey, record] of Object.entries(records)) {
+    // Closing a tab does not confirm a pending recovery or authorize destroying
+    // its saved identity. It remains visible in the saved-conversation menu.
+    if (record.resumeTargetPaneKey) {
+      continue
+    }
     if (!paneKey.startsWith(`${tabId}:`) && record.tabId !== tabId) {
       continue
     }
