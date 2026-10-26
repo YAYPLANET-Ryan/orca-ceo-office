@@ -85,7 +85,7 @@ function activeOrQueuedResumeClaimsProviderSession(
   record: SleepingAgentSessionRecord,
   state: ReturnType<typeof useAppStore.getState>,
   samePaneOwnsRecovery: boolean
-): boolean {
+): 'active' | 'queued' | null {
   const worktreeTabIds = new Set(
     (state.tabsByWorktree[record.worktreeId] ?? []).map((tab) => tab.id)
   )
@@ -101,7 +101,7 @@ function activeOrQueuedResumeClaimsProviderSession(
       entry.state !== 'done' &&
       agentProviderSessionsEqual(record.agent, entry.providerSession, record.providerSession)
     ) {
-      return true
+      return 'active'
     }
   }
 
@@ -115,7 +115,7 @@ function activeOrQueuedResumeClaimsProviderSession(
         record.providerSession
       )
     ) {
-      return true
+      return 'queued'
     }
   }
 
@@ -126,10 +126,10 @@ function activeOrQueuedResumeClaimsProviderSession(
       claim.launchAgent === record.agent &&
       agentProviderSessionsEqual(record.agent, claim.providerSession, record.providerSession)
     ) {
-      return true
+      return 'queued'
     }
   }
-  return false
+  return null
 }
 
 // Why: an interrupted turn is still resumable — `claude --resume` reopens the transcript at the
@@ -192,8 +192,8 @@ export function resumeSleepingAgentSessionsForWorktree(
     }
     const claimKey = getProviderSessionClaimKey(record)
     // Why: a mounted pane already consumed (or latched) the in-place
-    // hibernation wake for this session; its record clears when that spawn
-    // succeeds. Launching or clearing here would double-resume the session.
+    // hibernation wake for this session; its record remains until the provider
+    // confirms recovery. Launching or clearing here would double-resume the session.
     if (options?.skipClaimKeys?.has(claimKey)) {
       continue
     }
@@ -228,10 +228,16 @@ export function resumeSleepingAgentSessionsForWorktree(
       }
       continue
     }
-    if (activeOrQueuedResumeClaimsProviderSession(record, currentState, isPaneOwned)) {
-      // Why: main can replay the old wake record after the same provider
-      // session was already queued in a fresh tab; clear the stale replay.
-      state.clearSleepingAgentSession(record.paneKey)
+    const providerClaim = activeOrQueuedResumeClaimsProviderSession(
+      record,
+      currentState,
+      isPaneOwned
+    )
+    if (providerClaim) {
+      // A queued launch suppresses duplicates but does not prove recovery succeeded.
+      if (providerClaim === 'active') {
+        state.clearSleepingAgentSession(record.paneKey)
+      }
       continue
     }
     const paneOwnedClaimKeys = getCurrentPaneOwnedClaimKeys(activeWorktreeRecords)

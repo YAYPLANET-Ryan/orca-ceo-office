@@ -6,7 +6,7 @@ import {
 import { SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV } from '../../../../shared/setup-agent-sequencing'
 import { dropAgentResumeArgvFromCommand } from '../../../../shared/agent-resume-argv-drop'
 import type { CodexAccountSelectionTarget } from '../../../codex-accounts/runtime-selection'
-import { dropUnverifiedCodexResumeArgv } from '../../../codex/codex-unverified-resume-launch'
+import { UNVERIFIED_CODEX_RESUME_ERROR } from '../../../codex/codex-unverified-resume-launch'
 import type { CodexSessionResumePreparation } from '../../../codex/codex-session-resume-home'
 import { CODEX_RESUME_AUTH_UNAVAILABLE_MESSAGE, codexHomePathsEqual } from './codex-home'
 import type { PrepareCodexSessionResume } from './types'
@@ -67,15 +67,14 @@ export function noCodexResumeLaunch(command: string | undefined): CodexResumeLau
   }
 }
 
-/** The command a Codex launch actually runs: unchanged when provenance is verified,
- *  stripped of `resume <id>` when it is not. */
+/** A requested conversation must not silently become a new conversation. */
 export function resolveCodexResumeLaunch(
   command: string | undefined,
   preparation: PreparedCodexResumeHome
 ): Promise<CodexResumeLaunch> {
   return preparation.preparation.then((prepared) => {
     const providerSession = preparation.providerSession
-    if (prepared?.outcome !== 'fresh') {
+    if (prepared?.outcome === 'resume') {
       return {
         codexResumeHome: prepared ?? null,
         command,
@@ -84,22 +83,7 @@ export function resolveCodexResumeLaunch(
         providerSession
       }
     }
-    const dropped = dropUnverifiedCodexResumeArgv({
-      command,
-      providerSession,
-      claimedCodexProvenance: prepared.claimedCodexProvenance
-    })
-    return {
-      codexResumeHome: null,
-      command: dropped.command,
-      // Why: staying silent only makes sense for metadata that positively belongs to
-      // another agent; a resume with no transcript path at all still owes the user a notice.
-      notifyResumeUnavailable:
-        dropped.droppedResumeArgv &&
-        (prepared.claimedCodexProvenance || !providerSession.transcriptPath),
-      droppedResumeArgv: dropped.droppedResumeArgv,
-      providerSession
-    }
+    throw new Error(UNVERIFIED_CODEX_RESUME_ERROR)
   })
 }
 

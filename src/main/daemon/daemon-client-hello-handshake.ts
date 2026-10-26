@@ -4,6 +4,7 @@ import { encodeNdjson } from './ndjson'
 import { CLEAN_DISCONNECT_PROTOCOL_VERSION, DaemonProtocolError } from './types'
 import type { DaemonEndpointIdentity, HelloMessage, HelloResponse } from './types'
 import { addNodePtyRecoveryHint } from './node-pty-error-hints'
+import { DaemonHelloClosedError } from './daemon-hello-closed-error'
 
 export type DaemonHelloRequest = {
   socket: Socket
@@ -84,8 +85,7 @@ export function sendDaemonHello(
       }
     }
     const onError = (error: Error): void => finish(error)
-    const onClose = (): void =>
-      finish(new DaemonProtocolError('Connection closed before hello response'))
+    const onClose = (): void => finish(new DaemonHelloClosedError())
 
     timer = setTimeout(() => {
       // Why: a stale daemon can accept the socket but never answer hello;

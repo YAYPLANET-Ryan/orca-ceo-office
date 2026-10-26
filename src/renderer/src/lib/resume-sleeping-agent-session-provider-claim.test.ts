@@ -102,6 +102,38 @@ describe('resume sleeping agent provider claims', () => {
     expect(state.sleepingAgentSessionsByPaneKey[record.paneKey]).toBe(record)
   })
 
+  it('retains an owned recovery record while provider confirmation is only queued', () => {
+    const paneKey = makePaneKey('tab-1', LEAF_ID)
+    const record = makeRecord(paneKey)
+    useAppStore.setState({
+      ...makePreservedPaneState(record),
+      tabsByWorktree: { 'wt-1': [makeTerminalTab('tab-1')] },
+      agentStatusByPaneKey: {},
+      pendingStartupByTabId: {
+        'tab-1': { launchAgent: record.agent, resumeProviderSession: record.providerSession }
+      }
+    } as never)
+    expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(0)
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[paneKey]).toBe(record)
+    expect(useAppStore.getState().tabsByWorktree['wt-1']).toHaveLength(1)
+  })
+
+  it('keeps a preserved pane without hooks or queued startup from launching a duplicate', () => {
+    const paneKey = makePaneKey('tab-1', LEAF_ID)
+    const record = makeRecord(paneKey)
+    useAppStore.setState({
+      ...makePreservedPaneState(record),
+      tabsByWorktree: { 'wt-1': [makeTerminalTab('tab-1')] },
+      agentStatusByPaneKey: {},
+      pendingStartupByTabId: {},
+      automaticAgentResumeClaimsByTabId: {}
+    } as never)
+    expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(0)
+    expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(0)
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[paneKey]).toBe(record)
+    expect(useAppStore.getState().tabsByWorktree['wt-1']).toHaveLength(1)
+  })
+
   it('clears the quit record when another pane already resumed the provider session', () => {
     const paneKey = makePaneKey('tab-1', LEAF_ID)
     const otherPaneKey = makePaneKey('tab-2', OTHER_LEAF_ID)

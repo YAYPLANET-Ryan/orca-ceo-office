@@ -455,8 +455,11 @@ describe('connectPanePty', () => {
         })
       })
     )
-    // Why: consuming the record prevents a later worktree activation from launching a duplicate resume tab.
-    expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledWith(paneKey)
+    // A shell spawn is not provider confirmation; retain the exact recovery identity.
+    expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]?.providerSession.id).toBe(
+      'codex-session-1'
+    )
   })
 
   it('marks the pane as freshly started when main declined an unverifiable resume', async () => {
@@ -514,6 +517,62 @@ describe('connectPanePty', () => {
 
     expect(deps.onShowSessionRestoredBanner).toHaveBeenCalledTimes(1)
     expect(deps.onShowSessionRestoredBanner).toHaveBeenCalledWith(1, 'resume-unavailable')
+  })
+
+  it('retains the recovery record and reports an error when main refuses resume', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('fresh-pty')
+    transport.connect.mockRejectedValue(
+      new Error('Orca could not verify the originating Codex session file')
+    )
+    transportFactoryQueue.push(transport)
+    const paneKey = makePaneKey('tab-1', LEAF_1)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: 'lost-pty' }]
+      },
+      settings: {
+        ...mockStoreState.settings,
+        agentCmdOverrides: {}
+      },
+      agentStatusByPaneKey: {},
+      sleepingAgentSessionsByPaneKey: {
+        [paneKey]: {
+          paneKey,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          agent: 'codex',
+          providerSession: { key: 'session_id', id: 'codex-session-1' },
+          prompt: 'finish the task',
+          state: 'working',
+          capturedAt: 1,
+          updatedAt: 1
+        }
+      }
+    } as StoreState
+
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps({
+      restoredLeafId: LEAF_1,
+      restoredPtyIdByLeafId: { [LEAF_1]: 'lost-pty' }
+    })
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    await flushAsyncTicks(20)
+    await new Promise((resolve) => setTimeout(resolve, 70))
+
+    expect(deps.onShowSessionRestoredBanner).not.toHaveBeenCalled()
+    expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]?.providerSession.id).toBe(
+      'codex-session-1'
+    )
+    expect(transport.sendInput).not.toHaveBeenCalled()
+    expect(deps.onPtyErrorRef.current).toHaveBeenCalledWith(
+      1,
+      expect.stringContaining('could not verify')
+    )
   })
 
   it('resumes from an unambiguous legacy sleeping record when cold-restoring a preserved pane', async () => {
@@ -590,10 +649,13 @@ describe('connectPanePty', () => {
         command: "codex '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'"
       })
     )
-    expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledWith(legacyPaneKey)
-    expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledWith(duplicateLegacyPaneKey)
-    expect(mockStoreState.sleepingAgentSessionsByPaneKey[legacyPaneKey]).toBeUndefined()
-    expect(mockStoreState.sleepingAgentSessionsByPaneKey[duplicateLegacyPaneKey]).toBeUndefined()
+    expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[legacyPaneKey]?.providerSession.id).toBe(
+      'codex-session-1'
+    )
+    expect(
+      mockStoreState.sleepingAgentSessionsByPaneKey[duplicateLegacyPaneKey]?.providerSession.id
+    ).toBe('codex-session-1')
   })
 
   it('does not choose a non-exact legacy record when same-tab provider sessions differ', async () => {

@@ -20,7 +20,7 @@ export type ResumeSleepingAgentSessionsOptions = {
   suppressNavigation?: boolean
   /** Provider-session claim keys already woken in place by mounted panes
    *  (WAKE_HIBERNATED_AGENTS_WORKTREE_EVENT). Their sleeping records are
-   *  cleared only after the in-place spawn succeeds, so the generic resume
+   *  retained until the provider confirms recovery, so the generic resume
    *  must neither launch nor clear them here. */
   skipClaimKeys?: ReadonlySet<string>
   /** Called with the tab id of each freshly launched resume tab, so
@@ -125,7 +125,7 @@ export function launchSleepingAgentSession(
     launchAgent: record.agent,
     providerSession: record.providerSession
   })
-  state.clearSleepingAgentSession(record.paneKey)
+  // Keep the durable record until a provider confirms recovery; queuing is not success.
   if (!options?.suppressNavigation) {
     state.setActiveTabType('terminal')
   }

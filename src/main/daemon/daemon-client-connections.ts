@@ -62,9 +62,23 @@ export class DaemonClientConnections {
       return
     }
     const decoder = new StringDecoder('utf8')
+    let helloHandled = false
     const parser = createNdjsonParser(
-      (message) => this.handleFirstMessage(socket, message),
-      () => socket.destroy()
+      (message) => {
+        if (helloHandled) {
+          return
+        }
+        helloHandled = true
+        this.handleFirstMessage(socket, message)
+      },
+      () => {
+        if (helloHandled) {
+          return
+        }
+        helloHandled = true
+        this.options.log.log('client-hello-rejected', { reason: 'malformed-frame' })
+        socket.end(encodeNdjson({ type: 'hello', ok: false, error: 'Invalid hello frame' }))
+      }
     )
     socket.on('data', (chunk) => parser.feed(decoder.write(chunk)))
   }
@@ -105,10 +119,9 @@ export class DaemonClientConnections {
 
   private handleFirstMessage(socket: Socket, message: unknown): void {
     const hello = message as HelloMessage
-    if (hello.type !== 'hello') {
+    if (!hello || typeof hello !== 'object' || hello.type !== 'hello') {
       this.options.log.log('client-hello-rejected', { reason: 'expected-hello' })
-      socket.write(encodeNdjson({ type: 'hello', ok: false, error: 'Expected hello' }))
-      socket.destroy()
+      socket.end(encodeNdjson({ type: 'hello', ok: false, error: 'Expected hello' }))
       return
     }
     if (hello.version !== this.options.protocolVersion) {
@@ -116,14 +129,12 @@ export class DaemonClientConnections {
         reason: 'protocol-mismatch',
         clientVersion: hello.version
       })
-      socket.write(encodeNdjson({ type: 'hello', ok: false, error: 'Protocol version mismatch' }))
-      socket.destroy()
+      socket.end(encodeNdjson({ type: 'hello', ok: false, error: 'Protocol version mismatch' }))
       return
     }
     if (hello.token !== this.options.token) {
       this.options.log.log('client-hello-rejected', { reason: 'invalid-token', role: hello.role })
-      socket.write(encodeNdjson({ type: 'hello', ok: false, error: 'Invalid token' }))
-      socket.destroy()
+      socket.end(encodeNdjson({ type: 'hello', ok: false, error: 'Invalid token' }))
       return
     }
     if (hello.role !== 'control' && hello.role !== 'stream') {
@@ -132,6 +143,12 @@ export class DaemonClientConnections {
         role: hello.role
       })
       socket.end(encodeNdjson({ type: 'hello', ok: false, error: 'Invalid role' }))
+      return
+    }
+
+    if (hello.role === 'stream' && !this.clients.has(hello.clientId)) {
+      this.options.log.log('client-hello-rejected', { reason: 'missing-control' })
+      socket.end(encodeNdjson({ type: 'hello', ok: false, error: 'Control connection required' }))
       return
     }
 

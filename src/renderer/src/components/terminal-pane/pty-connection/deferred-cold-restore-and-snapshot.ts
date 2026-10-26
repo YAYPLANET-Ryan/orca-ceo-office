@@ -53,12 +53,8 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
     } else {
       lapseInPlaceRestore(session.cacheKey)
     }
-    if (startup && !startup.useLiveEntry && startup.sleepingRecordEntry) {
-      session.clearSleepingRecordProviderDuplicates(
-        useAppStore.getState(),
-        startup.sleepingRecordEntry
-      )
-    }
+    // A spawned shell does not prove the provider resumed. Keep its durable identity;
+    // the accepted provider hook replaces it with a fresh live recovery record.
   }
   session.mergeStartupEnvWithPaneIdentity = (
     env: Record<string, string> | undefined
