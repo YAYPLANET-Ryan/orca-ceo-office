@@ -6,6 +6,7 @@ import type { CreateMainWindowOptions } from './main-window-contracts'
 import type { MainWindowFocusLifecycle } from './main-window-focus-lifecycle'
 import type { MainWindowStateLifecycle } from './main-window-state-lifecycle'
 import { syncTrafficLightPosition } from './main-window-visual-lifecycle'
+import { registerWindowMaximizedHandler } from './window-maximized-handler'
 
 export const WINDOW_QUIT_RENDERER_ACK_TIMEOUT_MS = 10_000
 
@@ -180,15 +181,11 @@ export function installMainWindowCloseLifecycle(args: {
     Menu.getApplicationMenu()?.popup({ window: mainWindow })
   }
   // Why: WindowControls mounts after window:maximize-changed already fired, so expose a synchronous getter to init its icon.
-  const isMaximizedChannel = 'window:isMaximized'
-  const onIsMaximized = (): boolean => {
-    return !mainWindow.isDestroyed() && mainWindow.isMaximized()
-  }
+  const disposeMaximizedHandler = registerWindowMaximizedHandler(mainWindow)
   ipcMain.on(minimizeChannel, onMinimize)
   ipcMain.on(maximizeChannel, onMaximize)
   ipcMain.on(requestCloseChannel, onRequestClose)
   ipcMain.on(popupMenuChannel, onPopupMenu)
-  ipcMain.handle(isMaximizedChannel, onIsMaximized)
 
   ipcMain.on(confirmCloseChannel, onConfirmClose)
   ipcMain.on(closeRequestReceivedChannel, onCloseRequestReceived)
@@ -200,7 +197,7 @@ export function installMainWindowCloseLifecycle(args: {
     ipcMain.removeListener(maximizeChannel, onMaximize)
     ipcMain.removeListener(requestCloseChannel, onRequestClose)
     ipcMain.removeListener(popupMenuChannel, onPopupMenu)
-    ipcMain.removeHandler(isMaximizedChannel)
+    disposeMaximizedHandler()
     ipcMain.removeListener(confirmCloseChannel, onConfirmClose)
     ipcMain.removeListener(closeRequestReceivedChannel, onCloseRequestReceived)
   }

@@ -23,7 +23,8 @@ describe('Windows desktop shell PATH startup', () => {
     const startup = startWindowsDesktopBeforeShellPathReady({
       openWindow,
       shellPathReady: shellPath.promise,
-      startServices
+      startServices,
+      onWindowError: vi.fn()
     })
 
     expect(startup.window).toBe(window)
@@ -33,5 +34,26 @@ describe('Windows desktop shell PATH startup', () => {
     shellPath.resolve()
     await startup.services
     expect(startServices).toHaveBeenCalledOnce()
+  })
+
+  it('keeps service readiness alive after an early window creation failure', async () => {
+    const failure = new Error('duplicate handler')
+    const onWindowError = vi.fn()
+    const services = {
+      firstWindowReady: Promise.resolve(),
+      localPtyReady: Promise.resolve(),
+      localPtyProviderReady: Promise.resolve()
+    }
+    const startup = startWindowsDesktopBeforeShellPathReady({
+      openWindow: () => {
+        throw failure
+      },
+      shellPathReady: Promise.resolve(),
+      startServices: () => services,
+      onWindowError
+    })
+    expect(startup.window).toBeNull()
+    expect(onWindowError).toHaveBeenCalledWith(failure)
+    await expect(startup.services).resolves.toBe(services)
   })
 })
