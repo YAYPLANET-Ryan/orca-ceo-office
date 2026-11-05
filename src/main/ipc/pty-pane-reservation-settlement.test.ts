@@ -176,6 +176,13 @@ describe('registerPtyHandlers', () => {
         command: 'codex resume exact-dead-ssh-provider-session'
       })
       expect(store.setWorkspaceSession).toHaveBeenCalledWith(expect.anything(), hostId)
+      expect(session.tabsByWorktree[worktreeId]).toEqual([
+        expect.objectContaining({ id: tabId, ptyId: null })
+      ])
+      expect(session.terminalLayoutsByTabId[tabId]).toMatchObject({
+        root: { type: 'leaf', leafId },
+        ptyIdsByLeafId: {}
+      })
       expect(store.persistPtyBinding).toHaveBeenCalledWith(
         expect.objectContaining({
           worktreeId,

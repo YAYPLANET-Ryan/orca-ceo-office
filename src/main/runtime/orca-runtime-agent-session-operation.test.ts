@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type {
   RuntimeCreateAgentSessionRequest,
-  RuntimeCreateAgentSessionResult
+  RuntimeCreateAgentSessionResult,
+  RuntimeAgentResumeCheckpoint
 } from '../../shared/agent-session-host-authority'
 import { OrcaRuntimeService } from './orca-runtime'
 
@@ -35,10 +36,13 @@ function terminal() {
   }
 }
 
-function createRuntime(provider?: {
-  supportsAgentSessionClaims?: () => boolean
-  supportsAgentSessionCreateOperations?: () => boolean
-}) {
+function createRuntime(
+  provider?: {
+    supportsAgentSessionClaims?: () => boolean
+    supportsAgentSessionCreateOperations?: () => boolean
+  },
+  recordAgentResumeCheckpoint?: (checkpoint: RuntimeAgentResumeCheckpoint) => void
+) {
   const runtime = new OrcaRuntimeService(
     {
       getSettings: () => ({
@@ -49,7 +53,10 @@ function createRuntime(provider?: {
       })
     } as never,
     undefined,
-    provider ? { getLocalProvider: () => provider as never } : undefined
+    {
+      ...(provider ? { getLocalProvider: () => provider as never } : {}),
+      recordAgentResumeCheckpoint
+    }
   )
   const internal = runtime as unknown as {
     resolveTerminalWorkspaceLaunchScope: ReturnType<typeof vi.fn>
@@ -67,6 +74,37 @@ function createRuntime(provider?: {
 }
 
 describe('agent-session create operation ledger', () => {
+  it('carries the exact resume identity into launch preflight', async () => {
+    const recordCheckpoint = vi.fn()
+    const runtime = createRuntime({ supportsAgentSessionClaims: () => true }, recordCheckpoint)
+    const createTerminal = vi.spyOn(runtime, 'createTerminal').mockResolvedValue(terminal())
+    const providerSession = {
+      key: 'session_id' as const,
+      id: 'provider-resume-1',
+      transcriptPath: '/tmp/rollout-provider-resume-1.jsonl'
+    }
+    await runtime.ensureAgentSession({
+      kind: 'explicit',
+      worktree: 'id:worktree-1',
+      agent: 'codex',
+      providerSession
+    })
+    expect(createTerminal).toHaveBeenCalledWith(
+      'id:worktree-1',
+      expect.objectContaining({ resumeProviderSession: providerSession })
+    )
+    expect(recordCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paneKey: terminal().paneKey,
+        tabId: terminal().tabId,
+        worktreeId: 'worktree-1',
+        connectionId: null,
+        agent: 'codex',
+        providerSession
+      })
+    )
+  })
+
   it('selects legacy before trust, spawn, or ledger state for an old daemon', async () => {
     const provider = {
       supportsAgentSessionClaims: vi.fn(() => false),

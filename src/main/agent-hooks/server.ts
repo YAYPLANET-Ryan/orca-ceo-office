@@ -117,6 +117,7 @@ import {
   type AgentProviderSessionMetadata
 } from '../../shared/agent-session-resume'
 import { isCommandCodeNewTurnWhileWorking } from '../../shared/command-code-turn-boundary'
+import type { RuntimeAgentResumeCheckpoint } from '../../shared/agent-session-host-authority'
 
 export type { AgentHookSource }
 
@@ -840,6 +841,83 @@ export class AgentHookServer {
   /** Provider-session identities, including Pi's metadata-only rows. */
   getProviderSessionIdentities(): AgentHookProviderSessionIdentity[] {
     return this.buildStatusChangeNotification().providerSessions
+  }
+
+  recordRuntimeResumeIdentity(checkpoint: RuntimeAgentResumeCheckpoint): void {
+    const pane = parsePaneKey(checkpoint.paneKey)
+    const providerSession = normalizeAgentProviderSession(checkpoint.providerSession)
+    if (
+      !pane ||
+      pane.tabId !== checkpoint.tabId ||
+      !providerSession ||
+      !checkpoint.worktreeId ||
+      !Number.isFinite(checkpoint.requestedAt) ||
+      !getAgentResumeArgv(checkpoint.agent, providerSession)
+    ) {
+      throw new Error('agent_session_identity_required')
+    }
+    if (
+      this.closedAgentStatusTabIds.has(checkpoint.tabId) ||
+      this.closedAgentStatusPaneKeys.has(checkpoint.paneKey)
+    ) {
+      return
+    }
+    if (!this.lastStatusFilePath) {
+      throw new Error('agent_session_resume_checkpoint_unavailable')
+    }
+    const previous = this.state.lastStatusByPaneKey.get(checkpoint.paneKey) as
+      | EnrichedAgentHookEventPayload
+      | undefined
+    const sameIdentity =
+      previous?.payload.agentType === checkpoint.agent &&
+      agentProviderSessionsEqual(checkpoint.agent, previous.providerSession, providerSession)
+    // A late launch completion must not replace a newer provider observation.
+    if (
+      previous &&
+      previous.receivedAt >= checkpoint.requestedAt &&
+      (previous.payload.agentType !== checkpoint.agent ||
+        (previous.providerSession && !sameIdentity))
+    ) {
+      return
+    }
+    if (
+      previous &&
+      !previous.providerSessionOnly &&
+      previous.payload.agentType === checkpoint.agent &&
+      (sameIdentity || previous.receivedAt >= checkpoint.requestedAt)
+    ) {
+      const enriched = {
+        ...previous,
+        providerSession: sameIdentity
+          ? { ...previous.providerSession, ...providerSession }
+          : providerSession
+      }
+      this.state.lastStatusByPaneKey.set(checkpoint.paneKey, enriched)
+      this.scheduleStatusPersist()
+      this.notifyStatusChangeListeners()
+      this.emitEnrichedStatus({ ...enriched, isReplay: true })
+    } else {
+      const enriched = this.applyNormalizedStatus(
+        {
+          paneKey: checkpoint.paneKey,
+          tabId: checkpoint.tabId,
+          worktreeId: checkpoint.worktreeId,
+          connectionId: checkpoint.connectionId,
+          providerSession,
+          providerSessionOnly: true,
+          payload: { agentType: checkpoint.agent, state: 'done', prompt: '' }
+        },
+        undefined,
+        'launch'
+      )
+      enriched.retainedForLiveness = true
+    }
+    this.flushStatusPersistSync()
+    if (this.lastWrittenJson !== this.serializeStatusFile()) {
+      throw Object.assign(new Error('agent_session_resume_checkpoint_failed'), {
+        agentSessionOperationOutcome: 'unknown' as const
+      })
+    }
   }
 
   getStatusSnapshotForPane(paneKey: string): AgentStatusIpcPayload[] {

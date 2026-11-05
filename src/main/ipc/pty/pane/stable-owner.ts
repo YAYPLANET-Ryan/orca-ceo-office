@@ -1,7 +1,6 @@
 import { toSshExecutionHostId } from '../../../../shared/execution-host'
 import { makePaneKey, parsePaneKey } from '../../../../shared/stable-pane-id'
 import type { Store } from '../../../persistence'
-import { retireTerminalSurfaceFromPersistence } from '../../../runtime/mobile-session-terminal-persistence-retirement'
 import type { OrcaRuntimeService } from '../../../runtime/orca-runtime'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../../../providers/types'
 import { parseAppSshPtyId } from '../../../providers/ssh-pty-id'
@@ -119,7 +118,7 @@ export function resolveStablePaneOwner(
   }
 }
 
-export function retirePersistedStablePaneOwner(
+export function clearPersistedStablePaneBinding(
   store: Store | undefined,
   owner: StablePaneOwner,
   worktreeId: string,
@@ -141,17 +140,29 @@ export function retirePersistedStablePaneOwner(
     return false
   }
   const session = store.getWorkspaceSession(hostId)
-  const retired = retireTerminalSurfaceFromPersistence(session, {
-    worktreeId,
-    parentTabId: owner.tabId,
-    leafId: owner.leafId,
-    ptyId: owner.ptyId,
-    ...(current.incarnationId ? { incarnationId: current.incarnationId } : {})
-  })
-  if (retired === session) {
-    return false
-  }
-  store.setWorkspaceSession(retired, hostId)
+  const layout = session.terminalLayoutsByTabId[owner.tabId]
+  const bindings = { ...layout.ptyIdsByLeafId }
+  delete bindings[owner.leafId]
+  const incarnations = { ...session.terminalPtyIncarnationsByPaneKey }
+  delete incarnations[paneKey]
+  // Why: a failed reattach revokes a process binding, not the user's tab or resume identity.
+  store.setWorkspaceSession(
+    {
+      ...session,
+      tabsByWorktree: {
+        ...session.tabsByWorktree,
+        [worktreeId]: session.tabsByWorktree[worktreeId].map((tab) =>
+          tab.id === owner.tabId && tab.ptyId === owner.ptyId ? { ...tab, ptyId: null } : tab
+        )
+      },
+      terminalLayoutsByTabId: {
+        ...session.terminalLayoutsByTabId,
+        [owner.tabId]: { ...layout, ptyIdsByLeafId: bindings }
+      },
+      terminalPtyIncarnationsByPaneKey: incarnations
+    },
+    hostId
+  )
   store.flushOrThrow()
   return true
 }
@@ -252,12 +263,12 @@ export async function attachStablePaneOwner(
     ) {
       throw new Error('terminal_pane_owner_changed')
     }
-    runtime?.onPtyExit(owner.ptyId, 0, owner.incarnationId)
+    runtime?.onPtyExit(owner.ptyId, 0, owner.incarnationId, { preserveSurfaceForRecovery: true })
     clearProviderPtyState(owner.ptyId)
     ptyOwnership.delete(owner.ptyId)
     if (
       args.worktreeId &&
-      !retirePersistedStablePaneOwner(args.store, owner, args.worktreeId, args.connectionId)
+      !clearPersistedStablePaneBinding(args.store, owner, args.worktreeId, args.connectionId)
     ) {
       throw new Error('terminal_pane_owner_changed')
     }

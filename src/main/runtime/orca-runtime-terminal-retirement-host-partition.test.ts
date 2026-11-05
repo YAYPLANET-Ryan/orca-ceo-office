@@ -1,9 +1,20 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDefaultWorkspaceSession } from '../../shared/constants'
 import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostId } from '../../shared/execution-host'
 import type { RuntimeMobileSessionTabsSnapshot } from '../../shared/runtime-types'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { OrcaRuntimeService } from './orca-runtime'
+import { OrchestrationDb } from './orchestration/db'
+
+let database: OrchestrationDb
+beforeEach(() => {
+  database = new OrchestrationDb(':memory:')
+  vi.spyOn(OrcaRuntimeService.prototype, 'getOrchestrationDb').mockReturnValue(database)
+})
+afterEach(() => {
+  vi.restoreAllMocks()
+  database.close()
+})
 
 const CONNECTION_ID = 'conn-1'
 const SSH_HOST_ID: ExecutionHostId = `ssh:${CONNECTION_ID}`

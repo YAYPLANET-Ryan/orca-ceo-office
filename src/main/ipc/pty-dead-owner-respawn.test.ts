@@ -164,7 +164,8 @@ describe('registerPtyHandlers', () => {
     expect(runtime.onPtyExit).toHaveBeenCalledWith(
       'pty-proven-absent-owner',
       0,
-      'inc-proven-absent-owner'
+      'inc-proven-absent-owner',
+      { preserveSurfaceForRecovery: true }
     )
     expect(store.setWorkspaceSession).toHaveBeenCalledOnce()
     expect(store.flushOrThrow).toHaveBeenCalledOnce()
@@ -283,7 +284,8 @@ describe('registerPtyHandlers', () => {
     expect(runtime.onPtyExit).toHaveBeenCalledWith(
       'pty-probe-blip-owner',
       0,
-      'inc-probe-blip-owner'
+      'inc-probe-blip-owner',
+      { preserveSurfaceForRecovery: true }
     )
   })
   // Why: a parked pane (stopped with keepHistory) leaves the runtime holding the binding while
@@ -420,6 +422,8 @@ describe('registerPtyHandlers', () => {
     expect(providerSpawn.mock.calls[1]?.[0]).toMatchObject({
       command: 'codex resume already-retired-session'
     })
-    expect(runtime.onPtyExit).toHaveBeenCalledWith('pty-already-retired-owner', 0, undefined)
+    expect(runtime.onPtyExit).toHaveBeenCalledWith('pty-already-retired-owner', 0, undefined, {
+      preserveSurfaceForRecovery: true
+    })
   })
 })
