@@ -18,6 +18,7 @@ const STALE_DAEMON_CWD_MARKERS = [
 ]
 // Thrown by ipc/pty.ts when a persisted pane owner can't be proven alive or dead (STA-3536).
 const PANE_OWNER_UNVERIFIED_MARKER = 'terminal_pane_owner_unverified'
+const PANE_OWNER_CHANGED_PATTERN = /(^|[^a-z0-9_])terminal_pane_owner_changed(?=$|[^a-z0-9_])/g
 // Why one source: the test and replace forms must match the same token, and a lone /g regex carries
 // lastIndex state across .test() calls. Capture the leading boundary so replacement can restore it.
 const TERMINAL_HOST_GONE_SOURCE = '(^|[^a-z0-9_])terminal_host_gone(?=$|[^a-z0-9_])'
@@ -94,6 +95,14 @@ function humanizeUnreattachableSession(error: string): string {
 /** Swaps raw daemon-boundary codes for copy a user can act on. */
 export function humanizeTerminalError(error: string): string {
   let humanized = error
+  humanized = humanized.replace(PANE_OWNER_CHANGED_PATTERN, (_match, prefix: string) =>
+    prefix.concat(
+      translate(
+        'auto.components.terminal.pane.TerminalErrorToast.ownerChanged',
+        'The terminal connection changed while Orca was attaching to this pane. Reopen the pane to retry. If it keeps happening, report the error with the details below.'
+      )
+    )
+  )
   if (humanized.includes(PANE_OWNER_UNVERIFIED_MARKER)) {
     humanized = humanized.replace(
       PANE_OWNER_UNVERIFIED_MARKER,
