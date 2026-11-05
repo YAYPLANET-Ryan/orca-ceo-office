@@ -1,6 +1,7 @@
 import { toSshExecutionHostId } from '../../../../shared/execution-host'
 import { makePaneKey, parsePaneKey } from '../../../../shared/stable-pane-id'
 import type { Store } from '../../../persistence'
+import { matchesPersistedPaneAttachment } from './persisted-pane-attachment'
 import { retireTerminalSurfaceFromPersistence } from '../../../runtime/mobile-session-terminal-persistence-retirement'
 import type { OrcaRuntimeService } from '../../../runtime/orca-runtime'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../../../providers/types'
@@ -204,6 +205,21 @@ export function persistAdmittedStablePaneBinding(args: {
     args.connectionId ? toSshExecutionHostId(args.connectionId) : undefined
   )
   if (persisted === false) {
+    const session = args.store.getWorkspaceSession(
+      args.connectionId ? toSshExecutionHostId(args.connectionId) : undefined
+    )
+    // Another writer may have already saved this exact, generation-proven attachment.
+    if (
+      matchesPersistedPaneAttachment(session, {
+        worktreeId: args.worktreeId,
+        tabId: args.owner.tabId,
+        leafId: args.owner.leafId,
+        result: args.result
+      })
+    ) {
+      args.store.flushOrThrow()
+      return true
+    }
     throw new Error('terminal_pane_owner_changed')
   }
   return true
