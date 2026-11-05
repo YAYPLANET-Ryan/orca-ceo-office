@@ -1,18 +1,23 @@
 . "$PSScriptRoot/ReleaseIntegrity.ps1"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
+function Get-ReleaseArchiveEntries($Archive, [string]$PathRoot) {
+    $entries = @{}
+    foreach ($entry in $Archive.Entries) {
+        $relative = $entry.FullName.Replace('\','/')
+        if ($relative.EndsWith('/')) { continue }
+        Get-ReleaseFile $PathRoot $relative | Out-Null
+        if ($entries.ContainsKey($relative)) { throw 'Duplicate normalized archive entry' }
+        $entries[$relative] = $entry
+    }
+    $entries
+}
+
 function Assert-ReleaseArchive($Rollback) {
     if ((Get-ReleaseHash $Rollback.archive) -ne $Rollback.sha256) { throw 'Rollback archive hash mismatch' }
     $archive = [IO.Compression.ZipFile]::OpenRead($Rollback.archive)
     try {
-        $entries = @{}
-        foreach ($entry in $archive.Entries) {
-            if ($entry.FullName.EndsWith('/')) { continue }
-            $relative = $entry.FullName.Replace('\','/')
-            Get-ReleaseFile ([IO.Path]::GetDirectoryName($Rollback.archive)) $relative | Out-Null
-            if ($entries.ContainsKey($relative)) { throw 'Duplicate archive entry' }
-            $entries[$relative] = $entry
-        }
+        $entries = Get-ReleaseArchiveEntries $archive ([IO.Path]::GetDirectoryName($Rollback.archive))
         if ($entries.Count -ne @($Rollback.manifest.files).Count) { throw 'Archive inventory mismatch' }
         foreach ($expected in $Rollback.manifest.files) {
             $relative = $expected.path.Replace('\','/')
@@ -32,8 +37,9 @@ function Restore-ReleaseArchive($Plan) {
     Assert-ReleaseArchive $Plan.rollback
     $archive = [IO.Compression.ZipFile]::OpenRead($Plan.rollback.archive)
     try {
+        $entries = Get-ReleaseArchiveEntries $archive ([IO.Path]::GetDirectoryName($Plan.rollback.archive))
         foreach ($expected in $Plan.rollback.manifest.files) {
-            $entry = $archive.GetEntry($expected.path.Replace('\','/'))
+            $entry = $entries[$expected.path.Replace('\','/')]
             $target = Get-ReleaseFile $Plan.installRoot $expected.path
             [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target)) | Out-Null
             $inputStream = $entry.Open()

@@ -6,6 +6,18 @@ function Get-ReleaseHash([string]$Path) {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
 }
 
+function Get-ReleaseStateDirectory([string]$Root) {
+    $canonical = Resolve-ReleaseRoot $Root
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { $key = ([BitConverter]::ToString($algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical.ToLowerInvariant())))).Replace('-','').ToLowerInvariant() }
+    finally { $algorithm.Dispose() }
+    Join-Path $env:LOCALAPPDATA ('OrcaRelease/' + $key)
+}
+
+function Assert-ReleasePlanHash([string]$Value) {
+    if ($Value -notmatch '\A[0-9a-fA-F]{64}\z') { throw 'Expected plan hash must contain exactly 64 hexadecimal characters' }
+}
+
 function Resolve-ReleaseRoot([string]$Path) {
     if ($Path -match '(?i)(^|[\\/])[^\\/]*~[0-9]+([\\/]|$)') { throw 'Short-name alias refused' }
     $full = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')

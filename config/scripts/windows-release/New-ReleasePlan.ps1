@@ -5,10 +5,12 @@ param(
     [Parameter(Mandatory=$true)][string]$InstallerSha256,
     [Parameter(Mandatory=$true)][string]$OutputDirectory,
     [int]$RequiredPort = 6768,
-    [switch]$ApproveCandidateAdditions
+    [switch]$ApproveCandidateAdditions,
+    [switch]$ApprovePartialCandidateAdditions
 )
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/WindowsReleaseOperations.ps1"
+if ($ApprovePartialCandidateAdditions -and -not $ApproveCandidateAdditions) { throw 'Partial candidate removal also requires reviewed candidate-path approval' }
 $InstallRoot = Resolve-ReleaseRoot $InstallRoot
 $CandidateRoot = Resolve-ReleaseRoot $CandidateRoot
 $OutputDirectory = Resolve-ReleaseRoot $OutputDirectory
@@ -42,7 +44,8 @@ $plan = [ordered]@{schema=1;createdAt=[DateTime]::UtcNow.ToString('o');installRo
     installer=@{path=[IO.Path]::GetFullPath($Installer);sha256=$InstallerSha256};candidate=$candidate;
     rollback=@{archive=$backup;sha256=(Get-ReleaseHash $backup);manifest=$baseline;version=(Get-Item -LiteralPath (Join-Path $InstallRoot 'Orca.exe')).VersionInfo.FileVersion};
     requiredPort=$RequiredPort;readinessTimeoutSeconds=180;continuity='NOT_TESTED';
-    removalApproval=$(if($ApproveCandidateAdditions){'APPROVED_LISTED_CANDIDATE_ADDITIONS'}else{'REVIEW_REQUIRED'})}
+    removalApproval=$(if($ApproveCandidateAdditions){'APPROVED_LISTED_CANDIDATE_ADDITIONS'}else{'REVIEW_REQUIRED'});
+    partialCandidateRemovalApproval=$(if($ApprovePartialCandidateAdditions){'APPROVED_REVIEWED_CANDIDATE_PATHS'}else{'REVIEW_REQUIRED'})}
 $baselinePaths = @{}
 foreach ($entry in $baseline.files) { $baselinePaths[$entry.path.Replace('\','/')] = $true }
 $additions = @($candidate.files | Where-Object { -not $baselinePaths.ContainsKey($_.path.Replace('\','/')) })

@@ -16,17 +16,21 @@ function Assert-NoReleasePendingRename([string]$Root) {
     Assert-ReleasePendingRenameList $Root $pending
 }
 
-function Assert-ReleaseProcessTableIdle($Rows, $Plan, $State) {
+function Assert-ReleaseProcessTableIdle($Rows, $Plan, $State, [DateTime]$BootTime = [DateTime]::MinValue) {
     $root = (Resolve-ReleaseRoot $Plan.installRoot) + '\'
     $installerName = [IO.Path]::GetFileName($Plan.installer.path)
+    $priorBootIdentity = $false
+    if ($State -and $State.installerStartedAt -and $BootTime -ne [DateTime]::MinValue) {
+        $priorBootIdentity = [DateTime]::Parse($State.installerStartedAt).ToUniversalTime() -lt $BootTime.ToUniversalTime()
+    }
     foreach ($row in $Rows) {
         $path = [string]$row.ExecutablePath
         if ($row.Name -ieq 'Orca.exe' -or $row.Name -ieq $installerName -or
-            $row.Name -match '(?i)(\.tmp$|^uninstall.*orca.*\.exe$)' -or
+            $row.Name -match '(?i)(\.tmp$|^uninstall.*orca.*\.exe$|^Un_[A-Za-z0-9]+\.exe$)' -or
             ($path -and $path.StartsWith($root,[StringComparison]::OrdinalIgnoreCase))) {
             throw 'Application/installer/uninstaller is live or unverifiable; no files changed'
         }
-        if ($State -and $State.installerPid) {
+        if ($State -and $State.installerPid -and -not $priorBootIdentity) {
             if ($row.ParentProcessId -eq $State.installerPid) {
                 throw 'Prior installer child may still be active; recovery deferred'
             }
@@ -40,22 +44,36 @@ function Assert-ReleaseProcessTableIdle($Rows, $Plan, $State) {
 }
 
 function Remove-ReleaseCandidateAdditions($Plan) {
+    $installRoot=Resolve-ReleaseRoot $Plan.installRoot
     $baseline = @{}
     foreach ($entry in $Plan.rollback.manifest.files) { $baseline[$entry.path.Replace('\','/')] = $true }
     $candidate = @{}
     foreach ($entry in $Plan.candidate.files) { $candidate[$entry.path.Replace('\','/')] = $entry }
     $removals = @()
-    foreach ($file in Get-ChildItem -LiteralPath $Plan.installRoot -Recurse -File -Force) {
-        $relative = $file.FullName.Substring($Plan.installRoot.Length + 1).Replace('\','/')
+    foreach ($file in Get-ChildItem -LiteralPath $installRoot -Recurse -File -Force) {
+        $relative = $file.FullName.Substring($installRoot.Length + 1).Replace('\','/')
         if ($baseline.ContainsKey($relative)) { continue }
         if (-not $candidate.ContainsKey($relative)) { throw 'Unrecognized added file; rollback requires manual review' }
         $entry = $candidate[$relative]
-        $path = Get-ReleaseFile $Plan.installRoot $relative
-        if ($file.Length -ne $entry.size -or (Get-ReleaseHash $path) -ne $entry.sha256) { throw 'Added file differs from reviewed candidate; rollback requires manual review' }
-        $removals += $path
+        $path = Get-ReleaseFile $installRoot $relative
+        $observedHash = Get-ReleaseHash $path
+        $partial = $file.Length -ne $entry.size -or $observedHash -ne $entry.sha256
+        $partialApproved = $Plan.PSObject.Properties['partialCandidateRemovalApproval'] -and $Plan.partialCandidateRemovalApproval -eq 'APPROVED_REVIEWED_CANDIDATE_PATHS'
+        if ($partial -and -not $partialApproved) { throw 'Added file differs from reviewed candidate; rollback requires manual review' }
+        $removals += [pscustomobject]@{path=$path;relative=$relative;partial=$partial;sha256=$observedHash}
     }
     if ($removals.Count -gt 0 -and $Plan.removalApproval -ne 'APPROVED_LISTED_CANDIDATE_ADDITIONS') {
         throw 'Candidate-only file removal requires reviewed dry-run approval'
     }
-    foreach ($path in $removals) { [IO.File]::Delete($path) }
+    foreach ($removal in $removals) {
+        if ($removal.partial) {
+            $evidenceRoot = Join-Path ([IO.Path]::GetDirectoryName($Plan.rollback.archive)) 'partial-candidate-evidence'
+            $evidence = Get-ReleaseFile $evidenceRoot ($removal.sha256 + '/' + $removal.relative)
+            [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($evidence)) | Out-Null
+            if (-not (Test-Path -LiteralPath $evidence)) { [IO.File]::Copy($removal.path,$evidence,$false) }
+            if ((Get-ReleaseHash $evidence) -ne $removal.sha256) { throw 'Partial candidate preservation failed' }
+        }
+        if ((Get-ReleaseHash $removal.path) -ne $removal.sha256) { throw 'Candidate changed while preparing rollback' }
+        [IO.File]::Delete($removal.path)
+    }
 }

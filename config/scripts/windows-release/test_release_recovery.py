@@ -74,7 +74,7 @@ class RecoveryTests(unittest.TestCase):
     def test_completed_payload_after_worker_crash_is_preserved_without_claiming_readiness(self):
         self.run_worker('interrupt-after-complete', code=23)
         self.run_worker(mode='Recover')
-        self.assertEqual(self.state()['install'], 'VERIFIED')
+        self.assertEqual(self.state()['install'], 'CONTENT_VERIFIED_EXIT_UNKNOWN')
         self.assertEqual(self.state()['phase'], 'READINESS_FAILED')
         self.assertEqual(self.state()['rollback'], 'NOT_NEEDED')
         self.assertFalse((self.path/'launched').exists())
@@ -100,6 +100,75 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(self.state()['phase'], 'READINESS_FAILED')
         self.assertEqual(self.state()['rollback'], 'NOT_NEEDED')
         self.assertFalse((self.path/'launched').exists())
+
+    def test_interruption_status_defers_inline_rollback_then_recovers_next_run(self):
+        self.run_worker('interruption-status')
+        self.assertEqual(self.state()['rollback'], 'DEFERRED_INTERRUPTION_STATUS')
+        self.assertEqual((self.path/'program/program.bin').read_text(), 'n')
+        self.run_worker(mode='Recover')
+        self.assert_rolled_back()
+
+    def test_guard_recovers_partial_install_before_launching_verified_rollback(self):
+        self.run_worker('interrupt-install', code=23)
+        self.run_worker(mode='Launch')
+        self.assertEqual(self.state()['phase'], 'ROLLED_BACK')
+        self.assertEqual((self.path/'launched').read_text(), 'rollback')
+
+    def test_guard_refuses_unknown_installer_exit(self):
+        self.run_worker('exit-unknown')
+        self.run_worker(mode='Launch', code=1)
+        self.assertFalse((self.path/'launched').exists())
+
+    def test_guard_before_first_apply_requires_intact_baseline(self):
+        self.run_worker(mode='Launch')
+        self.assertEqual((self.path/'launched').read_text(), 'rollback')
+        self.setUp()
+        (self.path/'program/program.bin').write_text('broken')
+        self.run_worker(mode='Launch', code=1)
+        self.assertFalse((self.path/'launched').exists())
+
+    def test_guard_serializes_launch_against_apply(self):
+        (self.path/'state').mkdir()
+        # A separate Windows process owns the exact lock consumed by both entry paths.
+        command = [POWERSHELL, '-NoProfile', '-File', str(HERE/'ReleaseSafetyFixture.ps1'),
+                   '-Sandbox', str(self.path), '-Case', 'hold-launch-lock']
+        child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            deadline = time.monotonic() + 15
+            while not (self.path/'lock-held').exists() and time.monotonic() < deadline:
+                time.sleep(.1)
+            self.assertTrue((self.path/'lock-held').exists())
+            self.run_worker(code=1)
+            self.run_worker(mode='Launch', code=1)
+            self.assertFalse((self.path/'installs').exists())
+        finally:
+            child.kill()
+            child.communicate(timeout=10)
+
+    def test_guard_can_launch_verified_prepared_baseline_without_installing(self):
+        self.run_worker('interrupt-install', code=23)
+        state = self.state()
+        state.update(phase='PREPARED', install='NOT_STARTED', installerExitCode=None)
+        (self.path/'state/journal.json').write_text(json.dumps(state))
+        (self.path/'program/program.bin').write_text('old')
+        self.run_worker(mode='Launch')
+        self.assertEqual((self.path/'launched').read_text(), 'rollback')
+        self.assertEqual(self.state()['phase'], 'PREPARED')
+
+    def test_explicit_rollback_resolves_unknown_exit_without_reinstall(self):
+        self.run_worker('exit-unknown')
+        self.run_worker(mode='Rollback')
+        self.assert_rolled_back()
+        self.assertEqual((self.path/'installs').read_text(), '1')
+        self.run_worker(mode='Launch')
+        self.assertEqual((self.path/'launched').read_text(), 'rollback')
+
+    def test_guard_retries_known_exit_zero_readiness_and_updates_its_journal(self):
+        self.run_worker('readiness-fail')
+        self.run_worker(mode='Launch')
+        self.assertEqual(self.state()['phase'], 'READY')
+        self.assertEqual(self.state()['installerExitCode'], 0)
 
     def test_failed_rollback_recovers_on_next_run(self):
         self.run_worker('fail-rollback')
@@ -163,9 +232,13 @@ class RecoveryTests(unittest.TestCase):
         self.assert_rolled_back()
 
     def test_production_windows_safety_operations_on_isolated_inputs(self):
-        for case in ['pending-rename', 'installer-child', 'prior-pid-tolerance', 'pid-reuse',
+        for case in ['pending-rename', 'installer-child', 'orphan-nsis-uninstaller', 'prior-pid-tolerance', 'pid-reuse',
                      'other-orca', 'archive-traversal', 'additive-rollback', 'unknown-addition',
-                     'path-escape', 'wrong-version', 'nsis-whitespace', 'process-exit-handle']:
+                     'path-escape', 'wrong-version', 'nsis-whitespace', 'process-exit-handle',
+                     'nested-backslash-archive', 'pid-previous-boot', 'empty-version', 'partial-addition',
+                     'startup-shortcut', 'plan-hash-format', 'launch-plan-missing-installer',
+                     'journal-replace-failure', 'startup-shortcut-alias',
+                     'renamed-run-entry', 'unreviewed-startup-target', 'startup-shortcut-hidden']:
             with self.subTest(case=case):
                 self.setUp()
                 result = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-File', str(HERE/'ReleaseSafetyFixture.ps1'),

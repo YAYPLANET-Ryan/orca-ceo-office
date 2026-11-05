@@ -9,18 +9,24 @@ function Get-ReleaseProcessRows {
 
 function Assert-ReleaseIdle($Plan, $State) {
     $rows = Get-ReleaseProcessRows
-    Assert-ReleaseProcessTableIdle $rows $Plan $State
+    $bootTime = (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime
+    if (-not $bootTime) { throw 'Boot identity unavailable; recovery deferred' }
+    Assert-ReleaseProcessTableIdle $rows $Plan $State $bootTime
     Assert-NoReleasePendingRename $Plan.installRoot
 }
 
 function Assert-ReleaseVersion([string]$Root, [string]$Version) {
-    if ((Get-Item -LiteralPath (Join-Path $Root 'Orca.exe')).VersionInfo.FileVersion -ne $Version) {
+    if ([string]::IsNullOrWhiteSpace($Version)) { throw 'Expected version is empty' }
+    $actual = (Get-Item -LiteralPath (Join-Path $Root 'Orca.exe')).VersionInfo.FileVersion
+    if ([string]::IsNullOrWhiteSpace($actual) -or $actual -ne $Version) {
         throw 'Exact installed version mismatch'
     }
 }
 
-function Assert-ReleasePlan($Plan) {
+function Assert-ReleasePlan($Plan, [switch]$ForLaunch) {
     if ($Plan.schema -ne 1) { throw 'Unknown plan schema' }
+    $Plan.installRoot=Resolve-ReleaseRoot $Plan.installRoot
+    if ([string]::IsNullOrWhiteSpace($Plan.version) -or [string]::IsNullOrWhiteSpace($Plan.rollback.version)) { throw 'Plan versions must be nonempty' }
     if ($Plan.installRoot -match '\s') { throw 'NSIS /D target with whitespace is unsupported' }
     if ($Plan.requiredPort -lt 1 -or $Plan.requiredPort -gt 65535 -or $Plan.readinessTimeoutSeconds -lt 10 -or $Plan.readinessTimeoutSeconds -gt 900) { throw 'Invalid readiness parameters' }
     $supportedRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs/orca')).TrimEnd('\')
@@ -37,8 +43,10 @@ function Assert-ReleasePlan($Plan) {
     $root = Resolve-ReleaseRoot $Plan.installRoot
     $backup = Resolve-ReleaseRoot $Plan.rollback.archive
     if ($backup -eq $root -or $backup.StartsWith($root + '\',[StringComparison]::OrdinalIgnoreCase) -or $root.StartsWith($backup + '\',[StringComparison]::OrdinalIgnoreCase)) { throw 'Rollback must be a separate program snapshot' }
-    if ((Get-ReleaseHash $Plan.installer.path) -ne $Plan.installer.sha256) { throw 'Installer hash mismatch' }
-    Assert-ReleaseArchive $Plan.rollback
+    if (-not $ForLaunch) {
+        if ((Get-ReleaseHash $Plan.installer.path) -ne $Plan.installer.sha256) { throw 'Installer hash mismatch' }
+        Assert-ReleaseArchive $Plan.rollback
+    }
 }
 
 function Wait-ReleaseReady($Plan) {
@@ -64,6 +72,7 @@ function Wait-ReleaseReady($Plan) {
 }
 
 function New-WindowsReleaseOperations($Plan) {
+    $Plan.installRoot=Resolve-ReleaseRoot $Plan.installRoot
     @{
         Context = $Plan
         Preflight = {
@@ -113,5 +122,12 @@ function New-WindowsReleaseOperations($Plan) {
             Assert-ReleaseVersion $planValue.installRoot $planValue.rollback.version
         }
         Ready = { param($planValue) Wait-ReleaseReady $planValue }
+        ReadyRollback = {
+            param($planValue)
+            $launchPlan = $planValue | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+            $launchPlan.candidate = $planValue.rollback.manifest
+            $launchPlan.version = $planValue.rollback.version
+            Wait-ReleaseReady $launchPlan
+        }
     }
 }

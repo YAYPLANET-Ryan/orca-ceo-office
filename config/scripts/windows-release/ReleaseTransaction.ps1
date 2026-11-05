@@ -2,15 +2,22 @@
 
 function Invoke-ReleaseTransaction {
     param([string]$Root, [string]$StateDirectory, [string]$PlanHash, $Operations,
-          [ValidateSet('Apply','Recover','Inspect')][string]$Mode = 'Inspect')
+          [ValidateSet('Apply','Recover','Inspect','Rollback')][string]$Mode = 'Inspect')
     $ErrorActionPreference = 'Stop'
     $Root = Resolve-ReleaseRoot $Root
     $StateDirectory = Resolve-ReleaseRoot $StateDirectory
     if ($StateDirectory -eq $Root -or $StateDirectory.StartsWith($Root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Journal must be outside installation' }
     [IO.Directory]::CreateDirectory($StateDirectory) | Out-Null
+    $applyLaunchLock = $null
+    if ($Mode -eq 'Apply') {
+        $applyLaunchLock = [IO.File]::Open((Join-Path $StateDirectory 'launch.lock'),'OpenOrCreate','ReadWrite','None')
+    }
     # OS-owned lock survives crashes by releasing automatically; the journal survives by remaining on disk.
     try { $lock = [IO.File]::Open((Join-Path $StateDirectory 'update.lock'), 'OpenOrCreate', 'ReadWrite', 'None') }
-    catch { throw ('Release lock unavailable; contention or access failure; no action taken: ' + $_.Exception.GetType().Name) }
+    catch {
+        if ($applyLaunchLock) { $applyLaunchLock.Dispose() }
+        throw ('Release lock unavailable; contention or access failure; no action taken: ' + $_.Exception.GetType().Name)
+    }
     try {
         $journal = Join-Path $StateDirectory 'journal.json'
         $state = Read-ReleaseJournal $journal
@@ -18,11 +25,18 @@ function Invoke-ReleaseTransaction {
         if ($Mode -eq 'Inspect') { return $state }
         if (-not $state) {
             if ($Mode -eq 'Recover') { return $null }
+            if ($Mode -eq 'Rollback') { throw 'No failed transaction to roll back' }
             & $Operations.Preflight $Operations.Context
             $state = [pscustomobject][ordered]@{schema=1;root=$Root;planHash=$PlanHash;
                 phase='PREPARED';install='NOT_STARTED';rollback='NOT_NEEDED';readiness='NOT_TESTED';
                 continuity='NOT_TESTED';installerPid=$null;installerStartedAt=$null;installerExitCode=$null;
                 updatedAt='';error=$null;rollbackError=$null}
+            Write-ReleaseJournal $journal $state
+        }
+        if ($Mode -eq 'Rollback') {
+            if ($state.phase -ne 'READINESS_FAILED' -or $null -ne $state.installerExitCode) { throw 'Explicit rollback mode is reserved for verified content with unknown installer exit' }
+            & $Operations.AssertQuiescent $state $Operations.Context
+            $state.phase='ROLLING_BACK';$state.rollback='RUNNING'
             Write-ReleaseJournal $journal $state
         }
         if ($state.phase -eq 'ROLLED_BACK') { & $Operations.VerifyRestored $Operations.Context; return $state }
@@ -35,7 +49,7 @@ function Invoke-ReleaseTransaction {
                 $candidateComplete = $false
                 try { & $Operations.VerifyCandidate $Operations.Context; $candidateComplete = $true } catch { $state.error = $_.Exception.Message }
                 if ($candidateComplete) {
-                    $state.install = 'VERIFIED'; $state.phase = 'READINESS_FAILED'
+                    $state.install = $(if($null -eq $state.installerExitCode){'CONTENT_VERIFIED_EXIT_UNKNOWN'}else{'VERIFIED'}); $state.phase = 'READINESS_FAILED'
                     $state.readiness = 'NOT_TESTED_AFTER_WORKER_INTERRUPTION'
                     Write-ReleaseJournal $journal $state
                     return $state
@@ -43,8 +57,12 @@ function Invoke-ReleaseTransaction {
             }
             if ($state.install -eq 'RUNNING') { $state.install = 'INTERRUPTED_OR_UNKNOWN' }
         } else {
+            if ($Mode -eq 'Recover') {
+                & $Operations.AssertQuiescent $state $Operations.Context
+                & $Operations.VerifyRestored $Operations.Context
+                return $state
+            }
             & $Operations.Preflight $Operations.Context
-            if ($Mode -eq 'Recover') { return $state }
             $state.phase = 'INSTALLING'; $state.install = 'RUNNING'
             Write-ReleaseJournal $journal $state
             # Install invokes this synchronously in this function's session state.
@@ -76,6 +94,11 @@ function Invoke-ReleaseTransaction {
         # Persist rollback intent before even validating its source, including after interrupted recovery.
         $state.phase = 'ROLLING_BACK'; $state.rollback = 'RUNNING'
         Write-ReleaseJournal $journal $state
+        if ($Mode -eq 'Apply' -and $state.installerExitCode -eq 1073807364) {
+            $state.rollback = 'DEFERRED_INTERRUPTION_STATUS'
+            Write-ReleaseJournal $journal $state
+            return $state
+        }
         try {
             & $Operations.AssertQuiescent $state $Operations.Context
             & $Operations.VerifyRollback $Operations.Context
@@ -88,5 +111,5 @@ function Invoke-ReleaseTransaction {
         Write-ReleaseJournal $journal $state
         # Recovery never starts an application; a separate checked launch is required.
         return $state
-    } finally { $lock.Dispose() }
+    } finally { $lock.Dispose(); if ($applyLaunchLock) { $applyLaunchLock.Dispose() } }
 }

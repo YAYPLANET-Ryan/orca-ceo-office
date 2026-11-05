@@ -2,6 +2,7 @@ param([Parameter(Mandatory=$true)][string]$Sandbox,
       [string]$Scenario='success',[string]$Mode='Apply',[string]$PlanHash='fixture-plan')
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/ReleaseTransaction.ps1"
+. "$PSScriptRoot/ReleaseStartupGate.ps1"
 $Sandbox = Resolve-ReleaseRoot $Sandbox
 if (-not (Test-Path -LiteralPath (Join-Path $Sandbox 'TEST_ONLY'))) { throw 'Synthetic test marker required' }
 if ($Sandbox -notmatch '[\\/]dist[\\/]release-regression[\\/]') { throw 'Not an isolated regression directory' }
@@ -25,6 +26,7 @@ $operations=@{
         if($Scenario -eq 'hold-install'){Copy-Fixture 'n';[IO.File]::WriteAllText((Join-Path $Sandbox 'holding'),'yes');Start-Sleep -Seconds 45}
         if($Scenario -eq 'zero-file'){Copy-Fixture ''}
         if($Scenario -eq 'exit-unknown'){return $null}
+        if($Scenario -eq 'interruption-status'){Copy-Fixture 'n';return 1073807364}
         if($Scenario -in @('fail-install','fail-rollback','interrupt-rollback')){return 17}
         return 0
     }
@@ -47,5 +49,10 @@ $operations=@{
         if($Scenario -eq 'readiness-fail'){throw 'Synthetic listener failure'}
         [IO.File]::WriteAllText((Join-Path $Sandbox 'launched'),'yes')
     }
+    ReadyRollback={Check-Fixture 'old';[IO.File]::WriteAllText((Join-Path $Sandbox 'launched'),'rollback')}
 }
-Invoke-ReleaseTransaction -Root $root -StateDirectory $stateDir -PlanHash $PlanHash -Operations $operations -Mode $Mode | ConvertTo-Json
+if($Mode -eq 'Launch') {
+    Invoke-ReleaseGuardedLaunch -Root $root -StateDirectory $stateDir -PlanHash $PlanHash -Operations $operations | ConvertTo-Json
+} else {
+    Invoke-ReleaseTransaction -Root $root -StateDirectory $stateDir -PlanHash $PlanHash -Operations $operations -Mode $Mode | ConvertTo-Json
+}
