@@ -134,6 +134,8 @@ type EnrichedAgentHookEventPayload = AgentHookEventPayload & {
   retainedForLiveness?: true
   /** Explicit runtime resume checkpoint; ordinary user-hidden liveness rows retain their teardown semantics. */
   runtimeResumeCheckpoint?: true
+  /** Consumed by the first OSC observation; teardown and hydration never carry it forward. */
+  runtimeResumePendingObservation?: true
   /** Persisted proof that a lead boundary was held working only by child agents. */
   claudeLeadBoundaryChildOnly?: true
 }
@@ -861,10 +863,7 @@ export class AgentHookServer {
     ) {
       throw new Error('agent_session_identity_required')
     }
-    if (
-      this.closedAgentStatusTabIds.has(checkpoint.tabId) ||
-      this.closedAgentStatusPaneKeys.has(checkpoint.paneKey)
-    ) {
+    if (this.closedAgentStatusTabIds.has(checkpoint.tabId)) {
       throw new Error('agent_session_resume_checkpoint_superseded')
     }
     if (!this.lastStatusFilePath) {
@@ -888,6 +887,7 @@ export class AgentHookServer {
     ) {
       throw new Error('agent_session_resume_checkpoint_superseded')
     }
+    this.restorePaneAuthority(checkpoint.paneKey)
     if (
       previous &&
       !previous.providerSessionOnly &&
@@ -898,7 +898,6 @@ export class AgentHookServer {
     ) {
       const enriched = {
         ...previous,
-        retainedForLiveness: true as const,
         runtimeResumeCheckpoint: true as const,
         providerSession: sameIdentity
           ? { ...previous.providerSession, ...providerSession }
@@ -924,6 +923,7 @@ export class AgentHookServer {
       )
       enriched.retainedForLiveness = true
       enriched.runtimeResumeCheckpoint = true
+      enriched.runtimeResumePendingObservation = true
     }
     this.flushStatusPersistSync()
     if (this.lastWrittenJson !== this.serializeStatusFile()) {
@@ -1647,12 +1647,13 @@ export class AgentHookServer {
       ...(previous?.runtimeResumeCheckpoint &&
       previous.payload.agentType === boundaryAwarePayload.payload.agentType &&
       isResumableTuiAgent(boundaryAwarePayload.payload.agentType) &&
-      agentProviderSessionsEqual(
+      (agentProviderSessionsEqual(
         boundaryAwarePayload.payload.agentType,
         previous.providerSession,
         boundaryAwarePayload.providerSession
-      )
-        ? { retainedForLiveness: true as const, runtimeResumeCheckpoint: true as const }
+      ) ||
+        (origin === 'hook' && boundaryAwarePayload.providerSession))
+        ? { runtimeResumeCheckpoint: true as const }
         : {}),
       observation: this.stampObservation(boundaryAwarePayload, origin, now)
     }
@@ -2308,6 +2309,7 @@ export class AgentHookServer {
       previous.payload.turnCompletedAt === this.activeHookTurnCompletedAtByPaneKey.get(paneKey)
     if (
       !previous?.restoredUnconfirmed &&
+      !previous?.providerSessionOnly &&
       previous?.connectionId === connectionId &&
       previous.tabId === tabId &&
       previous.worktreeId === worktreeId &&
@@ -2330,8 +2332,8 @@ export class AgentHookServer {
     const preservedProviderSession =
       previous?.providerSession &&
       (claimedAgentType === undefined || claimedAgentType === previous.payload.agentType) &&
-      (previous.providerSessionOnly ||
-        previous.payload.state !== 'done' ||
+      (previous.runtimeResumePendingObservation ||
+        (!previous.providerSessionOnly && previous.payload.state !== 'done') ||
         event.payload.state === 'done')
         ? previous.providerSession
         : undefined
@@ -2797,7 +2799,11 @@ export class AgentHookServer {
     ) {
       return null
     }
-    const { launchToken: _launchToken, ...resumeIdentity } = entry
+    const {
+      launchToken: _launchToken,
+      runtimeResumePendingObservation: _pendingObservation,
+      ...resumeIdentity
+    } = entry
     return { ...resumeIdentity, providerSessionOnly: true, retainedForLiveness: true }
   }
 

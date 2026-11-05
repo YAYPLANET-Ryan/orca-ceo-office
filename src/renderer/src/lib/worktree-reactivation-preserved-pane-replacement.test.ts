@@ -132,10 +132,10 @@ afterEach(() => {
 })
 
 describe('preserved-pane replacement contract on workspace activation', () => {
-  it('appends exactly one replacement tab for a husk pane and retains the husk across repeats', () => {
+  it('cold-restores an exact provider identity in the original PTY-less pane across repeats', () => {
     const worktree = { ...makeWorktree(), createdWithAgent: undefined }
     const state = baseState(worktree)
-    // Hibernation cleared the pane's PTY binding: the husk cannot resume in place.
+    // Exact provider identity permits cold restore even after the PTY binding is cleared.
     seedHuskTab(state, worktree.id, null)
     useAppStore.setState(state)
     seedSleepingRecord(worktree.id, 'codex-session-A')
@@ -145,22 +145,21 @@ describe('preserved-pane replacement contract on workspace activation', () => {
     const afterFirst = useAppStore.getState()
     const tabsAfterFirst = afterFirst.tabsByWorktree[worktree.id] ?? []
     expect(tabsAfterFirst.map((tab) => tab.id)).toContain(HUSK_TAB_ID)
-    expect(tabsAfterFirst).toHaveLength(2)
-    const replacement = tabsAfterFirst.find((tab) => tab.id !== HUSK_TAB_ID)!
-    expect(afterFirst.automaticAgentResumeClaimsByTabId[replacement.id]?.providerSession).toEqual({
+    expect(tabsAfterFirst).toHaveLength(1)
+    expect(afterFirst.automaticAgentResumeClaimsByTabId).toEqual({})
+    expect(
+      afterFirst.sleepingAgentSessionsByPaneKey[makePaneKey(HUSK_TAB_ID, LEAF_ID)]?.providerSession
+    ).toEqual({
       key: 'session_id',
       id: 'codex-session-A'
     })
-    expect(afterFirst.consumeTabStartupCommand(replacement.id)?.resumeProviderSession).toEqual({
-      key: 'session_id',
-      id: 'codex-session-A'
-    })
+    expect(afterFirst.consumeTabStartupCommand(HUSK_TAB_ID)).toBeNull()
 
     // Reopening must not fork more tabs or launch another resume.
     activateAndRevealWorktree(worktree.id)
     activateAndRevealWorktree(worktree.id)
     const afterRepeats = useAppStore.getState()
-    expect(afterRepeats.tabsByWorktree[worktree.id]).toHaveLength(2)
+    expect(afterRepeats.tabsByWorktree[worktree.id]?.map((tab) => tab.id)).toEqual([HUSK_TAB_ID])
   })
 
   it('does not append a replacement while the preserved pane still has a live PTY', () => {

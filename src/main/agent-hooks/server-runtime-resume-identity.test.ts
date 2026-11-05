@@ -145,6 +145,100 @@ describe('runtime resume identity checkpoint', () => {
     expect(restarted.getStatusChangeSnapshot()).toEqual([])
   })
 
+  it.each(['dismiss', 'reconcile', 'checkpoint-teardown'] as const)(
+    'does not attach a retained old identity to a new OSC turn after %s',
+    async (teardown) => {
+      const { server } = await open()
+      server.recordRuntimeResumeIdentity(checkpoint('codex'))
+      server.ingestTerminalStatus({
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        connectionId: null,
+        payload: { agentType: 'codex', state: 'working', prompt: '' }
+      })
+      if (teardown === 'dismiss') {
+        server.dropStatusEntry(PANE)
+      } else if (teardown === 'reconcile') {
+        server.reconcileEndedProcessForPaneKeys([PANE], { preserveResumeIdentity: true })
+      } else {
+        server.clearPaneState(PANE)
+      }
+      server.ingestTerminalStatus({
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        connectionId: null,
+        payload: { agentType: 'codex', state: 'working', prompt: '' }
+      })
+      expect(server.getStatusSnapshotForPane(PANE)[0].providerSession).toBeUndefined()
+      expect(() =>
+        server.recordRuntimeResumeIdentity({
+          ...checkpoint('codex'),
+          providerSession: { key: 'session_id', id: 'new-conversation' },
+          requestedAt: Date.now() + 1
+        })
+      ).not.toThrow()
+      expect(server.getStatusSnapshotForPane(PANE)[0].providerSession?.id).toBe('new-conversation')
+    }
+  )
+
+  it('accepts a committed resume after pane retirement while preserving explicit tab fences', async () => {
+    const { server } = await open()
+    server.recordRuntimeResumeIdentity(checkpoint('codex'))
+    server.retirePaneAuthority(PANE)
+    expect(() =>
+      server.recordRuntimeResumeIdentity({ ...checkpoint('codex'), requestedAt: Date.now() + 1 })
+    ).not.toThrow()
+    server.dropStatusEntriesByTabPrefix('tab-1')
+    expect(() =>
+      server.recordRuntimeResumeIdentity({ ...checkpoint('codex'), requestedAt: Date.now() + 2 })
+    ).toThrow('checkpoint_superseded')
+  })
+
+  it('retains an authoritative replacement provider ID through teardown and restart', async () => {
+    const { server, userDataPath } = await open()
+    server.recordRuntimeResumeIdentity(checkpoint('codex', 'ssh-target-1'))
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        providerSession: { key: 'session_id', id: 'provider-replacement-id' },
+        payload: { agentType: 'codex', state: 'working', prompt: '' }
+      },
+      'ssh-target-1'
+    )
+    server.clearPaneState(PANE)
+    server.stop()
+    expect(
+      (await open(userDataPath)).server.getStatusSnapshotForPane(PANE)[0]?.providerSession?.id
+    ).toBe('provider-replacement-id')
+  })
+
+  it.each(['teardown', 'restart'] as const)(
+    'does not reuse a pending launch observation after %s',
+    async (boundary) => {
+      const { server, userDataPath } = await open()
+      server.recordRuntimeResumeIdentity(checkpoint('codex'))
+      let current = server
+      if (boundary === 'teardown') {
+        server.clearPaneState(PANE)
+      } else {
+        server.stop()
+        current = (await open(userDataPath)).server
+      }
+      current.ingestTerminalStatus({
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        connectionId: null,
+        payload: { agentType: 'codex', state: 'working', prompt: '' }
+      })
+      expect(current.getStatusSnapshotForPane(PANE)[0]?.providerSession).toBeUndefined()
+    }
+  )
+
   it('does not restore checkpoint identities after the user closes the tab', async () => {
     const { server, userDataPath } = await open()
     server.recordRuntimeResumeIdentity(checkpoint('codex'))
