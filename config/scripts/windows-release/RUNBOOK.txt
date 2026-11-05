@@ -1,0 +1,85 @@
+Verified Windows release procedure (per-user Orca only)
+
+Scope
+These scripts are an operator deployment procedure. They do not replace the
+embedded updater or existing Windows Startup shortcuts automatically. Keep old
+Task install helpers as historical evidence; do not run them for a new update.
+Never patch installed ASAR/CLI bytes, restore a whole profile, or stop model jobs.
+
+Preparation, while the recovered app remains running
+1. Validate the NSIS artifact against the build's recorded SHA256 and version.
+   Run the isolated packaged smoke and retain the source revision association.
+2. New-ReleasePlan.ps1 requires a complete installed program and candidate tree.
+   It creates a program-only ZIP and pins every size/hash, essential nonempty
+   file, exact version, installer hash, canonical target and readiness settings.
+   Missing baseline files must be investigated; they are never silently omitted.
+3. Review candidate-additions-dry-run.json. If candidate-only files exist, the
+   initial plan remains REVIEW_REQUIRED. Only after approval may a new output
+   directory be prepared with -ApproveCandidateAdditions. No old plan is edited.
+   Unknown or modified additions always block rollback; they are never deleted.
+4. Pin the plan SHA256 and keep this procedure at the reviewed source commit.
+   Invoke-VerifiedRelease.ps1 -PlanPath <plan> -ExpectedPlanSha256 <hash> -Mode Validate
+   verifies artifacts without closing the app, installing or registering tasks.
+5. Register-ReleaseRecovery.ps1 previews by default. Actual -Register is a
+   separate approved deployment step after graceful app close. It registers an
+   on-demand Apply task and an interactive-logon Recover task, with no execution
+   timeout and IgnoreNew. It never starts either task itself.
+
+Deployment and worker lifetime
+Coordinate the user's graceful GUI quit and continuity checkpoint first. Keep
+the relocated terminal daemon and model processes alive. Apply refuses any Orca
+image, relevant installer/uninstaller/child process, inaccessible identity, or
+pending reboot rename touching the target. It never kills a process.
+Start the reviewed on-demand scheduled Apply task, rather than a terminal-owned
+helper. Task Scheduler owns that worker; a terminal/GUI parent can disappear.
+No worker survives OS shutdown. Never reboot while INSTALLING or ROLLING_BACK.
+Its journal outside the program directory is the next-run recovery authority.
+
+State and next-run recovery
+The canonical target determines one lock/journal directory under LOCALAPPDATA/
+OrcaRelease. The current-user per-user target is the only supported deployment;
+per-machine/multi-account installs are refused. Lock-open access errors and
+contention both fail closed. Writes flush a temporary journal then atomically
+replace it; the prior journal is retained. Corrupt latest journals require review.
+Installation, rollback, window/server readiness and session continuity are separate
+fields. An interrupted worker does not become a successful install automatically.
+The installer handle is pinned before waiting. If its exit code is unavailable,
+valid bytes are preserved as CONTENT_VERIFIED_EXIT_UNKNOWN with no launch or
+success; incomplete bytes still enter rollback. A known nonzero exit is retained.
+Recover first refuses a surviving installer or pending reboot file operation.
+If a completed candidate verifies, it is preserved with readiness still untested.
+Otherwise the verified rollback ZIP is restored, with intent persisted before
+any copy, then every restored byte/version and exact inventory is checked.
+Rollback failure/interruption remains recoverable on the next invocation.
+Recovery never starts the app. Inspect reports persisted evidence, not a fresh
+health certification. Apply exit0 requires READY; ROLLED_BACK exits2 and retains
+the failed install outcome. Continuity remains NOT_TESTED even when READY.
+A completed journal belonging to another plan must be explicitly reviewed and
+archived under the same lock before a later release; never delete it to retry.
+
+Launch and continuity gate
+Only launch after the selected candidate or restored baseline passes integrity,
+version and pending-rename checks. Record a responding real window and that same
+PID's required-port listener. Port readiness is not authenticated laptop/model
+response. Capture the strict identity/config/tab comparator separately and keep
+its WARN/FAIL until explained; do not weaken it or overwrite old profiles.
+Existing direct Startup shortcuts and embedded updater are not gated by this
+operator procedure. Before claiming unattended reboot recovery, deploy/review
+the Startup routing so it waits for journal recovery and verified program state.
+That live wiring and actual NSIS/reboot/laptop tests are not performed by these
+source changes or the synthetic regression suite.
+
+Isolated verification
+python -B config/scripts/windows-release/test_release_recovery.py
+All workers and fault injection use dist/release-regression/<unique>/TEST_ONLY.
+Only known test children are terminated; all fixtures are retained for review.
+No production install, scheduler, registry or profile is modified by the suite.
+
+2026-11-06 incident constraint
+The 20261105.1 app window was recovered, but resources/bin/orca.exe subsequently
+disappeared from installed/candidate/snapshot trees during read-only preparation.
+Actor unknown. No security exclusion, file restoration or live reinstall was
+performed. A separately labeled reconstructed program-only rollback ZIP combines
+the repaired program with byte-identical CLI data from the pinned prior archive.
+This is not a complete live snapshot and does not authorize a deployment. Keep
+the next deployment BLOCKED until CLI removal and baseline preflight are resolved.
