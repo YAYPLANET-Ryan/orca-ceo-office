@@ -364,6 +364,45 @@ describe('connectPanePty', () => {
     )
   })
 
+  it('resumes the exact provider ID in the original pane when no PTY binding remains', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('fresh-pty')
+    transportFactoryQueue.push(transport)
+    const paneKey = makePaneKey('tab-1', LEAF_1)
+    mockStoreState = {
+      ...mockStoreState,
+      settings: { ...mockStoreState.settings, agentCmdOverrides: {} },
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
+      agentStatusByPaneKey: {},
+      sleepingAgentSessionsByPaneKey: {
+        [paneKey]: {
+          paneKey,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          agent: 'codex',
+          providerSession: { key: 'session_id', id: 'codex-session-1' },
+          state: 'working',
+          prompt: '',
+          capturedAt: 1,
+          updatedAt: 1,
+          origin: 'live'
+        }
+      }
+    } as StoreState
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps({ restoredLeafId: LEAF_1, restoredPtyIdByLeafId: {} })
+    connectPanePty(pane as never, manager as never, deps as never)
+    await flushAsyncTicks(20)
+    expect(transport.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.stringContaining('codex-session-1'),
+        resumeProviderSession: { key: 'session_id', id: 'codex-session-1' },
+        env: expect.objectContaining({ ORCA_PANE_KEY: paneKey })
+      })
+    )
+  })
+
   it('resumes from the quit-captured sleeping record when cold-restoring after an app restart', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const transport = createMockTransport('fresh-pty')

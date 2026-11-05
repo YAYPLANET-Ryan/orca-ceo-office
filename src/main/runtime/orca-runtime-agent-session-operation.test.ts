@@ -74,6 +74,21 @@ function createRuntime(
 }
 
 describe('agent-session create operation ledger', () => {
+  it('returns the live terminal and a warning when checkpoint persistence fails', async () => {
+    const runtime = createRuntime({ supportsAgentSessionClaims: () => true }, () => {
+      throw new Error('agent_session_resume_checkpoint_failed')
+    })
+    const createTerminal = vi.spyOn(runtime, 'createTerminal').mockResolvedValue(terminal())
+    const result = await runtime.ensureAgentSession({
+      kind: 'explicit',
+      worktree: 'id:worktree-1',
+      agent: 'codex',
+      providerSession: { key: 'session_id', id: 'provider-resume-1' }
+    })
+    expect(createTerminal).toHaveBeenCalledTimes(1)
+    expect(result.terminal.handle).toBe(terminal().handle)
+    expect(result.terminal.warning).toContain('resume identity')
+  })
   it('carries the exact resume identity into launch preflight', async () => {
     const recordCheckpoint = vi.fn()
     const runtime = createRuntime({ supportsAgentSessionClaims: () => true }, recordCheckpoint)

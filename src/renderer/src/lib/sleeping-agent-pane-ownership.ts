@@ -1,5 +1,8 @@
 import type { useAppStore } from '@/store'
-import type { SleepingAgentSessionRecord } from '../../../shared/agent-session-resume'
+import {
+  getAgentResumeArgv,
+  type SleepingAgentSessionRecord
+} from '../../../shared/agent-session-resume'
 import type {
   TerminalLayoutSnapshot,
   TerminalPaneLayoutNode,
@@ -159,16 +162,17 @@ export function recordPaneIsOwnedByPreservedPane(
     ) {
       return true
     }
-    // Why: active sessions rely on pane-level cold restore. A preserved leaf
-    // without a PTY/session id can repaint scrollback but cannot resume.
+    // Why: dead-owner recovery can clear the PTY binding while the exact provider identity still permits in-place cold restore.
     return (
-      hasRestorableStablePanePty(
+      (hasRestorableStablePanePty(
         tab,
         tabId,
         stable.leafId,
         state.ptyIdsByTabId,
         state.terminalLayoutsByTabId
-      ) && paneWillConnectOnActivation(record.worktreeId, tabId, state)
+      ) ||
+        getAgentResumeArgv(record.agent, record.providerSession) !== null) &&
+      paneWillConnectOnActivation(record.worktreeId, tabId, state)
     )
   }
 

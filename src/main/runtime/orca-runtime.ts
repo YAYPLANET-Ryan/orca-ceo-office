@@ -1537,6 +1537,7 @@ type RuntimeLeafRecord = RuntimeSyncedLeaf & {
 type RuntimePtyWorktreeRecord = {
   ptyId: string
   incarnationId: PtyIncarnationId | null
+  preservedExitIncarnationId?: string
   worktreeId: string
   connectionId: string | null
   runtimeSessionOwned: boolean
@@ -15776,8 +15777,12 @@ export class OrcaRuntimeService {
     }
     const intentionalStopIncarnation = this.intentionalHandlelessPtyStops.get(ptyId)
     const preservesIntentionalHandlelessSurface =
-      this.intentionalHandlelessPtyStops.has(ptyId) &&
-      (intentionalStopIncarnation === null || intentionalStopIncarnation === incarnationId)
+      (this.intentionalHandlelessPtyStops.has(ptyId) &&
+        (intentionalStopIncarnation === null || intentionalStopIncarnation === incarnationId)) ||
+      pty?.preservedExitIncarnationId === incarnationId
+    if (pty && (preservesIntentionalHandlelessSurface || options?.preserveSurfaceForRecovery)) {
+      pty.preservedExitIncarnationId = incarnationId
+    }
     advertisedUrlWatcher.unbindPty(ptyId)
     // Clean up new mobile state for this PTY
     this.mobileSubscribers.delete(ptyId)
@@ -28370,15 +28375,25 @@ export class OrcaRuntimeService {
       signal: _caller.signal
     })
     if (terminal.paneKey && terminal.tabId) {
-      this.recordAgentResumeCheckpointFn?.({
-        paneKey: terminal.paneKey,
-        tabId: terminal.tabId,
-        worktreeId: workspace.id,
-        connectionId: workspace.connectionId ?? null,
-        agent: request.agent,
-        providerSession: identity.providerSession,
-        requestedAt
-      })
+      try {
+        this.recordAgentResumeCheckpointFn?.({
+          paneKey: terminal.paneKey,
+          tabId: terminal.tabId,
+          worktreeId: workspace.id,
+          connectionId: workspace.connectionId ?? null,
+          agent: request.agent,
+          providerSession: identity.providerSession,
+          requestedAt
+        })
+      } catch {
+        // Why: physical work committed; return its handle so persistence failure cannot strand or duplicate it.
+        terminal.warning = [
+          terminal.warning,
+          'The terminal is running, but its resume identity could not be checkpointed. Verify the original conversation before restarting.'
+        ]
+          .filter(Boolean)
+          .join('\n')
+      }
     }
     return {
       terminal,
@@ -33099,6 +33114,9 @@ export class OrcaRuntimeService {
     }
     if (state.connected !== undefined) {
       pty.connected = state.connected
+      if (state.connected) {
+        pty.preservedExitIncarnationId = undefined
+      }
       pty.disconnectedAt = state.connected ? null : (pty.disconnectedAt ?? Date.now())
     }
     if (state.lastOutputAt !== undefined) {

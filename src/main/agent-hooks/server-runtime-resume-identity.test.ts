@@ -87,8 +87,85 @@ describe('runtime resume identity checkpoint', () => {
       ...checkpoint('codex'),
       providerSession: { key: 'session_id', id: 'newer-conversation' }
     })
-    server.recordRuntimeResumeIdentity(delayed)
+    expect(() => server.recordRuntimeResumeIdentity(delayed)).toThrow('checkpoint_superseded')
     expect(server.getStatusSnapshotForPane(PANE)[0].providerSession?.id).toBe('newer-conversation')
+  })
+
+  it('merges an identity into an observed working row without an ID', async () => {
+    const { server } = await open()
+    server.ingestTerminalStatus({
+      paneKey: PANE,
+      tabId: 'tab-1',
+      worktreeId: 'wt-1',
+      connectionId: null,
+      payload: { agentType: 'codex', state: 'working', prompt: '' }
+    })
+    server.recordRuntimeResumeIdentity({ ...checkpoint('codex'), requestedAt: Date.now() + 1 })
+    expect(server.getStatusSnapshotForPane(PANE)[0]).toMatchObject({
+      state: 'working',
+      providerSession: { id: 'codex-original-id' }
+    })
+    expect(server.getStatusSnapshotForPane(PANE)[0].providerSessionOnly).not.toBe(true)
+  })
+
+  it('retains a checkpoint identity through process teardown and restart', async () => {
+    const { server, userDataPath } = await open()
+    server.recordRuntimeResumeIdentity(checkpoint('codex'))
+    server.registerPaneKeyAlias('tab-1:1', PANE, 'pty-original')
+    server.clearPaneKeyAliasesForPty('pty-original')
+    server.retirePaneAuthority(PANE)
+    server.clearPaneState(PANE)
+    server.stop()
+    const restarted = (await open(userDataPath)).server
+    expect(restarted.getStatusSnapshotForPane(PANE)[0]).toMatchObject({
+      providerSessionOnly: true,
+      providerSession: { id: 'codex-original-id' }
+    })
+    expect(restarted.getStatusChangeSnapshot()).toEqual([])
+  })
+
+  it('keeps checkpoint identity after a live OSC observation and teardown', async () => {
+    const { server, userDataPath } = await open()
+    server.recordRuntimeResumeIdentity(checkpoint('codex'))
+    server.ingestTerminalStatus({
+      paneKey: PANE,
+      tabId: 'tab-1',
+      worktreeId: 'wt-1',
+      connectionId: null,
+      payload: { agentType: 'codex', state: 'working', prompt: '' }
+    })
+    expect(server.getStatusSnapshotForPane(PANE)[0].providerSession?.id).toBe('codex-original-id')
+    server.clearPaneState(PANE)
+    server.stop()
+    const restarted = (await open(userDataPath)).server
+    expect(restarted.getStatusSnapshotForPane(PANE)[0]).toMatchObject({
+      providerSessionOnly: true,
+      providerSession: { id: 'codex-original-id' }
+    })
+    expect(restarted.getStatusChangeSnapshot()).toEqual([])
+  })
+
+  it('does not restore checkpoint identities after the user closes the tab', async () => {
+    const { server, userDataPath } = await open()
+    server.recordRuntimeResumeIdentity(checkpoint('codex'))
+    server.dropStatusEntriesByTabPrefix('tab-1')
+    server.clearPaneState(PANE)
+    server.stop()
+    expect((await open(userDataPath)).server.getStatusSnapshotForPane(PANE)).toEqual([])
+  })
+
+  it('retains a checkpoint identity after SSH transport loss and restart', async () => {
+    const { server, userDataPath } = await open()
+    server.recordRuntimeResumeIdentity(checkpoint('codex', 'ssh-target-1'))
+    server.clearStatusEntriesForConnection('ssh-target-1')
+    server.stop()
+    const restarted = (await open(userDataPath)).server
+    expect(restarted.getStatusSnapshotForPane(PANE)[0]).toMatchObject({
+      providerSessionOnly: true,
+      connectionId: 'ssh-target-1',
+      providerSession: { id: 'codex-original-id' }
+    })
+    expect(restarted.getStatusChangeSnapshot()).toEqual([])
   })
 
   it('reports an unknown outcome when the durable write cannot complete', async () => {

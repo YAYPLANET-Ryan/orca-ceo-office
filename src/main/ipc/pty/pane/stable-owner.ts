@@ -2,6 +2,7 @@ import { toSshExecutionHostId } from '../../../../shared/execution-host'
 import { makePaneKey, parsePaneKey } from '../../../../shared/stable-pane-id'
 import type { Store } from '../../../persistence'
 import type { OrcaRuntimeService } from '../../../runtime/orca-runtime'
+import { advanceTerminalTopologyRevision } from '../../../runtime/workspace-session-terminal-membership-authority'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../../../providers/types'
 import { parseAppSshPtyId } from '../../../providers/ssh-pty-id'
 import {
@@ -147,20 +148,23 @@ export function clearPersistedStablePaneBinding(
   delete incarnations[paneKey]
   // Why: a failed reattach revokes a process binding, not the user's tab or resume identity.
   store.setWorkspaceSession(
-    {
-      ...session,
-      tabsByWorktree: {
-        ...session.tabsByWorktree,
-        [worktreeId]: session.tabsByWorktree[worktreeId].map((tab) =>
-          tab.id === owner.tabId && tab.ptyId === owner.ptyId ? { ...tab, ptyId: null } : tab
-        )
+    advanceTerminalTopologyRevision(
+      {
+        ...session,
+        tabsByWorktree: {
+          ...session.tabsByWorktree,
+          [worktreeId]: session.tabsByWorktree[worktreeId].map((tab) =>
+            tab.id === owner.tabId && tab.ptyId === owner.ptyId ? { ...tab, ptyId: null } : tab
+          )
+        },
+        terminalLayoutsByTabId: {
+          ...session.terminalLayoutsByTabId,
+          [owner.tabId]: { ...layout, ptyIdsByLeafId: bindings }
+        },
+        terminalPtyIncarnationsByPaneKey: incarnations
       },
-      terminalLayoutsByTabId: {
-        ...session.terminalLayoutsByTabId,
-        [owner.tabId]: { ...layout, ptyIdsByLeafId: bindings }
-      },
-      terminalPtyIncarnationsByPaneKey: incarnations
-    },
+      worktreeId
+    ),
     hostId
   )
   store.flushOrThrow()

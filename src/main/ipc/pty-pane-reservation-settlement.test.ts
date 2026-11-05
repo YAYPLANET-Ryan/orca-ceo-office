@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { spawnMock, registerPtyMock } from './pty-ipc-mock-registry'
 import { setupPtyIpcSuite } from './pty-ipc-test-harness'
 import { makePaneKey } from '../../shared/stable-pane-id'
+import { rebaseWorkspaceSessionTerminalMembership } from '../runtime/workspace-session-terminal-membership-authority'
 import {
   registerPtyHandlers,
   registerSshPtyProvider,
@@ -106,6 +107,7 @@ describe('registerPtyHandlers', () => {
       },
       terminalPtyIncarnationsByPaneKey: { [paneKey]: 'inc-dead-ssh-owner' }
     }
+    const staleSession = structuredClone(session)
     const store = {
       getWorkspaceSession: vi.fn((requestedHostId?: string) => {
         expect(requestedHostId).toBe(hostId)
@@ -176,6 +178,12 @@ describe('registerPtyHandlers', () => {
         command: 'codex resume exact-dead-ssh-provider-session'
       })
       expect(store.setWorkspaceSession).toHaveBeenCalledWith(expect.anything(), hostId)
+      expect(store.setWorkspaceSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          terminalTopologyRevisionByRepoId: { 'repo-ssh': 1 }
+        }),
+        hostId
+      )
       expect(session.tabsByWorktree[worktreeId]).toEqual([
         expect.objectContaining({ id: tabId, ptyId: null })
       ])
@@ -183,6 +191,12 @@ describe('registerPtyHandlers', () => {
         root: { type: 'leaf', leafId },
         ptyIdsByLeafId: {}
       })
+      const replay = rebaseWorkspaceSessionTerminalMembership(
+        staleSession as never,
+        session as never
+      )
+      expect(replay.terminalLayoutsByTabId[tabId].ptyIdsByLeafId).toEqual({})
+      expect(replay.terminalPtyIncarnationsByPaneKey?.[paneKey]).toBeUndefined()
       expect(store.persistPtyBinding).toHaveBeenCalledWith(
         expect.objectContaining({
           worktreeId,

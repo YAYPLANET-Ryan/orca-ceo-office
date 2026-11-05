@@ -88,6 +88,9 @@ describe('worktree sleep preserves session membership', () => {
     expect(session.sleepingAgentSessionsByPaneKey[paneKey].providerSession.id).toBe('original')
     expect((await runtime.listMobileSessionTabs(`id:${worktreeId}`)).tabs).toHaveLength(1)
 
+    runtime.onPtyExit('pty-sleep', 0, 'inc-sleep', { providerExitObserved: true })
+    expect(session.tabsByWorktree[worktreeId]).toHaveLength(1)
+
     // A later incarnation's ordinary exit must still retire its surface.
     const release = await runtime.acquireWorktreeTerminalSpawn(worktreeId)
     release()
