@@ -28369,7 +28369,7 @@ export class OrcaRuntimeService {
       agentSessionClaim: claim,
       signal: _caller.signal
     })
-    if (terminal.paneKey) {
+    if (terminal.paneKey && terminal.tabId) {
       this.recordAgentResumeCheckpointFn?.({
         paneKey: terminal.paneKey,
         tabId: terminal.tabId,

@@ -536,6 +536,9 @@ jobs:
           filter: blob:none
           persist-credentials: false
 
+      - name: Fetch the historical browser wire baseline
+        run: git fetch --no-tags https://github.com/stablyai/orca.git refs/tags/v1.4.184:refs/tags/v1.4.184
+
       - uses: ./.github/actions/install-node-dependencies
         with:
           native-runtime: node
