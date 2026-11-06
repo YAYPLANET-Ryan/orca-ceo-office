@@ -296,12 +296,13 @@ describe('a resume launch seeds the pane identity', () => {
       providerSession: RESUMED,
       launchedAt: 1
     })
-    const row = server.state.lastStatusByPaneKey.get(PANE)
+    const state = server['state']
+    const row = state.lastStatusByPaneKey.get(PANE)
     if (!row) {
       throw new Error('Missing synthetic seed')
     }
     admitLegacyAgentStatus(
-      server.state,
+      state,
       'main-status-cleanup',
       { ...row, connectionId: 'synthetic-remote' },
       AGENT_STATUS_2A_CURRENT_PRODUCER_MODE

@@ -25,6 +25,7 @@ export abstract class AgentHookServerLaunchResumeIdentity extends AgentHookServe
       typeof previous.observation === 'object' &&
       'origin' in previous.observation &&
       previous.observation.origin === 'launch' &&
+      'runtimeResumePendingObservation' in previous &&
       previous.runtimeResumePendingObservation === true
     if (
       previous &&
