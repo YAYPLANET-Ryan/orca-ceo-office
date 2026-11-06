@@ -155,10 +155,14 @@ export function tabIds(worktreeId: string): string[] {
  *  consumed the record launched nothing. */
 export function expectReplayedResume(paneKey: string, worktreeId: string, sessionId: string): void {
   const state = useAppStore.getState()
-  expect(state.sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
   const claimedTabIds = Object.keys(state.automaticAgentResumeClaimsByTabId)
   expect(claimedTabIds).toHaveLength(1)
   const replacementTabId = claimedTabIds[0]!
+  expect(state.sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
+    providerSession: { key: 'session_id', id: sessionId },
+    requiresManualResume: true,
+    resumeTargetPaneKey: expect.stringMatching(new RegExp(`^${replacementTabId}:`))
+  })
   expect(replacementTabId).not.toBe(MIRROR_TAB_ID)
   expect(tabIds(worktreeId)).toContain(replacementTabId)
   expect(state.automaticAgentResumeClaimsByTabId[replacementTabId]).toMatchObject({

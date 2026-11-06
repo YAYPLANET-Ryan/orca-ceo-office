@@ -174,7 +174,11 @@ describe('parked mirrored-pane resume replay', () => {
       key: 'session_id',
       id: 'codex-session-replay-1'
     })
-    expect(after.sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
+    expect(after.sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
+      providerSession: { key: 'session_id', id: 'codex-session-replay-1' },
+      requiresManualResume: true,
+      resumeTargetPaneKey: expect.stringMatching(new RegExp(`^${tabs[0]!.id}:`))
+    })
   })
 
   it('replays without relaunching when the mirror reports the host PTY live', () => {

@@ -69,6 +69,12 @@ const useAppStoreMock = vi.fn(
       activeTabType: 'terminal' | 'editor' | 'browser' | 'simulator' | null
       activeWorktreeId: string | null
       gitStatusByWorktree: Record<string, never[]>
+      tabsByWorktree: Record<string, never[]>
+      terminalLayoutsByTabId: Record<string, never>
+      pendingStartupByTabId: Record<string, never>
+      sleepingAgentSessionsByPaneKey: Record<string, never>
+      paneForegroundAgentByPaneKey: Record<string, never>
+      agentStatusByPaneKey: Record<string, never>
       projects: typeof appStoreSnapshot.projects
       repos: { id: string; connectionId?: string | null }[]
       sshConnectionStates: Map<string, { remotePlatform?: NodeJS.Platform }>
@@ -98,6 +104,12 @@ const useAppStoreMock = vi.fn(
       activeTabType: appStoreSnapshot.activeTabType,
       activeWorktreeId: appStoreSnapshot.activeWorktreeId,
       gitStatusByWorktree: {},
+      tabsByWorktree: {},
+      terminalLayoutsByTabId: {},
+      pendingStartupByTabId: {},
+      sleepingAgentSessionsByPaneKey: {},
+      paneForegroundAgentByPaneKey: {},
+      agentStatusByPaneKey: {},
       projects: appStoreSnapshot.projects,
       repos: appStoreSnapshot.repos,
       sshConnectionStates: appStoreSnapshot.sshConnectionStates,
@@ -130,6 +142,12 @@ useAppStoreExport.getState = vi.fn(() => ({
   activeTabType: appStoreSnapshot.activeTabType,
   activeWorktreeId: appStoreSnapshot.activeWorktreeId,
   gitStatusByWorktree: {},
+  tabsByWorktree: {},
+  terminalLayoutsByTabId: {},
+  pendingStartupByTabId: {},
+  sleepingAgentSessionsByPaneKey: {},
+  paneForegroundAgentByPaneKey: {},
+  agentStatusByPaneKey: {},
   projects: appStoreSnapshot.projects,
   repos: appStoreSnapshot.repos,
   sshConnectionStates: appStoreSnapshot.sshConnectionStates,

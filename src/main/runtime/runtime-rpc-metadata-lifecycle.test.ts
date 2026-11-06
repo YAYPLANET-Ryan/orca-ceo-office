@@ -75,7 +75,7 @@ describe('OrcaRuntimeRpcServer', () => {
     const server = new OrcaRuntimeRpcServer({
       runtime: new OrcaRuntimeService(),
       userDataPath,
-      pid: 4242
+      pid: process.pid === 42424242 ? 42424241 : 42424242
     })
     await server.start()
 

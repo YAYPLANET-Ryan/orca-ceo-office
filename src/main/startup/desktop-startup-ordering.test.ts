@@ -10,7 +10,7 @@ describe('startup ordering', () => {
     const attachBlock = source.slice(attachStart, attachEnd)
     // Why: anchor on the destructure head only — the settled-result variable's name is not the
     // contract, and pinning it turns a rename into a cryptic `expected -1` failure here.
-    const desktopStart = source.indexOf('const [win')
+    const desktopStart = source.indexOf('const { window: win')
     // Why: anchor on code, not a comment — the previous comment anchor was silently reworded, so
     // this was -1 and sliced to EOF, letting the assertions below pass against never-run code.
     const desktopEnd = source.indexOf("win.once('show'", desktopStart)
@@ -31,7 +31,9 @@ describe('startup ordering', () => {
     )
     expect(source).toContain('localPtyStartupReady = services.then((value) => value.localPtyReady)')
 
-    const windowIndex = desktopStartup.indexOf('Promise.resolve(desktopWindow ?? openMainWindow())')
+    const windowIndex = desktopStartup.indexOf(
+      'desktopWindow ?? openMainWindow({ revealOnDidFinishLoad:'
+    )
     const rpcStartIndex = desktopStartup.indexOf('desktopRuntimeRpc.start()')
     const legacyRpcStartIndex = desktopStartup.indexOf('runtimeRpc.start()')
 
@@ -40,7 +42,7 @@ describe('startup ordering', () => {
     expect(desktopStartup).toMatch(
       /shellPathReady\s*\.then\(\(\) => (?:desktopRuntimeRpc|runtimeRpc)\.start\(\)\)/
     )
-    expect(desktopStartup).toContain('recordRuntimeRpcStartFailure(')
+    expect(desktopStartup).toContain('onRpcError: recordRuntimeRpcStartFailure')
     // Why: `void`, not `await` — awaiting the dialog would park the rest of startup behind a modal.
     expect(desktopStartup).toMatch(/void showRuntimeRpcStartupFailureDialog\(\s*win,/)
     // Why (#11025): a bare console.error here is exactly what left the CLI dead but the app healthy.
@@ -93,7 +95,7 @@ describe('startup ordering', () => {
       'const desktopStartup = startWindowsDesktopBeforeShellPathReady('
     )
     const desktopWindowJoin = source.indexOf(
-      'Promise.resolve(desktopWindow ?? openMainWindow())',
+      'desktopWindow ?? openMainWindow({ revealOnDidFinishLoad:',
       serveEnd
     )
     const serveStartup = source.slice(serveStart, serveEnd)
@@ -150,7 +152,7 @@ describe('startup ordering', () => {
     )
     const serveIndex = source.indexOf('if (serveOptions) {', reconciliationIndex)
     const desktopIndex = source.indexOf(
-      'Promise.resolve(desktopWindow ?? openMainWindow())',
+      'desktopWindow ?? openMainWindow({ revealOnDidFinishLoad:',
       serveIndex
     )
 

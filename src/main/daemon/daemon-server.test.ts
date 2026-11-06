@@ -126,6 +126,7 @@ describe('DaemonServer', () => {
           resolve()
           return
         }
+        socket.destroy()
         reject(new Error(parsed.error ?? 'hello rejected'))
       }
       const onError = (error: Error): void => {
@@ -823,13 +824,9 @@ describe('DaemonServer', () => {
     it('destroys orphan stream sockets without a control client', async () => {
       await startServer()
       const daemon = server as unknown as DaemonServerPrivate
-      const stream = await connectRawHello('stream', 'missing-client')
-      let closed = false
-      stream.once('close', () => {
-        closed = true
-      })
-
-      await waitFor(() => closed || stream.destroyed)
+      await expect(connectRawHello('stream', 'missing-client')).rejects.toThrow(
+        'Control connection required'
+      )
       expect(daemon.connections.clients.has('missing-client')).toBe(false)
     })
   })

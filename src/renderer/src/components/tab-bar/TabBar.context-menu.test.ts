@@ -21,6 +21,12 @@ const useAppStoreMock = vi.fn(
       activeTabId: string | null
       activeTabType: 'terminal' | 'editor' | 'browser' | 'simulator' | null
       gitStatusByWorktree: Record<string, never[]>
+      tabsByWorktree: Record<string, never[]>
+      terminalLayoutsByTabId: Record<string, never>
+      pendingStartupByTabId: Record<string, never>
+      sleepingAgentSessionsByPaneKey: Record<string, never>
+      paneForegroundAgentByPaneKey: Record<string, never>
+      agentStatusByPaneKey: Record<string, never>
       repos: never[]
       worktreesByRepo: Record<string, never[]>
       unifiedTabsByWorktree: Record<string, unknown[]>
@@ -37,6 +43,12 @@ const useAppStoreMock = vi.fn(
       activeTabId: appStoreSnapshot.activeTabId,
       activeTabType: appStoreSnapshot.activeTabType,
       gitStatusByWorktree: {},
+      tabsByWorktree: {},
+      terminalLayoutsByTabId: {},
+      pendingStartupByTabId: {},
+      sleepingAgentSessionsByPaneKey: {},
+      paneForegroundAgentByPaneKey: {},
+      agentStatusByPaneKey: {},
       repos: [],
       worktreesByRepo: {},
       unifiedTabsByWorktree: appStoreSnapshot.unifiedTabsByWorktree,
@@ -76,6 +88,12 @@ useAppStoreExport.getState = vi.fn(() => ({
   activeTabId: appStoreSnapshot.activeTabId,
   activeTabType: appStoreSnapshot.activeTabType,
   gitStatusByWorktree: {},
+  tabsByWorktree: {},
+  terminalLayoutsByTabId: {},
+  pendingStartupByTabId: {},
+  sleepingAgentSessionsByPaneKey: {},
+  paneForegroundAgentByPaneKey: {},
+  agentStatusByPaneKey: {},
   repos: [],
   worktreesByRepo: {},
   unifiedTabsByWorktree: appStoreSnapshot.unifiedTabsByWorktree,

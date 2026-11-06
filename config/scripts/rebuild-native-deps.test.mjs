@@ -46,7 +46,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'download attempted\n'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   })
 
@@ -70,7 +70,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'Continuing postinstall because Electron binary installation failed'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   })
 
@@ -91,7 +91,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'Continuing postinstall because Electron binary installation failed'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   })
 
@@ -121,7 +121,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'partial cleared\ndownload attempted\n'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   })
 })
@@ -154,7 +154,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         )
         expect(existsSync(rebuildLogPath)).toBe(false)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
       }
     }
   )
@@ -179,7 +179,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
       expect(readFileSync(join(runtimeDir, 'conpty.dll'), 'utf8')).toBe('conpty.dll x64')
       expect(readFileSync(join(runtimeDir, 'OpenConsole.exe'), 'utf8')).toBe('OpenConsole.exe x64')
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   })
 
@@ -207,7 +207,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         const rebuildCall = JSON.parse(readFileSync(rebuildLogPath, 'utf8').trim())
         expect(rebuildCall.onlyModules).toEqual(['windows-native-registry'])
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
       }
     }
   )
@@ -237,7 +237,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         const rebuildCall = JSON.parse(readFileSync(rebuildLogPath, 'utf8').trim())
         expect(rebuildCall.onlyModules).toEqual(['node-pty'])
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
       }
     }
   )
@@ -268,7 +268,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         expect(rebuildCall.ignoreModules).toEqual(['cpu-features'])
         expect(rebuildCall.force).toBe(true)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
       }
     }
   )
@@ -296,7 +296,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         )
         expect(existsSync(rebuildLogPath)).toBe(false)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
       }
     }
   )
@@ -326,7 +326,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         expect(rebuildCall.onlyModules).toEqual(['node-pty'])
         expect(rebuildCall.force).toBe(true)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
       }
     }
   )

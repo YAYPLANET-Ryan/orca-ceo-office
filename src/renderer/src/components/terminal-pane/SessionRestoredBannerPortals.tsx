@@ -1,11 +1,11 @@
 import { createPortal } from 'react-dom'
 import { useAppStore } from '@/store'
-import type { SessionRestoredBannerReason } from './session-restored-banner-pane-state'
 import { SessionRestoredBanner } from './SessionRestoredBanner'
 import { PaneConversationRecovery } from './PaneConversationRecovery'
 import type {
   SessionRestoredBannerPane,
-  SessionRestoredBannerPaneReasons
+  SessionRestoredBannerPaneReasons,
+  SessionRestoredBannerReason
 } from './session-restored-banner-pane-state'
 
 type SessionRestoredBannerPortalsProps = {
