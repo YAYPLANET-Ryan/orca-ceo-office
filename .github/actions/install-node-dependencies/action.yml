@@ -78,6 +78,19 @@ runs:
           git -C "$GITHUB_WORKSPACE" diff --exit-code -- package.json pnpm-lock.yaml
         fi
 
+    - name: Identify native build platform
+      id: native-platform
+      if: inputs.native-runtime != 'none'
+      shell: bash
+      run: |
+        image="$RUNNER_OS"
+        if [ "$RUNNER_OS" = 'Linux' ]; then
+          . /etc/os-release
+          : "${ID:?Missing Linux distribution ID}" "${VERSION_ID:?Missing Linux version ID}"
+          image="$ID-$VERSION_ID"
+        fi
+        echo "image=$image" >> "$GITHUB_OUTPUT"
+
     # Why cached: `--ignore-scripts` leaves node-pty without build/Release, so
     # ensure-native-runtime node-gyp-compiles it in every job that asks for a runtime.
     # The artifacts are ABI-bound, so the key carries the target runtime, the resolved
@@ -87,7 +100,7 @@ runs:
       uses: actions/cache@v5
       with:
         path: node_modules/.pnpm/node-pty@*/node_modules/node-pty/build
-        key: native-modules-${{ runner.os }}-${{ runner.arch }}-${{ inputs.native-runtime }}-node${{ steps.default-node.outputs.node-version }}${{ steps.requested-node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'config/patches/node-pty@1.1.0.patch') }}
+        key: native-modules-${{ runner.os }}-${{ runner.arch }}-${{ steps.native-platform.outputs.image }}-${{ inputs.native-runtime }}-node${{ steps.default-node.outputs.node-version }}${{ steps.requested-node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'config/patches/node-pty@1.1.0.patch') }}
 
     - name: Prepare native runtime
       if: inputs.native-runtime != 'none'

@@ -300,10 +300,33 @@ describe('PR workflow parallelism', () => {
     // Native artifacts are ABI-bound: a key missing either dimension serves a build
     // that cannot load, and ensure-native-runtime would recompile it anyway.
     expect(steps[cacheIndex].with.key).toContain('${{ inputs.native-runtime }}')
+    expect(steps[cacheIndex].with.key).toContain('${{ steps.native-platform.outputs.image }}')
+    const platformIndex = steps.findIndex((step) => step.id === 'native-platform')
+    expect(platformIndex).toBeGreaterThanOrEqual(0)
+    expect(platformIndex).toBeLessThan(cacheIndex)
+    expect(steps[platformIndex].run).toContain('/etc/os-release')
     expect(steps[cacheIndex].with.key).toContain('steps.requested-node.outputs.node-version')
     expect(steps[cacheIndex].with.key).toContain('config/patches/node-pty@1.1.0.patch')
     // No restore-keys: a partial-match key is exactly the ABI-mismatched build above.
     expect(steps[cacheIndex].with['restore-keys']).toBeUndefined()
+  })
+
+  it('builds legacy Git and packaged native modules on the supported image family', () => {
+    expect(workflow.jobs.git_compatibility['runs-on']).toBe('ubuntu-24.04')
+    expect(workflow.jobs.package['runs-on']).toBe('ubuntu-24.04')
+    expect(workflow.jobs.shell_contracts['runs-on']).toBe('ubuntu-24.04')
+  })
+
+  it('hydrates the immutable wire baseline when fork release tags are missing', () => {
+    const job = workflow.jobs['cross-version-wire']
+    expect(job.env.ORCA_CROSS_VERSION_BASELINE_REF).toBe(
+      "${{ github.repository == 'YAYPLANET-Ryan/orca-ceo-office' && 'v1.4.191-ceo.20260903.27' || '' }}"
+    )
+    const fetch = job.steps.find((step) => step.name === 'Fetch pinned upstream wire baseline')
+    expect(fetch.run).toContain('https://github.com/stablyai/orca.git')
+    expect(fetch.run).toContain('refs/tags/v1.4.184:refs/tags/v1.4.184')
+    expect(fetch.run).toContain('284a244a12dfe266f62c103cc6b1b1d13203e0b4')
+    expect(fetch.run).not.toContain('--force')
   })
 
   it('reuses TypeScript incremental state across typecheck runs', () => {
