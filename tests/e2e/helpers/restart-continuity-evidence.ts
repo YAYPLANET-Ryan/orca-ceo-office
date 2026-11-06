@@ -65,6 +65,9 @@ export async function attachRestartTerminalEvidence(
       ptyId: pane?.container?.dataset?.ptyId,
       cols: pane?.terminal.cols,
       rows: pane?.terminal.rows,
+      workspaceSessionReady: state?.workspaceSessionReady,
+      layout: tabId ? state?.terminalLayoutsByTabId[tabId] : undefined,
+      livePtyIds: tabId ? state?.ptyIdsByTabId[tabId] : undefined,
       bufferLength: buffer?.length,
       serialized: pane?.serializeAddon?.serialize?.().slice(-20_000) ?? '',
       logicalText: rows

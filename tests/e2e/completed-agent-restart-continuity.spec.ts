@@ -61,8 +61,14 @@ for (const [coldRestart, observedExit] of [
     const session = createRestartSession(testInfo)
     let app: ElectronApplication | null = null
     let exitEvidence: string[] = []
+    const startupEvidence: string[] = []
+    const onStderr = (chunk: string): void => {
+      if (startupEvidence.join('').length < 40_000) {
+        startupEvidence.push(chunk)
+      }
+    }
     try {
-      const first = await session.launch()
+      const first = await session.launch({ onStderr })
       app = first.app
       await attachRepoAndOpenTerminal(first.page, repoPath)
       await waitForSessionReady(first.page)
@@ -102,7 +108,7 @@ for (const [coldRestart, observedExit] of [
         // Why: stop only this isolated fixture's daemon to model a computer restart.
         await cleanupE2EDaemons(session.userDataDir)
       }
-      const second = await session.launch()
+      const second = await session.launch({ onStderr })
       app = second.app
       await waitForSessionReady(second.page)
       await ensureTerminalVisible(second.page)
@@ -132,6 +138,10 @@ for (const [coldRestart, observedExit] of [
       }
       await second.page.screenshot({ path: testInfo.outputPath('restored-conversation.png') })
     } finally {
+      await testInfo.attach('main-startup-evidence', {
+        body: startupEvidence.join(''),
+        contentType: 'text/plain'
+      })
       await testInfo.attach('first-launch-exit-evidence', {
         body: JSON.stringify(exitEvidence, null, 2),
         contentType: 'application/json'
