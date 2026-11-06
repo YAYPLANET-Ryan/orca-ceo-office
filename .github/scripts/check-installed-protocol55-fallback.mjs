@@ -247,7 +247,8 @@ try {
       throw new Error('Synthetic fixture unexpectedly owns prior terminals')
     }
     checkpoint('CREATE_SYNTHETIC_TERMINAL')
-    if (/[\s"%!&|<>^]/.test(process.execPath)) {
+    const collectorPath = path.join(workspace, 'protocol55-input-collector.mjs')
+    if ([process.execPath, collectorPath].some((value) => /[^a-zA-Z0-9_:\\/.-]/.test(value))) {
       throw new Error(
         'The hosted Node fixture requires a space-free path without shell metacharacters'
       )
@@ -263,7 +264,7 @@ try {
           commandDelivery: 'provider',
           spawnIntent: 'interactive'
         }),
-      { cwd: workspace, command: `${process.execPath} protocol55-input-collector.mjs` }
+      { cwd: workspace, command: `${process.execPath} ${collectorPath}` }
     )
     diagnosticPtyId = created.id
     const before = await identity(first, created.id)

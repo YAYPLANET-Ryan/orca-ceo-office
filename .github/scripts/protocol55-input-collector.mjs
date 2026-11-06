@@ -26,7 +26,7 @@ function fail(reason) {
   throw new Error(reason)
 }
 process.stdin.on('data', (chunk) => {
-  pending += chunk
+  pending += String(chunk)
   if (pending.length > 1024) {
     fail('Synthetic terminal input exceeded its fixed payload')
   }
