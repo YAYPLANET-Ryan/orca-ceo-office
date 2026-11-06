@@ -143,19 +143,23 @@ try {
   async function closeGracefully() {
     const closing = app
     const child = closing.process()
-    const closed = closing.close().then(
-      () => null,
-      (error) => error
+    const release = { guiPid: child.pid, status: 'REQUESTED_NOT_AWAITED' }
+    evidence.controllerReleases ??= []
+    evidence.controllerReleases.push(release)
+    void closing.close().then(
+      () => {
+        release.status = 'COMPLETED'
+      },
+      (error) => {
+        release.status = 'REJECTED'
+        release.warning = error.message
+      }
     )
     await expect.poll(() => child.exitCode, { timeout: 30000 }).toBe(0)
     checkpoint('GUI_EXIT_ZERO', { guiExitCode: child.exitCode })
     // Detached hosts can retain controller pipes after the GUI has exited normally.
     for (const stream of child.stdio) {
       stream?.destroy()
-    }
-    const error = await closed
-    if (error) {
-      throw error
     }
     app = null
   }
@@ -167,9 +171,7 @@ try {
     return result.sessions
   }
   async function identity(page, id) {
-    const sessions = await page.evaluate(() =>
-      window.api.pty.listSessions({ connectionId: null, includeUnrouted: true })
-    )
+    const sessions = await page.evaluate(() => window.api.pty.listSessions({ connectionId: null }))
     const row = sessions.find((session) => session.id === id)
     if (!row?.incarnationId) {
       throw new Error('PTY incarnation is missing')
@@ -293,14 +295,18 @@ try {
     evidence.fallbackInstallerExitCode = installed.code
     evidence.result = 'PASS_SYNTHETIC_PROTOCOL55_PROGRAM_FALLBACK'
     checkpoint('CLEANUP_SYNTHETIC_TERMINAL')
-    await second.evaluate(
+    const cleanup = await second.evaluate(
       (sessionId) => window.api.pty.management.killOne({ sessionId }),
       before.sessionId
     )
+    if (!cleanup.success) {
+      throw new Error('Synthetic terminal cleanup was refused')
+    }
     await closeGracefully()
   } catch (error) {
     evidence.result = 'FAIL'
     checkpoint('ERROR', { failedPhase: evidence.phase, error: error.message })
+    console.error(error.message)
     throw error
   } finally {
     try {
@@ -332,4 +338,11 @@ try {
       `${JSON.stringify(evidence, null, 2)}\n`
     )
   }
+}
+if (
+  evidence.result === 'PASS_SYNTHETIC_PROTOCOL55_PROGRAM_FALLBACK' &&
+  (process.exitCode ?? 0) === 0
+) {
+  // Both GUIs exited normally and the proof is durable; only this controller may remain open.
+  process.exit(0)
 }
