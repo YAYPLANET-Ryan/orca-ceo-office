@@ -95,7 +95,7 @@ switch($Case){
         $preserved=@(Get-ChildItem -LiteralPath (Join-Path $Sandbox 'partial-candidate-evidence') -File -Recurse)
         if($preserved.Count -ne 1 -or [IO.File]::ReadAllText($preserved[0].FullName) -ne 'n'){throw 'Partial file bytes were not preserved'}
     }
-    {$_ -in @('startup-shortcut','startup-shortcut-alias','startup-shortcut-hidden')} {
+    {$_ -in @('startup-shortcut','startup-shortcut-alias','startup-shortcut-hidden','startup-shortcut-bundle')} {
         $folder=Join-Path $Sandbox 'startup';[IO.Directory]::CreateDirectory($folder)|Out-Null
         $shell=New-Object -ComObject WScript.Shell
         $name=$(if($Case -eq 'startup-shortcut-alias'){'My Work.lnk'}else{'Orca.lnk'})
@@ -104,11 +104,23 @@ switch($Case){
         $originalHash=Get-ReleaseHash $path
         $arguments=@{Folder=$folder;InstallRoot=$root;PlanPath=(Join-Path $Sandbox 'plan.json');PlanHash=('a'*64);GatePath=(Join-Path $Sandbox 'gate.ps1');BackupRoot=(Join-Path $Sandbox 'startup-backup')}
         if($Case -eq 'startup-shortcut-alias'){$arguments.InstallRoot=$root.Replace('\','/')+'/'}
+        if($Case -eq 'startup-shortcut-bundle'){$arguments.BundleSha256='b'*64}
         $preview=Set-ReleaseStartupShortcutGate @arguments
         if($preview.routed -or $preview.eligibleShortcuts -ne 1 -or (Get-ReleaseHash $path) -ne $originalHash){throw 'Preview modified startup'}
-        Set-ReleaseStartupShortcutGate @arguments -Apply|Out-Null
+        $routed=Set-ReleaseStartupShortcutGate @arguments -Apply
         $after=$shell.CreateShortcut($path)
         if($after.Arguments -notmatch 'gate.ps1' -or (Get-ReleaseHash (Join-Path $Sandbox ('startup-backup/'+$name+'.original'))) -ne $originalHash){throw 'Startup routing/backup failed'}
+        if($preview.shortcuts[0].originalSha256 -ne $originalHash -or $routed.shortcuts[0].routedSha256 -ne (Get-ReleaseHash $path)){throw 'Registration reconciliation evidence missing'}
+        if($Case -eq 'startup-shortcut-bundle'){
+            @'
+param($PlanPath,$ExpectedPlanSha256,$ExpectedBundleSha256,$Entry)
+if($ExpectedPlanSha256 -ne ('a'*64) -or $ExpectedBundleSha256 -ne ('b'*64) -or $Entry -ne 'Invoke-GuardedOrcaLaunch.ps1' -or (Get-ExecutionPolicy) -ne 'Bypass'){exit 9}
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'received-arguments'),'PASS')
+'@|Set-Content -LiteralPath $arguments.GatePath -Encoding UTF8
+            $env:PSExecutionPolicyPreference='Restricted'
+            $child=Start-Process -FilePath $after.TargetPath -ArgumentList $after.Arguments -Wait -PassThru -WindowStyle Hidden
+            if($child.ExitCode -ne 0 -or -not(Test-Path -LiteralPath (Join-Path $Sandbox 'received-arguments'))){throw 'Pinned bundle shortcut failed under inherited Restricted policy'}
+        }
     }
     'hold-launch-lock' {
         $lock=[IO.File]::Open((Join-Path $Sandbox 'state/launch.lock'),'OpenOrCreate','ReadWrite','None')

@@ -30,8 +30,11 @@ Preparation, while the recovered app remains running
    timeout and IgnoreNew. Logon invokes Invoke-GuardedOrcaLaunch.ps1. Direct
    Startup links require reviewed -RouteExistingStartup; originals are copied
    and hashed before routing. Direct HKCU Run entries block registration pending
-   bounded review. Registration never starts a task and is not transactional:
-   if task registration fails after routing, backed-up links still use the gate.
+   bounded review. Registration never starts a task. It requires a pinned bundle
+   outside the worktree and persists registration.json before routing/tasks.
+   It is not an atomic Scheduler/LNK transaction: failure or worker interruption
+   leaves a durable intent and retry is refused until partial state is reviewed.
+   Original LNK bytes remain copied and hashed; never delete intent to retry.
 
 Deployment and worker lifetime
 Coordinate the user's graceful GUI quit and continuity checkpoint first. Keep
@@ -106,4 +109,54 @@ the repaired program with byte-identical CLI data from the pinned prior archive.
 This is not a complete live snapshot and does not authorize a deployment. Keep
 the next deployment BLOCKED until vendor detection and baseline preflight are
 resolved. A local analysis packet contains only the pinned sample, source,
-build script and technical metadata; external submission needs user approval.
+build script and technical metadata. The November 6 instruction authorizes that
+exact packet after embedded NSIS CLI equality; private contact fields and human
+verification still require direct user interaction. No vendor verdict is implied.
+
+Same-version bootstrap (R0), prepared only; not permission to run it now
+Normal Apply continues to reject an incomplete baseline. New-BootstrapRepairPlan
+measures the one approved initial absence (resources/bin/orca.exe); every other
+program byte and inventory entry must equal the pinned recovered rollback.
+Candidate and rollback must have identical version, inventory, sizes and hashes.
+The builder can prepare DRAFT_BLOCKED_SECURITY_PENDING without changing the app.
+Invoke-BootstrapRepair -Mode Validate must refuse that draft. Apply additionally
+requires a pinned exact-hash vendor resolution document and two scoped clean
+scan reports bracketing at least two hours, with stable engine/definitions and
+recent timestamps. These JSON attestations need real operator-verified evidence;
+synthetic passing fixtures are not vendor clearance. No exception/restore occurs.
+R0 must run as the interactive current user, with the GUI gracefully closed and
+no relevant installer/model process touching the target. It reuses the existing
+transaction/rollback engine and never starts the GUI. Known exit0 plus verified
+payload ends at DEFERRED_MAINTENANCE_FINALIZATION, never READY/continuity PASS.
+Unknown exit stays blocked. Recovery does not reinstall completed transactions.
+Fresh evidence gates a new install; later rollback accepts the same pinned
+historical vendor/scoped scan artifacts without expiring its recovery ability.
+It still refuses mismatched hashes, changed reports, or future/invalid intervals.
+R0 rollback restores the complete security-cleared baseline, including the CLI;
+it does not restore the quarantined/incomplete initial state.
+
+After completed R0, prepare an ordinary plan from the now-complete baseline.
+Transition-VerifiedReleasePlan previews by default; -Apply permits only known
+exit0, verified, deferred R0 state. It validates security, both plans, idle state,
+exact installed files and rollback ZIP. Under launch/update locks it retains a
+hash-verified copy of the old journal and atomically writes new PREPARED state.
+It never deletes a pending journal, rewrites a profile, launches or reinstalls.
+The same transition tool can prepare R0 from an existing verified READY or
+ROLLED_BACK ordinary journal. It requires the exact prior plan/root, unchanged
+non-CLI bytes, identical CLI baseline hash/version, fresh R0 evidence and idle
+state. Pending/unknown/failed recovery states never qualify for archival.
+
+Persistent runtime preparation
+Commit/review the helper source before New-VerifiedReleaseBundle. It requires
+the exact Git revision and clean scoped source. Output must be a new directory
+outside source. Every helper is hashed into bundle-manifest.json. Keep this
+directory and the pinned plan available across logon/reboot. The bundle loader
+validates all bytes before dot-sourcing modules and rejects extra/missing files,
+path aliases and modified content. Registration requires this pinned bundle,
+not mutable worktree scripts. Staging alone does not register or execute tasks.
+Task/LNK actions use process-only ExecutionPolicy Bypass for this hash-verified
+loader; they never change machine/user policy. Organization-enforced Group
+Policy may still refuse execution and requires isolated OS validation.
+Run both test_release_recovery.py and test_release_bootstrap.py. Real NSIS fault
+injection must run in a disposable Windows OS, never merely /D=temp on this host.
+The current branch is an operator procedure, not an embedded-updater integration.

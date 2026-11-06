@@ -1,5 +1,5 @@
 param([Parameter(Mandatory=$true)][string]$Sandbox,
-      [string]$Scenario='success',[string]$Mode='Apply',[string]$PlanHash='fixture-plan')
+      [string]$Scenario='success',[string]$Mode='Apply',[string]$PlanHash='fixture-plan',[switch]$DeferReadiness)
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/ReleaseTransaction.ps1"
 . "$PSScriptRoot/ReleaseStartupGate.ps1"
@@ -54,5 +54,5 @@ $operations=@{
 if($Mode -eq 'Launch') {
     Invoke-ReleaseGuardedLaunch -Root $root -StateDirectory $stateDir -PlanHash $PlanHash -Operations $operations | ConvertTo-Json
 } else {
-    Invoke-ReleaseTransaction -Root $root -StateDirectory $stateDir -PlanHash $PlanHash -Operations $operations -Mode $Mode | ConvertTo-Json
+    Invoke-ReleaseTransaction -Root $root -StateDirectory $stateDir -PlanHash $PlanHash -Operations $operations -Mode $Mode -DeferReadiness:$DeferReadiness | ConvertTo-Json
 }

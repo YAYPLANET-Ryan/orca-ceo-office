@@ -2,7 +2,8 @@
 
 function Invoke-ReleaseTransaction {
     param([string]$Root, [string]$StateDirectory, [string]$PlanHash, $Operations,
-          [ValidateSet('Apply','Recover','Inspect','Rollback')][string]$Mode = 'Inspect')
+          [ValidateSet('Apply','Recover','Inspect','Rollback')][string]$Mode = 'Inspect',
+          [switch]$DeferReadiness)
     $ErrorActionPreference = 'Stop'
     $Root = Resolve-ReleaseRoot $Root
     $StateDirectory = Resolve-ReleaseRoot $StateDirectory
@@ -51,6 +52,7 @@ function Invoke-ReleaseTransaction {
                 if ($candidateComplete) {
                     $state.install = $(if($null -eq $state.installerExitCode){'CONTENT_VERIFIED_EXIT_UNKNOWN'}else{'VERIFIED'}); $state.phase = 'READINESS_FAILED'
                     $state.readiness = 'NOT_TESTED_AFTER_WORKER_INTERRUPTION'
+                    if($DeferReadiness -and $null -ne $state.installerExitCode -and $state.installerExitCode -eq 0){$state.readiness='DEFERRED_MAINTENANCE_FINALIZATION'}
                     Write-ReleaseJournal $journal $state
                     return $state
                 }
@@ -59,7 +61,7 @@ function Invoke-ReleaseTransaction {
         } else {
             if ($Mode -eq 'Recover') {
                 & $Operations.AssertQuiescent $state $Operations.Context
-                & $Operations.VerifyRestored $Operations.Context
+                if($Operations.ContainsKey('VerifyPrepared')){& $Operations.VerifyPrepared $Operations.Context}else{& $Operations.VerifyRestored $Operations.Context}
                 return $state
             }
             & $Operations.Preflight $Operations.Context
@@ -80,6 +82,11 @@ function Invoke-ReleaseTransaction {
                     return $state
                 }
                 $state.install = 'VERIFIED'; $state.phase = 'READINESS_FAILED'
+                if ($DeferReadiness) {
+                    $state.readiness='DEFERRED_MAINTENANCE_FINALIZATION'
+                    Write-ReleaseJournal $journal $state
+                    return $state
+                }
                 Write-ReleaseJournal $journal $state
                 # Failure after a verified install must never trigger rollback over a running app.
                 try { & $Operations.Ready $Operations.Context; $state.readiness = 'WINDOW_AND_SERVER_READY'; $state.phase = 'READY' }

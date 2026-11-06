@@ -17,11 +17,12 @@ function Get-ReleaseStartupRunBypasses([string]$InstallRoot) {
     } finally { $key.Dispose() }
 }
 
-function Set-ReleaseStartupShortcutGate([string]$Folder,[string]$InstallRoot,[string]$PlanPath,[string]$PlanHash,[string]$GatePath,[string]$BackupRoot,[switch]$Apply) {
+function Set-ReleaseStartupShortcutGate([string]$Folder,[string]$InstallRoot,[string]$PlanPath,[string]$PlanHash,[string]$GatePath,[string]$BackupRoot,[switch]$Apply,[string]$BundleSha256) {
     $InstallRoot=Resolve-ReleaseRoot $InstallRoot
     $PlanPath=[IO.Path]::GetFullPath($PlanPath)
     $GatePath=[IO.Path]::GetFullPath($GatePath)
     Assert-ReleasePlanHash $PlanHash
+    if($BundleSha256){Assert-ReleasePlanHash $BundleSha256}
     foreach ($value in @($PlanPath,$GatePath)) { if ($value.Contains('"') -or $value -match '[\r\n]') { throw 'Invalid startup argument' } }
     $shell=New-Object -ComObject WScript.Shell
     $selected=@()
@@ -30,7 +31,7 @@ function Set-ReleaseStartupShortcutGate([string]$Folder,[string]$InstallRoot,[st
         if ([string]::IsNullOrWhiteSpace($shortcut.TargetPath) -or $shortcut.TargetPath -notmatch '(?i)(^|[\\/])Orca\.exe$') { continue }
         if ([IO.Path]::GetFullPath($shortcut.TargetPath) -ine (Join-Path $InstallRoot 'Orca.exe')) { throw 'Orca startup target differs from reviewed installation; routing review required' }
         if (-not [string]::IsNullOrWhiteSpace($shortcut.Arguments)) { throw 'Existing startup arguments require separate review' }
-        $selected+=[pscustomobject]@{path=$file.FullName;shortcut=$shortcut}
+        $selected+=[pscustomobject]@{path=$file.FullName;shortcut=$shortcut;originalSha256=(Get-ReleaseHash $file.FullName);backupPath=(Join-Path $BackupRoot ($file.Name+'.original'))}
     }
     if ($Apply) {
         $backupDirectory=Resolve-ReleaseRoot $BackupRoot
@@ -43,12 +44,14 @@ function Set-ReleaseStartupShortcutGate([string]$Folder,[string]$InstallRoot,[st
             $backup=Get-ReleaseFile $backupDirectory ([IO.Path]::GetFileName($item.path)+'.original')
             [IO.File]::Copy($item.path,$backup,$false)
             if ((Get-ReleaseHash $backup) -ne (Get-ReleaseHash $item.path)) { throw 'Startup backup verification failed' }
-            $item.shortcut.TargetPath="$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe"
-            $item.shortcut.Arguments='-NoProfile -NonInteractive -WindowStyle Hidden -File "'+$GatePath+'" -PlanPath "'+$PlanPath+'" -ExpectedPlanSha256 '+$PlanHash
+            $item.shortcut.TargetPath=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $item.shortcut.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+$GatePath+'" -PlanPath "'+$PlanPath+'" -ExpectedPlanSha256 '+$PlanHash
+            if($BundleSha256){$item.shortcut.Arguments+=' -ExpectedBundleSha256 '+$BundleSha256+' -Entry Invoke-GuardedOrcaLaunch.ps1'}
             $item.shortcut.Save()
             $saved=$shell.CreateShortcut($item.path)
             if ([IO.Path]::GetFullPath($saved.TargetPath) -ine [IO.Path]::GetFullPath($item.shortcut.TargetPath) -or $saved.Arguments -ne $item.shortcut.Arguments) { throw 'Startup gate write verification failed' }
         }
     }
-    [pscustomobject]@{eligibleShortcuts=$selected.Count;routed=[bool]$Apply;backupCreated=[bool]($Apply -and $selected.Count)}
+    $details=@(foreach($item in $selected){[pscustomobject]@{path=$item.path;originalSha256=$item.originalSha256;backupPath=$item.backupPath;routedSha256=$(if($Apply){Get-ReleaseHash $item.path}else{$null})}})
+    [pscustomobject]@{eligibleShortcuts=$selected.Count;routed=[bool]$Apply;backupCreated=[bool]($Apply -and $selected.Count);shortcuts=$details}
 }

@@ -23,8 +23,9 @@ function Assert-ReleaseVersion([string]$Root, [string]$Version) {
     }
 }
 
-function Assert-ReleasePlan($Plan, [switch]$ForLaunch) {
+function Assert-ReleasePlan($Plan, [switch]$ForLaunch, [switch]$ForBootstrap) {
     if ($Plan.schema -ne 1) { throw 'Unknown plan schema' }
+    if ($Plan.PSObject.Properties['bootstrap'] -and -not $ForBootstrap) { throw 'Bootstrap plan requires the dedicated R0 entry' }
     $Plan.installRoot=Resolve-ReleaseRoot $Plan.installRoot
     if ([string]::IsNullOrWhiteSpace($Plan.version) -or [string]::IsNullOrWhiteSpace($Plan.rollback.version)) { throw 'Plan versions must be nonempty' }
     if ($Plan.installRoot -match '\s') { throw 'NSIS /D target with whitespace is unsupported' }
