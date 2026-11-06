@@ -325,7 +325,7 @@ describe('connectPanePty', () => {
     expect(resumeConnectOptions?.command).toContain('sess-hibernated-race')
   })
 
-  it('keeps an in-place provider claim until the replacement PTY spawn settles', async () => {
+  it('keeps an in-place provider claim after spawn until identity confirmation', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const transport = createMockTransport('pty-pane-2')
     transportFactoryQueue.push(transport)
@@ -369,7 +369,13 @@ describe('connectPanePty', () => {
 
     deferredSpawn.resolve('pty-resumed')
     await flushAsyncTicks()
-    expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledWith(paneKey)
+    expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
+      providerSession: {
+        key: 'session_id',
+        id: 'sess-hibernated-inflight'
+      }
+    })
   })
 
   it('re-arms the exact hibernation target after a replacement spawn fails', async () => {

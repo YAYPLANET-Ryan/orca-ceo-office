@@ -11,7 +11,8 @@
  * The fault is injected at the multiplex transport seam (onClose), never with
  * elapsed time; the oracle is the per-pane handle inventory.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { createRemoteRuntimePtyTransport as createTransport } from './remote-runtime-pty-transport'
 import {
   TerminalStreamOpcode,
   decodeTerminalStreamFrame,
@@ -35,6 +36,8 @@ describe('paired client sleep/wake with several remote terminal tabs', () => {
   let subscriptionCallbacks: SubscriptionCallbacks | null = null
   /** Host handle currently published for each host tab; null models a parked surface. */
   let hostHandleByTabId = new Map<string, string | null>()
+  let createRemoteRuntimePtyTransport: typeof createTransport
+  const transports: { destroy?: () => void }[] = []
 
   function subscribedHandles(): string[] {
     return subscriptionSendBinary.mock.calls
@@ -76,7 +79,7 @@ describe('paired client sleep/wake with several remote terminal tabs', () => {
     }
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules()
     vi.doUnmock('../../runtime/remote-runtime-terminal-multiplexer')
     vi.doMock('@/runtime/web-runtime-session', () => ({
@@ -113,18 +116,31 @@ describe('paired client sleep/wake with several remote terminal tabs', () => {
     vi.stubGlobal('window', {
       api: { runtimeEnvironments: { call: runtimeCall, subscribe: runtimeSubscribe } }
     })
+    // Cold module loading belongs to setup, not the reconnect timing assertion.
+    ;({ createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport'))
+  })
+
+  afterEach(async () => {
+    // A failed assertion must not leave six reconnect loops running in the next test.
+    for (const transport of transports.splice(0)) {
+      transport.destroy?.()
+    }
+    const { resetRemoteRuntimeTerminalMultiplexersForTests } =
+      await import('../../runtime/remote-runtime-terminal-multiplexer')
+    resetRemoteRuntimeTerminalMultiplexersForTests()
+    vi.unstubAllGlobals()
   })
 
   async function attachAllPanes(): Promise<
     { hostTabId: string; transport: { getPtyId: () => string | null; destroy?: () => void } }[]
   > {
-    const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
     const panes = HOST_TAB_IDS.map((hostTabId) => {
       const transport = createRemoteRuntimePtyTransport('env-1', {
         worktreeId: 'wt-1',
         tabId: `web-terminal-${hostTabId}`,
         leafId: 'pane:1'
       })
+      transports.push(transport)
       transport.attach({
         existingPtyId: `remote:env-1@@${hostHandleByTabId.get(hostTabId)}`,
         cols: 80,
@@ -153,7 +169,6 @@ describe('paired client sleep/wake with several remote terminal tabs', () => {
     )
     for (const pane of panes) {
       expect(pane.transport.getPtyId(), `pane ${pane.hostTabId} lost its handle`).not.toBeNull()
-      pane.transport.destroy?.()
     }
   })
 
@@ -176,7 +191,6 @@ describe('paired client sleep/wake with several remote terminal tabs', () => {
     expect(afterReconnect, evidence).toContain(`${parked}-respawned`)
     for (const pane of panes) {
       expect(pane.transport.getPtyId(), `pane ${pane.hostTabId} lost its handle`).not.toBeNull()
-      pane.transport.destroy?.()
     }
   })
 })

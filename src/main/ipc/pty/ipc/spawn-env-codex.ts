@@ -7,6 +7,11 @@ import { stampWslOrchestrationCompatibilityHost } from '../../../pty/wsl-orca-en
 import { ensureCodexStateDbBackfillRecoveryStarted } from '../../../codex/codex-state-db-backfill-recovery'
 import { buildPtyHostEnv } from '../host-env/assembly'
 import {
+  applyCustomCommandContract,
+  applyCustomCommandContractToSequencedStartup,
+  resolveCustomCommandContractShell
+} from '../host-env/custom-command-contract'
+import {
   getCompatibleSelectedCodexHomePath,
   getCodexSelectionTargetForPty,
   resolveCodexHomeAfterManagedAuthReadiness,
@@ -46,8 +51,20 @@ export async function assemblePtyIpcSpawnCodexEnv(ctx: PtyIpcSpawnState): Promis
     ? await ctx.deps.resolveCodexResumeLaunch(args.command, codexResumePreparation)
     : ctx.deps.noCodexResumeLaunch(ctx.preAdoptedStablePane ? undefined : args.command)
   const codexResumeHome = ctx.codexResumeLaunch.codexResumeHome
-  ctx.launchCommand = ctx.codexResumeLaunch.command
-  ctx.baseEnv = ctx.deps.stripSequencedStartupResumeArgv(ctx.baseEnv, ctx.codexResumeLaunch)
+  // Why: user-authored commands (quick commands, CLI --command, pasted resume
+  // lines) bypass the shared startup builder; this is the one point every
+  // native Windows IPC spawn passes, so the Codex launch contract is applied
+  // here, to the launch command and to the sequenced startup command alike.
+  const customCommandShell = resolveCustomCommandContractShell({
+    applies: ctx.nativeWindowsConptySpawn && !isTuiAgent(args.launchAgent),
+    terminalWindowsShell:
+      ctx.effectiveShellOverride ?? ctx.deps.getSettings?.()?.terminalWindowsShell
+  })
+  ctx.launchCommand = applyCustomCommandContract(ctx.codexResumeLaunch.command, customCommandShell)
+  ctx.baseEnv = applyCustomCommandContractToSequencedStartup(
+    ctx.deps.stripSequencedStartupResumeArgv(ctx.baseEnv, ctx.codexResumeLaunch),
+    customCommandShell
+  )
   // Why: declared after the strip so a local-provider spawn cannot capture the
   // pre-strip env — only the daemon branch below re-derives this from baseEnv.
   ctx.env = ctx.baseEnv

@@ -1,5 +1,9 @@
 /* eslint-disable max-lines -- Why: the agent-status slice co-locates live map, retained snapshots, retention-suppression, and tab-prefix sweep so the teardown contract stays readable end-to-end. Splitting across files would scatter the drop/remove/retain interactions that must stay in lockstep. */
 import type { StateCreator } from 'zustand'
+import {
+  confirmRecoverySources,
+  remapRecoveryTargets
+} from '../../../../shared/agent-recovery-target'
 import type { AppState } from '../types'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
@@ -27,6 +31,12 @@ import {
   resolveAgentStatusIdentity,
   shouldSuppressInheritedTerminalStatus
 } from '../../../../shared/agent-status-identity'
+import type { ResolvedAgentStatusIdentity } from '../../../../shared/agent-status-ipc-payload'
+import {
+  getPaneForegroundObservedAt,
+  rebindPaneForegroundObservation,
+  reportPaneForegroundToMain
+} from './pane-foreground-agent'
 import { isCommandCodeNewTurnWhileWorking } from '../../../../shared/command-code-turn-boundary'
 import { agentEntryCompletionAt } from '../../../../shared/agent-completion-time'
 import type { TerminalPaneLayoutNode, TerminalTab } from '../../../../shared/terminal-tab-types'
@@ -133,6 +143,8 @@ export type AgentStatusMetadata = {
   providerSession?: AgentProviderSessionMetadata
   launchConfig?: SleepingAgentLaunchConfig
   launchToken?: string
+  /** Main's verdict for this event; applied instead of resolving again (see agent-status-ipc-payload.ts). */
+  resolvedIdentity?: ResolvedAgentStatusIdentity
 }
 
 export type AgentStatusUpdate = {
@@ -153,7 +165,11 @@ export type AgentProviderSessionRouting = {
   connectionId?: string | null
 }
 
-export type AgentProviderSessionRecordMetadata = { launchToken?: string }
+export type AgentProviderSessionRecordMetadata = {
+  launchToken?: string
+  preserveLiveStatus?: boolean
+  preserveResumeCheckpoint?: boolean
+}
 
 export type AgentProviderSessionUpdate = {
   kind: 'providerSession'
@@ -302,6 +318,7 @@ export type AgentStatusSlice = {
   clearSleepingAgentSession: (paneKey: string) => void
   clearSleepingAgentSessionsByPaneKey: (paneKeys: readonly string[]) => void
   setSleepingAgentAutomaticResumeBlocked: (paneKey: string, blocked: boolean) => void
+  markSleepingAgentSessionExited: (paneKey: string) => void
   clearSleepingAgentSessionsByWorktree: (worktreeId: string) => void
   pruneSleepingAgentSessions: (validWorktreeIds: Set<string>) => void
 
@@ -678,6 +695,13 @@ function carryOverAutomaticResumeBlock(
   record: SleepingAgentSessionRecord,
   previous: SleepingAgentSessionRecord | undefined
 ): void {
+  if (previous?.requiresManualResume && recoveryRecordTargetsSameSession(previous, record)) {
+    record.requiresManualResume = true
+  }
+  if (previous?.resumeTargetPaneKey && recoveryRecordTargetsSameSession(previous, record)) {
+    record.resumeTargetPaneKey = previous.resumeTargetPaneKey
+    record.resumeConfirmedAt = previous.resumeConfirmedAt
+  }
   if (
     previous?.automaticResumeBlockedBy === 'legacy-orchestration-worker' &&
     previous.agent === record.agent &&
@@ -888,6 +912,9 @@ function sleepingRecordsEquivalentIgnoringCaptureTime(
     existing.lastAssistantMessage === next.lastAssistantMessage &&
     existing.interrupted === next.interrupted &&
     existing.origin === next.origin &&
+    existing.requiresManualResume === next.requiresManualResume &&
+    existing.resumeTargetPaneKey === next.resumeTargetPaneKey &&
+    existing.resumeConfirmedAt === next.resumeConfirmedAt &&
     launchConfigsEqual(existing.launchConfig, next.launchConfig)
   )
 }
@@ -907,6 +934,9 @@ function recoveryRecordMatches(
     existing.tabId === next.tabId &&
     existing.state === next.state &&
     existing.interrupted === next.interrupted &&
+    existing.requiresManualResume === next.requiresManualResume &&
+    existing.resumeTargetPaneKey === next.resumeTargetPaneKey &&
+    existing.resumeConfirmedAt === next.resumeConfirmedAt &&
     agentProviderSessionsEqual(existing.agent, existing.providerSession, next.providerSession) &&
     launchConfigsEqual(existing.launchConfig, next.launchConfig)
   )
@@ -934,6 +964,20 @@ function copyLaunchConfig(config: SleepingAgentLaunchConfig): SleepingAgentLaunc
     agentEnv: { ...config.agentEnv },
     ...(config.ompResumeFilePath ? { ompResumeFilePath: config.ompResumeFilePath } : {})
   }
+}
+
+// A redirected source is a backup, and a different provider cannot confirm a
+// pending destination. In either case keep the only known recovery identity.
+function preservePendingRecovery(
+  existing: SleepingAgentSessionRecord | undefined,
+  next: SleepingAgentSessionRecord | null
+): boolean {
+  return Boolean(
+    existing?.resumeTargetPaneKey &&
+    (existing.resumeTargetPaneKey !== existing.paneKey ||
+      !next ||
+      !recoveryRecordTargetsSameSession(existing, next))
+  )
 }
 
 function launchConfigsEqual(
@@ -1778,11 +1822,14 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             tab: targetTabId ? { ...retained.tab, id: targetTabId } : retained.tab
           })
         ),
-        sleepingAgentSessionsByPaneKey: movePaneKeyedRecord(
-          s.sleepingAgentSessionsByPaneKey,
+        sleepingAgentSessionsByPaneKey: remapRecoveryTargets(
+          movePaneKeyedRecord(s.sleepingAgentSessionsByPaneKey, from, to, (record) => ({
+            ...record,
+            paneKey: to,
+            tabId: targetTabId
+          })),
           from,
-          to,
-          (record) => ({ ...record, paneKey: to, tabId: targetTabId })
+          to
         ),
         agentLaunchConfigByPaneKey: movePaneKeyedRecord(
           s.agentLaunchConfigByPaneKey,
@@ -1801,6 +1848,15 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         cacheTimerByKey: movePaneKeyedRecord(s.cacheTimerByKey, from, to),
         retentionSuppressedPaneKeys: movePaneKeyedRecord(s.retentionSuppressedPaneKeys, from, to)
       }))
+      // Why: main resolves nested-hook identity from the renderer's foreground
+      // report; the moved entry must follow the pane key there too, or main keeps
+      // judging the old key and holds nothing for the new one.
+      rebindPaneForegroundObservation(from, to)
+      reportPaneForegroundToMain(from, null)
+      const movedForeground = storeGet().paneForegroundAgentByPaneKey[to]
+      if (movedForeground) {
+        reportPaneForegroundToMain(to, movedForeground)
+      }
       if (typeof window !== 'undefined') {
         window.api?.agentStatus?.transferPaneAuthority?.({
           fromPaneKey: from,
@@ -1932,7 +1988,11 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
                 origin: existingSleepingRecord.origin
               })
             : null
-          if (refreshedRecord) {
+          if (
+            refreshedRecord &&
+            !preservePendingRecovery(existingSleepingRecord, refreshedRecord)
+          ) {
+            carryOverAutomaticResumeBlock(refreshedRecord, existingSleepingRecord)
             nextSleepingAgentSessions = {
               ...s.sleepingAgentSessionsByPaneKey,
               [paneKey]: {
@@ -2061,10 +2121,22 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           ...(preservesCompletedRecoveryRecord && existingRecord.interrupted !== undefined
             ? { interrupted: existingRecord.interrupted }
             : {}),
-          origin: preservesQuitOrigin ? 'quit' : 'live'
+          origin: preservesQuitOrigin ? 'quit' : 'live',
+          ...(metadata?.preserveResumeCheckpoint ? { resumeTargetPaneKey: paneKey } : {})
         }
-        removedLiveStatus = existingStatus !== undefined
-        const nextLive = removedLiveStatus ? { ...s.agentStatusByPaneKey } : s.agentStatusByPaneKey
+        const preserveLiveStatus =
+          metadata?.preserveLiveStatus === true &&
+          existingStatus?.agentType === agent &&
+          (!existingStatus.providerSession ||
+            agentProviderSessionsEqual(agent, existingStatus.providerSession, providerSession))
+        removedLiveStatus = existingStatus !== undefined && !preserveLiveStatus
+        const nextLive =
+          removedLiveStatus || preserveLiveStatus
+            ? { ...s.agentStatusByPaneKey }
+            : s.agentStatusByPaneKey
+        if (preserveLiveStatus) {
+          nextLive[paneKey] = { ...existingStatus, providerSession }
+        }
         if (removedLiveStatus) {
           delete nextLive[paneKey]
         }
@@ -2093,10 +2165,14 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         return {
           agentStatusByPaneKey: nextLive,
           retainedAgentsByPaneKey: nextRetained,
-          sleepingAgentSessionsByPaneKey: {
-            ...s.sleepingAgentSessionsByPaneKey,
-            [paneKey]: record
-          },
+          sleepingAgentSessionsByPaneKey: confirmRecoverySources(
+            {
+              ...s.sleepingAgentSessionsByPaneKey,
+              [paneKey]: preservePendingRecovery(existingRecord, record) ? existingRecord! : record
+            },
+            existingRecord,
+            record
+          ),
           agentLaunchConfigByPaneKey: nextLaunchConfigs,
           acknowledgedAgentsByPaneKey: removePaneKeys(
             s.acknowledgedAgentsByPaneKey,
@@ -2185,18 +2261,32 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           }
         }
 
-        const identity = resolveAgentStatusIdentity({
-          existing: existing
-            ? {
-                agentType: existing.agentType,
-                state: existing.state,
-                updatedAt: existing.updatedAt,
-                restoredUnconfirmed: existing.restoredUnconfirmed
-              }
-            : undefined,
-          incoming: payload.agentType,
-          now: updatedAt
-        })
+        const foregroundEvidence = s.paneForegroundAgentByPaneKey[paneKey]
+        const foregroundObservedAt = getPaneForegroundObservedAt(paneKey)
+        const identity =
+          metadata?.resolvedIdentity ??
+          resolveAgentStatusIdentity({
+            existing: existing
+              ? {
+                  agentType: existing.agentType,
+                  state: existing.state,
+                  updatedAt: existing.updatedAt,
+                  restoredUnconfirmed: existing.restoredUnconfirmed
+                }
+              : undefined,
+            incoming: payload.agentType,
+            now: updatedAt,
+            foreground: foregroundEvidence
+              ? {
+                  agent: foregroundEvidence.agent,
+                  shellForeground: foregroundEvidence.shellForeground,
+                  ...(foregroundEvidence.routingRevoked ? { routingRevoked: true } : {}),
+                  ...(foregroundObservedAt !== undefined
+                    ? { observedAt: foregroundObservedAt }
+                    : {})
+                }
+              : undefined
+          })
         // Why: Command Code has no UserPromptSubmit; a fresh transcript prompt while still `working` is the smart-sort turn boundary.
         const commandCodeNewTurn =
           existing !== undefined &&
@@ -2258,9 +2348,18 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         const canReuseExistingProviderSession =
           existing?.agentType === identity.agentType &&
           (existing.state !== 'done' || payload.state === 'done')
+        // Why: a nested hook (see resolveAgentStatusIdentity) carries the child's session id;
+        // the pane keeps the parent's, or a later cold restore would resume the wrong agent.
+        // When main's verdict rides on the event, main already substituted the parent's
+        // session for an inherited hook, so its field is the pane's session — preferring
+        // this store's own row here is what let the two sides disagree.
         const providerSession =
-          metadata?.providerSession ??
-          (canReuseExistingProviderSession ? existing.providerSession : undefined)
+          identity.inheritedFromActivePane &&
+          existing?.providerSession &&
+          !metadata?.resolvedIdentity
+            ? existing.providerSession
+            : (metadata?.providerSession ??
+              (canReuseExistingProviderSession ? existing.providerSession : undefined))
         const existingProviderSession = canReuseExistingProviderSession
           ? existing.providerSession
           : undefined
@@ -2530,7 +2629,9 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           nextLaunchConfigs = { ...s.agentLaunchConfigByPaneKey }
           delete nextLaunchConfigs[paneKey]
         }
-        if (liveRecoveryRecord) {
+        if (preservePendingRecovery(existingSleepingRecord, liveRecoveryRecord)) {
+          // Keep the saved conversation until this destination reports the same provider.
+        } else if (liveRecoveryRecord) {
           if (!recoveryRecordMatches(existingSleepingRecord, liveRecoveryRecord)) {
             nextSleepingAgentSessions = {
               ...s.sleepingAgentSessionsByPaneKey,
@@ -2541,6 +2642,11 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           nextSleepingAgentSessions = { ...s.sleepingAgentSessionsByPaneKey }
           delete nextSleepingAgentSessions[paneKey]
         }
+        nextSleepingAgentSessions = confirmRecoverySources(
+          nextSleepingAgentSessions,
+          existingSleepingRecord,
+          liveRecoveryRecord
+        )
         const nextLive = { ...s.agentStatusByPaneKey, [paneKey]: entry }
         // Why: cap the live map so a huge map's per-ping spread copy can't OOM the renderer (#9872).
         const evictedPaneKeys = capLiveAgentStatusesInPlace(
@@ -3240,6 +3346,13 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             origin
           })
           const existing = next[entry.paneKey]
+          if (existing?.resumeTargetPaneKey) {
+            // Periodic/quit capture is not provider confirmation and must not erase the fence.
+            continue
+          }
+          if (record) {
+            carryOverAutomaticResumeBlock(record, existing)
+          }
           // Why: a periodic timer must not downgrade a confirmed-quit shutdown snapshot; a live hook event supersedes it elsewhere.
           if (
             mode === 'periodic' &&
@@ -3260,6 +3373,20 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
 
     clearSleepingAgentSession: (paneKey) => clearSleepingAgentSessionsByPaneKey([paneKey]),
     clearSleepingAgentSessionsByPaneKey,
+    markSleepingAgentSessionExited: (paneKey) => {
+      set((s) => {
+        const record = s.sleepingAgentSessionsByPaneKey[paneKey]
+        if (!record || record.requiresManualResume) {
+          return s
+        }
+        return {
+          sleepingAgentSessionsByPaneKey: {
+            ...s.sleepingAgentSessionsByPaneKey,
+            [paneKey]: { ...record, requiresManualResume: true }
+          }
+        }
+      })
+    },
     setSleepingAgentAutomaticResumeBlocked: (paneKey, blocked) => {
       set((s) => {
         const current = s.sleepingAgentSessionsByPaneKey[paneKey]

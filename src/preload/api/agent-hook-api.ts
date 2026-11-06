@@ -35,7 +35,17 @@ export type HooksApi = {
   }) => Promise<void>
 }
 
+export type PaneForegroundReport = {
+  agent: string | null
+  shellForeground: boolean
+  routingRevoked?: boolean
+  observedAt?: number
+}
+
 export type AgentHooksApi = {
+  /** Fire-and-forget: the renderer's process-table foreground evidence for a pane, so main
+   *  resolves nested-hook identity with the same facts (null clears it). */
+  reportPaneForeground: (paneKey: string, evidence: PaneForegroundReport | null) => void
   claudeStatus: () => Promise<AgentHookInstallStatus>
   openClaudeStatus: () => Promise<AgentHookInstallStatus>
   codexStatus: () => Promise<AgentHookInstallStatus>

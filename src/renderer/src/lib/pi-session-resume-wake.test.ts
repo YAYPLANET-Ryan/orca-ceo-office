@@ -56,6 +56,10 @@ describe('Pi session wake', () => {
     expect(state.pendingStartupByTabId[resumedTab!.id]?.resumeProviderSession).toEqual(
       providerSession
     )
-    expect(state.sleepingAgentSessionsByPaneKey[record.paneKey]).toBeUndefined()
+    expect(state.sleepingAgentSessionsByPaneKey[record.paneKey]).toMatchObject({
+      providerSession,
+      requiresManualResume: true,
+      resumeTargetPaneKey: expect.stringMatching(new RegExp(`^${resumedTab!.id}:`))
+    })
   })
 })

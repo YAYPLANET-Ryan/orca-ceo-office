@@ -10,8 +10,10 @@ import { resumeSleepingAgentSessionsForWorktree } from './resume-sleeping-agent-
 import {
   getProviderSessionClaimKey,
   isPassiveCompletedHibernationEvidence,
-  recordPaneIsOwnedByPreservedPane
+  recordPaneIsOwnedByPreservedPane,
+  recordPaneIsRestorablePreservedPane
 } from './sleeping-agent-pane-ownership'
+import { claimInPlaceRestore } from './in-place-restore-claims'
 
 type BackgroundSleepingAgentWakeDispatcherOptions = {
   isWorkspaceSessionReady?: () => boolean
@@ -155,9 +157,15 @@ function getCanonicalPassiveWakeRecords(
  *      sleeping pane does not permanently mount every saved tab, and skips
  *      `restoreOnTabOpenOnly` records so an explicit workspace sleep is not
  *      undone wholesale by a phone opening the workspace;
- *  (c) resume the non-passive record classes (manual sleep of a still-working
- *      agent, `origin: 'quit'`) with navigation suppressed, skipping the
- *      claims from (a);
+ *  (b') background-mount the tabs of NON-passive records whose own pane is
+ *      still preserved and restorable (saved leaf PTY id / single-leaf tab),
+ *      so the session resumes in place; those claims are skipped in (c).
+ *      Why: launching them into a fresh tab left the original tab to
+ *      cold-restore a brand-new agent later (observed 2026-10-19), which read
+ *      as "my conversation was reset" while the resume sat in "Terminal N";
+ *  (c) resume the remaining non-passive record classes (manual sleep of a
+ *      still-working agent, `origin: 'quit'`) with navigation suppressed,
+ *      skipping the claims from (a) and (b');
  *  (d) background-mount the tabs (c) created — they are `activate: false`, so
  *      nothing else would mount them and their queued `--resume` startup
  *      would otherwise never reach a PTY.
@@ -201,6 +209,46 @@ export function wakeSleepingAgentsForWorktreeInBackground(worktreeId: string): v
       hasUntargetablePassiveRecord = true
     }
   }
+  const inPlaceClaimKeys = new Set<string>()
+  const ownershipState = useAppStore.getState()
+  for (const record of worktreeRecords) {
+    if (
+      isPassiveCompletedHibernationEvidence(record) ||
+      record.requiresManualResume ||
+      record.automaticResumeBlockedBy === 'legacy-orchestration-worker'
+    ) {
+      continue
+    }
+    const claimKey = getProviderSessionClaimKey(record)
+    if (wokenClaimKeys.has(claimKey) || inPlaceClaimKeys.has(claimKey)) {
+      continue
+    }
+    if (record.restoreOnTabOpenOnly === true) {
+      // Why: an explicit workspace sleep resumes only when its tab is opened; the
+      // generic sweep must not fork it into a fresh tab on a background wake.
+      inPlaceClaimKeys.add(claimKey)
+      continue
+    }
+    if (!recordPaneIsRestorablePreservedPane(record, ownershipState)) {
+      continue
+    }
+    const tabId = getSleepingRecordTabId(record)
+    if (!tabId) {
+      continue
+    }
+    passiveTabIds.add(tabId)
+    claimInPlaceRestore(record.paneKey, {
+      // Why: a mount that never cold-restores must not strand the session; once
+      // the claim lapses unreleased, the ordinary sweep recovers the record into
+      // a fresh tab, which is the pre-existing fallback for an unowned record.
+      onLapse: () =>
+        resumeSleepingAgentSessionsForWorktree(worktreeId, {
+          suppressNavigation: true,
+          onSessionLaunched: (launchedTabId) => dispatchBackgroundMount(worktreeId, [launchedTabId])
+        })
+    })
+    inPlaceClaimKeys.add(claimKey)
+  }
   if (passiveTabIds.size > 0 || hasUntargetablePassiveRecord) {
     // Why: a record whose tab cannot be resolved falls back to the untargeted
     // whole-worktree mount rather than silently never waking.
@@ -211,7 +259,10 @@ export function wakeSleepingAgentsForWorktreeInBackground(worktreeId: string): v
   }
   resumeSleepingAgentSessionsForWorktree(worktreeId, {
     suppressNavigation: true,
-    skipClaimKeys: wokenClaimKeys,
+    skipClaimKeys:
+      inPlaceClaimKeys.size > 0
+        ? new Set([...wokenClaimKeys, ...inPlaceClaimKeys])
+        : wokenClaimKeys,
     // Why: a mirror-parked sweep replays after this call returns, so each tab
     // must request its own mount instead of a batch collected here.
     onSessionLaunched: (tabId) => dispatchBackgroundMount(worktreeId, [tabId])

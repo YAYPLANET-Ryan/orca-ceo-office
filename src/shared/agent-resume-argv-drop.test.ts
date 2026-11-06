@@ -32,7 +32,11 @@ describe('dropAgentResumeArgvFromCommand', () => {
           agent: 'codex',
           providerSession: CODEX_SESSION
         })
-      ).toEqual({ status: 'dropped', command: 'codex' })
+      ).toEqual({
+        status: 'dropped',
+        // Why: the Codex --no-daemon contract applies to native Windows launches only.
+        command: platform === 'win32' ? "codex '--no-daemon'" : 'codex'
+      })
     }
   })
 

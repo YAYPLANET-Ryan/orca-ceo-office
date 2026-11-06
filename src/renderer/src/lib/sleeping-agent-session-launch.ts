@@ -20,7 +20,7 @@ export type ResumeSleepingAgentSessionsOptions = {
   suppressNavigation?: boolean
   /** Provider-session claim keys already woken in place by mounted panes
    *  (WAKE_HIBERNATED_AGENTS_WORKTREE_EVENT). Their sleeping records are
-   *  cleared only after the in-place spawn succeeds, so the generic resume
+   *  retained until the provider confirms recovery, so the generic resume
    *  must neither launch nor clear them here. */
   skipClaimKeys?: ReadonlySet<string>
   /** Called with the tab id of each freshly launched resume tab, so
@@ -67,6 +67,14 @@ export function launchSleepingAgentSession(
   options?: ResumeSleepingAgentSessionsOptions
 ): boolean {
   const state = useAppStore.getState()
+  // A prior submission may still be running on its execution host, even when
+  // the renderer lost every ephemeral claim. Recovery continues in that pane.
+  if (
+    record.resumeTargetPaneKey ||
+    state.sleepingAgentSessionsByPaneKey[record.paneKey] !== record
+  ) {
+    return false
+  }
   const launchConfig = record.launchConfig
   const resumeTarget = getResumeLaunchTarget(record.worktreeId)
   const startupPlan = buildAgentResumeStartupPlan({
@@ -86,7 +94,8 @@ export function launchSleepingAgentSession(
       ? { ompResumeFilePath: launchConfig.ompResumeFilePath }
       : {}),
     platform: resumeTarget.platform,
-    shell: resumeTarget.shell
+    shell: resumeTarget.shell,
+    isRemote: resumeTarget.isRemote
   })
   if (!startupPlan) {
     toast.error(
@@ -100,6 +109,7 @@ export function launchSleepingAgentSession(
 
   const tab = state.createTab(record.worktreeId, undefined, undefined, {
     launchAgent: record.agent,
+    recoveryRecord: { ...record, launchConfig: record.launchConfig ?? startupPlan.launchConfig },
     ...(options?.suppressNavigation ? { activate: false, recordInteraction: false } : {})
   })
   state.queueTabStartupCommand(tab.id, {
@@ -112,7 +122,8 @@ export function launchSleepingAgentSession(
     ...(startupPlan.startupCommandDelivery
       ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
       : {}),
-    showSessionRestoredBanner: true,
+    // Delivery is not confirmation that the original provider session resumed.
+    showSessionRestoredBanner: false,
     telemetry: {
       agent_kind: tuiAgentToAgentKind(record.agent),
       launch_source: 'sidebar',
@@ -124,7 +135,7 @@ export function launchSleepingAgentSession(
     launchAgent: record.agent,
     providerSession: record.providerSession
   })
-  state.clearSleepingAgentSession(record.paneKey)
+  // Keep the durable record until a provider confirms recovery; queuing is not success.
   if (!options?.suppressNavigation) {
     state.setActiveTabType('terminal')
   }

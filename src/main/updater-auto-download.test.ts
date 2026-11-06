@@ -3,9 +3,14 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const { autoUpdaterMock, moduleFactories, resetUpdaterMocks } = await vi.hoisted(async () =>
-  (await import('./updater-test-harness')).createUpdaterMocks()
-)
+const {
+  appMock,
+  autoUpdaterMock,
+  moduleFactories,
+  resetUpdaterMocks,
+  chooseLocalBuildMock,
+  fetchNewerReleaseTagsMock
+} = await vi.hoisted(async () => (await import('./updater-test-harness')).createUpdaterMocks())
 
 const originalResourcesPath = process.resourcesPath
 let resourcesDir: string | null = null
@@ -70,4 +75,46 @@ describe('updater auto-download policy', () => {
 
     expect(autoUpdaterMock.autoDownload).toBe(false)
   })
+
+  it.each(['upstream', 'ceo', 'missing', 'corrupt'])(
+    'keeps CEO builds manual-only even with %s updater configuration',
+    async (config) => {
+      useUpdateRepository(config === 'ceo' ? 'YAYPLANET-Ryan' : 'stablyai', 'orca')
+      if (config === 'missing') {
+        rmSync(join(resourcesDir!, 'app-update.yml'))
+      }
+      if (config === 'corrupt') {
+        writeFileSync(join(resourcesDir!, 'app-update.yml'), '[broken')
+      }
+      appMock.getVersion.mockReturnValue('1.4.191-ceo.20261026.1')
+      const updater = await import('./updater')
+      const send = vi.fn()
+      const beforeQuit = vi.fn()
+      updater.setupAutoUpdater({ webContents: { send } } as never, { onBeforeQuit: beforeQuit })
+      updater.checkForUpdates()
+      updater.checkForUpdatesFromMenu()
+      updater.checkForUpdatesFromMenu({ localBuild: true })
+      updater.checkForUpdatesFromMenu({ channel: 'stable', targetTag: 'v1.4.240' })
+      updater.downloadUpdate()
+      updater.quitAndInstall()
+      await expect(updater.listAvailableReleaseBuilds('stable')).rejects.toThrow(
+        'verified CEO installer'
+      )
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(updater.getUpdateStatus()).toMatchObject({
+        state: 'error',
+        message: expect.stringContaining('verified CEO installer')
+      })
+      expect(autoUpdaterMock.setFeedURL).not.toHaveBeenCalled()
+      expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled()
+      expect(autoUpdaterMock.downloadUpdate).not.toHaveBeenCalled()
+      expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled()
+      expect(autoUpdaterMock.on).not.toHaveBeenCalled()
+      expect(chooseLocalBuildMock).not.toHaveBeenCalled()
+      expect(fetchNewerReleaseTagsMock).not.toHaveBeenCalled()
+      expect(beforeQuit).not.toHaveBeenCalled()
+      expect(appMock.quit).not.toHaveBeenCalled()
+      expect(updater.getRemoteServerUpdateSupport().automatic).toBe(false)
+    }
+  )
 })

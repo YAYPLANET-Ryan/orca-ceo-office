@@ -15,6 +15,216 @@ function makePiCompatibleProviderSession(agent: 'pi' | 'omp' | 'prime-agent') {
   return agent === 'omp' ? session : { ...session, transcriptPath: `/tmp/${agent}-session-1.jsonl` }
 }
 
+describe('nested hooks under a foreground parent', () => {
+  it('keeps an idle Claude pane and its session when codex exec posts hooks from inside it', () => {
+    const store = createTestStore()
+    const claudeSession = { key: 'session_id' as const, id: 'claude-parent' }
+    store
+      .getState()
+      .setPaneForegroundAgent('tab-1:leaf-1', { agent: 'claude', shellForeground: false })
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'done', prompt: 'idle at prompt', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 10, stateStartedAt: 10 },
+        undefined,
+        { providerSession: claudeSession }
+      )
+
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'codex exec from a Claude tool call', agentType: 'codex' },
+        'Codex',
+        { updatedAt: 20, stateStartedAt: 20 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'codex-child' } }
+      )
+
+    const entry = store.getState().agentStatusByPaneKey['tab-1:leaf-1']
+    expect(entry?.agentType).toBe('claude')
+    expect(entry?.providerSession).toEqual(claudeSession)
+  })
+
+  it('does not trust revoked foreground evidence to keep a stale identity', () => {
+    const store = createTestStore()
+    store.getState().setPaneForegroundAgent('tab-1:leaf-1', {
+      agent: 'claude',
+      shellForeground: false,
+      routingRevoked: true
+    })
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'done', prompt: 'idle at prompt', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 10, stateStartedAt: 10 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'claude-parent' } }
+      )
+
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'codex after a crashed claude', agentType: 'codex' },
+        'Codex',
+        { updatedAt: 20, stateStartedAt: 20 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'codex-new' } }
+      )
+
+    const entry = store.getState().agentStatusByPaneKey['tab-1:leaf-1']
+    expect(entry?.agentType).toBe('codex')
+    expect(entry?.providerSession).toEqual({ key: 'session_id', id: 'codex-new' })
+  })
+
+  it("ignores a shell return observed before the parent's last hook, and revoked shell evidence", () => {
+    for (const evidence of [
+      { entry: { agent: null, shellForeground: true }, observedAt: 5 },
+      { entry: { agent: null, shellForeground: true, routingRevoked: true }, observedAt: 15 }
+    ]) {
+      const store = createTestStore()
+      store.getState().setPaneForegroundAgent('tab-1:leaf-1', evidence.entry, {
+        observedAt: evidence.observedAt
+      })
+      store
+        .getState()
+        .setAgentStatus(
+          'tab-1:leaf-1',
+          { state: 'working', prompt: 'claude turn', agentType: 'claude' },
+          'Claude',
+          { updatedAt: 10, stateStartedAt: 10 },
+          undefined,
+          { providerSession: { key: 'session_id', id: 'claude-parent' } }
+        )
+      store.getState().setAgentStatus(
+        'tab-1:leaf-1',
+        {
+          state: 'working',
+          prompt: 'codex exec from the active claude turn',
+          agentType: 'codex'
+        },
+        'Codex',
+        { updatedAt: 20, stateStartedAt: 20 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'codex-child' } }
+      )
+      // Why: a stale or revoked shell return must not hand an active parent's pane
+      // to its nested child; the parent turn rule still protects it.
+      const entry = store.getState().agentStatusByPaneKey['tab-1:leaf-1']
+      expect(entry?.agentType).toBe('claude')
+      expect(entry?.providerSession).toEqual({ key: 'session_id', id: 'claude-parent' })
+    }
+  })
+
+  it('applies the identity main resolved instead of resolving again from local evidence', () => {
+    const store = createTestStore()
+    store
+      .getState()
+      .setPaneForegroundAgent('tab-1:leaf-1', { agent: 'claude', shellForeground: false })
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'claude turn', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 10, stateStartedAt: 10 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'claude-parent' } }
+      )
+    // Why: locally this would be a nested child (active parent, Claude foreground);
+    // main saw the shell return in between and ruled a takeover. Its verdict wins.
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'codex after claude exited', agentType: 'codex' },
+        'Codex',
+        { updatedAt: 20, stateStartedAt: 20 },
+        undefined,
+        {
+          providerSession: { key: 'session_id', id: 'codex-new' },
+          resolvedIdentity: { agentType: 'codex', inheritedFromActivePane: false }
+        }
+      )
+
+    const entry = store.getState().agentStatusByPaneKey['tab-1:leaf-1']
+    expect(entry?.agentType).toBe('codex')
+    expect(entry?.providerSession).toEqual({ key: 'session_id', id: 'codex-new' })
+  })
+
+  it('takes the provider session main supplied with an inherited verdict, not its own stale row', () => {
+    const store = createTestStore()
+    // Why: this store believes a fresh Codex/B owns the pane; main (which holds Claude/A)
+    // ruled the next Claude event inherited and already substituted A for it.
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'codex turn', agentType: 'codex' },
+        'Codex',
+        { updatedAt: 10, stateStartedAt: 10 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'codex-b' } }
+      )
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'claude turn', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 20, stateStartedAt: 20 },
+        undefined,
+        {
+          providerSession: { key: 'session_id', id: 'claude-a' },
+          resolvedIdentity: { agentType: 'claude', inheritedFromActivePane: true }
+        }
+      )
+
+    const entry = store.getState().agentStatusByPaneKey['tab-1:leaf-1']
+    expect(entry?.agentType).toBe('claude')
+    expect(entry?.providerSession).toEqual({ key: 'session_id', id: 'claude-a' })
+  })
+
+  it('lets a new agent take the pane once the shell foreground proves the parent exited', () => {
+    const store = createTestStore()
+    store
+      .getState()
+      .setPaneForegroundAgent('tab-1:leaf-1', { agent: 'claude', shellForeground: false })
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'done', prompt: 'idle at prompt', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 10, stateStartedAt: 10 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'claude-parent' } }
+      )
+    store.getState().setPaneForegroundAgent('tab-1:leaf-1', { agent: null, shellForeground: true })
+
+    store
+      .getState()
+      .setAgentStatus(
+        'tab-1:leaf-1',
+        { state: 'working', prompt: 'fresh codex in the same pane', agentType: 'codex' },
+        'Codex',
+        { updatedAt: 20, stateStartedAt: 20 },
+        undefined,
+        { providerSession: { key: 'session_id', id: 'codex-new' } }
+      )
+
+    const entry = store.getState().agentStatusByPaneKey['tab-1:leaf-1']
+    expect(entry?.agentType).toBe('codex')
+    expect(entry?.providerSession).toEqual({ key: 'session_id', id: 'codex-new' })
+  })
+})
+
 describe('recordAgentProviderSession', () => {
   it('preserves the root session while a child permission hook moves Codex to waiting', () => {
     const store = createTestStore()

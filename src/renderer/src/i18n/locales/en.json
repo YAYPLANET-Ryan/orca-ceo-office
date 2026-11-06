@@ -1,4 +1,21 @@
 {
+  "sessionRecovery": {
+    "pendingHere": "Recovery is not confirmed. Your conversation is saved; you can retry here when the terminal is ready.",
+    "pendingLabel": "Recovery needs checking",
+    "missingTarget": "The recovery pane is unavailable. The saved conversation is retained. Its previous execution must be checked before starting it again.",
+    "pending": "Recovery is not confirmed. Your conversation is saved; continue in its recovery tab.",
+    "context": "Last saved context",
+    "contextNote": "Saved excerpts, not a complete handoff. Check the task checkpoint before continuing work.",
+    "uncertain": "Delivery could not be confirmed. Check the terminal before retrying.",
+    "submitted": "Resume requested; waiting for the agent.",
+    "changed": "Terminal input changed. Finish or cancel the command before resuming.",
+    "unavailable": "Cannot safely resume here yet. Your saved conversation is retained.",
+    "ready": "Agent exited. Your conversation is saved.",
+    "continue": "Continue conversation",
+    "savedTabs": "Saved conversations",
+    "fold": "Fold ended agent tabs",
+    "showAll": "Show all tabs"
+  },
   "app": {
     "recoverableError": {
       "rootTitle": "Orca hit a renderer error.",
@@ -3053,7 +3070,8 @@
             "cc6d997c65": "Restart the terminal daemon from here to clear stale daemon state.",
             "7ee11bc0db": "Orca couldn't confirm whether this terminal's previous session is still running, so it left the session untouched. Reopen this pane to retry.",
             "e16012e31e": "The terminal daemon that owned this session exited, so the session and its scrollback could not be recovered. Open a new terminal to continue.",
-            "sessionUnavailable": "Orca couldn't reattach to this pane's terminal session on the host. Open a new terminal to continue."
+            "sessionUnavailable": "Orca couldn't reattach to this pane's terminal session on the host. Open a new terminal to continue.",
+            "ownerChanged": "The terminal connection changed while Orca was attaching to this pane. Reopen the pane to retry. If it keeps happening, report the error with the details below."
           },
           "TerminalProcessExitOverlay": {
             "capacityTitle": "Git Bash console limit reached",

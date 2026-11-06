@@ -10,7 +10,143 @@ import {
   tokenizeStartupCommand,
   type AgentStartupShell
 } from './tui-agent-startup-shell'
+import { hasRemotingWrapperBefore, locateAgentExecutable } from './agent-launch-executable'
 import type { TuiAgent } from './tui-agent'
+
+/** True when the contract `launchArgs` apply: a native Windows host launch.
+ * Why: this custom build only certifies the pinned Codex CLI on the Windows
+ * host. SSH remotes and WSL run a CLI of unknown version, where an unsupported
+ * flag would stop the agent from starting at all; other host platforms keep
+ * upstream behavior until their CLI versions are verified. */
+export function launchArgsApply(args: { platform: NodeJS.Platform; isRemote?: boolean }): boolean {
+  return args.platform === 'win32' && !args.isRemote
+}
+
+/** Applies the launch contract of whichever agent a user-authored command runs
+ * (quick commands, CLI `--command`, pasted lines, sequenced startup). Returns
+ * the command unchanged when no contract agent executable is located. */
+export function applyAgentLaunchArgsToCustomCommand(
+  command: string,
+  shell: AgentStartupShell,
+  host: { platform: NodeJS.Platform; isRemote?: boolean }
+): string {
+  if (!launchArgsApply(host) || !command.trim()) {
+    return command
+  }
+  const tokenized = tokenizeStartupCommand(command, shell)
+  if (!tokenized.ok) {
+    return command
+  }
+  for (const agent of Object.keys(TUI_AGENT_CONFIG) as TuiAgent[]) {
+    if (!TUI_AGENT_CONFIG[agent].launchArgs?.length) {
+      continue
+    }
+    if (locateAgentExecutable(agent, command, tokenized.tokens, tokenized.spans, shell)) {
+      return appendAgentLaunchArgs(agent, command, shell)
+    }
+  }
+  return command
+}
+
+const BARE_ARG = /^[A-Za-z0-9_.=:/-]+$/
+
+/** Inserts the agent's contract `launchArgs` (tui-agent-config.ts) unless the
+ * command already carries each of them as its own option token. Used for the
+ * fresh launch base and again at resume time, because a command captured before
+ * the contract existed (or a user override) may lack them.
+ *
+ * Placement: the args belong to the agent executable, so they are inserted
+ * right after it — in command position, behind a local shell wrapper, or as
+ * bare words inside the wrapper's one quoted payload token — and tokens after
+ * a `--` terminator are positional and never count as the flag being present.
+ * Whenever the executable cannot be located unambiguously (an unparseable
+ * command, a remoting wrapper, a Windows token that diverges from the shell's
+ * own parse, an ambiguous quoted payload) the command is returned unchanged:
+ * an appended flag can land in another command of a compound line
+ * (`… && echo done "--no-daemon"`), so an unprotected launch is the only safe
+ * fallback. */
+export function appendAgentLaunchArgs(
+  agent: TuiAgent,
+  command: string,
+  shell: AgentStartupShell,
+  options: { skip?: boolean } = {}
+): string {
+  const launchArgs = TUI_AGENT_CONFIG[agent].launchArgs
+  if (!launchArgs?.length || options.skip) {
+    return command
+  }
+  const quoted = (args: readonly string[]) =>
+    args.map((arg) => quoteStartupArg(arg, shell)).join(' ')
+  const tokenized = tokenizeStartupCommand(command, shell)
+  if (!tokenized.ok) {
+    return command
+  }
+  const { tokens, spans } = tokenized
+  const location = locateAgentExecutable(agent, command, tokens, spans, shell)
+  if (!location) {
+    return command
+  }
+  if (hasRemotingWrapperBefore(tokens, shell, location.index)) {
+    // Why: `wsl codex` / `ssh host codex` run a CLI whose version this host cannot vouch for.
+    return command
+  }
+  let optionTokens: string[]
+  if (location.scriptArgument) {
+    // Why: only the script's own words reach the agent; a later token is the
+    // script's `$0`, so it never counts as the flag being present.
+    optionTokens = [tokens[location.index]]
+  } else if (location.insidePayload) {
+    const span = spans[location.index]
+    const words = command
+      .slice(span.start, span.end)
+      .replace(/^["']|["']$/g, '')
+      .split(/\s+/)
+    const terminator = words.indexOf('--', 1)
+    optionTokens = terminator === -1 ? words : words.slice(0, terminator)
+  } else {
+    const terminatorIndex = tokens.indexOf('--', location.index + 1)
+    optionTokens =
+      terminatorIndex === -1
+        ? tokens.slice(location.index)
+        : tokens.slice(location.index, terminatorIndex)
+  }
+  const missing = launchArgs.filter((arg) => !optionTokens.includes(arg))
+  if (missing.length === 0) {
+    return command
+  }
+  // Why: a Windows token that diverges from the shell's own parse up to the
+  // executable falls back to appending, except PowerShell's leading call
+  // operator which the tokenizer models.
+  const diverges = spans
+    .slice(0, location.index + 1)
+    .some(
+      (span, index) =>
+        span.divergesFromShell && !(shell === 'powershell' && index === 0 && tokens[0] === '&')
+    )
+  if (diverges) {
+    return command
+  }
+  if (location.scriptArgument) {
+    // Why: `bash -c codex` runs the token as the script; a further token would be
+    // the script's `$0`, so the script itself is rewritten to carry the args.
+    if (!missing.every((arg) => BARE_ARG.test(arg))) {
+      return command
+    }
+    const span = spans[location.index]
+    const script = quoteStartupArg(`${tokens[location.index]} ${missing.join(' ')}`, shell)
+    return `${command.slice(0, span.start)}${script}${command.slice(span.end)}`
+  }
+  if (location.insidePayload) {
+    // Why: inside the wrapper's quoted payload the inner shell sees the words
+    // verbatim, so only quote-free args can be placed there; anything else is
+    // appended outside, where it is harmless.
+    if (!missing.every((arg) => BARE_ARG.test(arg))) {
+      return `${command} ${quoted(missing)}`
+    }
+    return `${command.slice(0, location.insertAt)} ${missing.join(' ')}${command.slice(location.insertAt)}`
+  }
+  return `${command.slice(0, location.insertAt)} ${quoted(missing)}${command.slice(location.insertAt)}`
+}
 
 export type ResolvedAgentLaunchCommand =
   | {
@@ -32,11 +168,17 @@ export function resolveAgentLaunchCommand(args: {
   isRemote?: boolean
 }): ResolvedAgentLaunchCommand {
   const override = args.cmdOverrides[args.agent]
-  const command =
+  // Why: contract args ride in the base command (not the picker/session-option
+  // suffix) so the command captured for resume keeps them too.
+  const command = appendAgentLaunchArgs(
+    args.agent,
     override ||
-    getTuiAgentLaunchCommand(TUI_AGENT_CONFIG[args.agent], args.platform, {
-      isRemote: args.isRemote
-    })
+      getTuiAgentLaunchCommand(TUI_AGENT_CONFIG[args.agent], args.platform, {
+        isRemote: args.isRemote
+      }),
+    args.shell,
+    { skip: !launchArgsApply({ platform: args.platform, isRemote: args.isRemote }) }
+  )
   const suffix = planAgentCliArgsSuffix(args.agentArgs, args.shell)
   if (!suffix.ok) {
     return suffix

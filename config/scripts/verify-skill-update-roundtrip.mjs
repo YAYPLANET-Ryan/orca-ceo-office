@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { collectPackageFiles, packageDigest } from './generate-skill-bundle-manifest.mjs'
+import { resolveHistoricalSkillRef } from './skill-update-history.mjs'
 
 function option(name) {
   return process.argv.find((value) => value.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -97,9 +98,13 @@ async function materializePackage(name, tag, destination) {
   }
 }
 
-async function seedPlacement(name, tag) {
+async function seedPlacement(name, historical) {
+  const ref = resolveHistoricalSkillRef(name, historical.tag, historical.snapshot.gitTreeSha)
   const canonical = path.join(home, '.agents', 'skills', name)
-  await materializePackage(name, tag, canonical)
+  await materializePackage(name, ref, canonical)
+  if ((await packageDigestAt(canonical)) !== historical.snapshot.packageDigest) {
+    throw new Error(`Historical ${name} does not match its registered package digest`)
+  }
   const providerRoot = path.join(home, '.claude', 'skills')
   const provider = path.join(providerRoot, name)
   await mkdir(providerRoot, { recursive: true })
@@ -166,8 +171,8 @@ try {
   await installFakeAgentCommands()
   await mkdir(path.join(home, '.codex'), { recursive: true })
   await mkdir(path.join(home, '.claude'), { recursive: true })
-  await seedPlacement(targetName, targetHistorical.tag)
-  await seedPlacement(controlName, controlHistorical.tag)
+  await seedPlacement(targetName, targetHistorical)
+  await seedPlacement(controlName, controlHistorical)
   const targetProvider = path.join(home, '.claude', 'skills', targetName)
   const controlCanonical = path.join(home, '.agents', 'skills', controlName)
   const controlProvider = path.join(home, '.claude', 'skills', controlName)

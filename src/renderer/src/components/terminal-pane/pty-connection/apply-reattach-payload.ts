@@ -17,6 +17,7 @@ import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { restoredSnapshotPaintsPrintableContent } from '../restored-snapshot-coverage'
 import { resolveSshReconnectModelPaint } from './resolve-ssh-reconnect-model-paint'
 
+import { releaseInPlaceRestore } from '@/lib/in-place-restore-claims'
 import type { ReattachPayloadContext } from './reattach-payload-context'
 import type { ReattachPayloadSession } from './reattach-payload-session'
 
@@ -32,6 +33,10 @@ export function createReattachPayloadHandlers(
       return
     }
     if (ctx.connectResult?.snapshot) {
+      // Why: a live reattach does not consume the sleeping record through a
+      // spawn; a background in-place claim marked in flight for this pane would
+      // otherwise stay in flight forever. The live PTY owns the pane from here.
+      releaseInPlaceRestore(session.cacheKey)
       const snapshotPrefixAnsi = ctx.connectResult.snapshotPrefixAnsi
       const snapshotFrameAnsi = ctx.connectResult.snapshotFrameAnsi
       const snapshotFrameRestoreAnsi = ctx.connectResult.snapshotFrameRestoreAnsi
@@ -111,6 +116,7 @@ export function createReattachPayloadHandlers(
       ctx.prefetchedParkModelSnapshot ||
       ctx.reconnectMayUseModel
     ) {
+      releaseInPlaceRestore(session.cacheKey)
       // Why scoped to a park-reveal: the 100KiB relay tail loses scrollback the
       // model still holds, but an in-place reattach (network reconnect, wake,
       // reload) already has that replay in hand, so probing would only delay its
@@ -286,6 +292,10 @@ export function createReattachPayloadHandlers(
         session.clearSleepingRecordAfterColdRestoreSpawn(preparedStartup)
       } else if (ctx.coldRestoreAgentResumeRequired) {
         session.showSessionRestoredBanner('resume-required')
+        // Why: no resume could be prepared, so the background in-place claim must
+        // lapse now and let the sweep recover the record elsewhere (a null startup
+        // only releases the claim; there is no record to clear).
+        session.clearSleepingRecordAfterColdRestoreSpawn(null)
       }
       // Why: cold-restore spawned a fresh shell; reset mode bytes a crashed TUI (e.g. Claude's \e[?1004h) left in scrollback that no live TUI now consumes.
       session.writeReplayData(POST_REPLAY_MODE_RESET)
@@ -318,6 +328,9 @@ export function createReattachPayloadHandlers(
     if (!reattachPtyId) {
       return
     }
+    // Why: whatever the payload was, a PTY is live in this pane now; a background
+    // in-place claim marked in flight for it has nothing left to protect.
+    releaseInPlaceRestore(session.cacheKey)
     if (!getFitOverrideForPty(reattachPtyId)) {
       const gridPush = session.createReattachGridPush(ctx.attemptGeneration, reattachPtyId)
       const fit = safeFitAndThen(session.pane, 'reattach-pty-resize', gridPush.continuation, {

@@ -110,6 +110,7 @@ import { callRuntimeEnvironment } from './ipc/runtime-environment-transport-rout
 import { resolveEnvironment } from '../shared/runtime-environment-store'
 import { getPreferredPairingOffer } from '../shared/runtime-environments'
 import { OrcaRuntimeRpcServer } from './runtime/runtime-rpc'
+import { startDesktopWindowAndRpc } from './startup/desktop-window-rpc-startup'
 import {
   recordRuntimeRpcStartFailure,
   showRuntimeRpcStartupFailureDialog
@@ -551,7 +552,7 @@ if (isServeMode) {
   reserveServeStdoutForReadiness()
 }
 const desktopActivationGate = createServeDesktopActivationGate({
-  initialState: isServeMode ? 'initializing' : 'ready',
+  initialState: 'initializing',
   activateWindow: () => {
     // Why: an updater replacement must not resurrect the old app bundle.
     if (!isQuittingForUpdate()) {
@@ -1344,6 +1345,10 @@ async function prepareCodexSessionResumeForLaunch(args: {
 
 // Why: restore the window the close handler may have hidden to tray, or reopen it (dock-reactivation style) if fully torn down.
 function showMainWindowFromTray(): void {
+  if (desktopActivationGate.getState() === 'initializing') {
+    desktopActivationGate.requestActivation()
+    return
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) {
       mainWindow.restore()
@@ -1415,6 +1420,10 @@ function syncMacMenuBarIcon(showMenuBarIcon: boolean): Tray | null {
 }
 
 function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): BrowserWindow {
+  // Why: tray/second-instance activation may have created the window during async startup.
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return mainWindow
+  }
   logStartupMilestone('open-main-window-start')
   if (!store) {
     throw new Error('Store must be initialized before opening the main window')
@@ -1681,6 +1690,7 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
       promptInteractionKey,
       restoredUnconfirmed,
       observation,
+      resolvedIdentity,
       isReplay
     }) => {
       if (mainWindow?.isDestroyed()) {
@@ -1731,6 +1741,9 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
         ...(promptInteractionKey ? { promptInteractionKey } : {}),
         ...(restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
         ...(observation ? { observation } : {}),
+        // Why: the renderer applies this verdict instead of resolving the nested-hook
+        // identity again; dropping it here is how main and renderer diverged.
+        ...(resolvedIdentity ? { resolvedIdentity } : {}),
         ...(orchestration ? { orchestration } : {})
       }
       mainWindow?.webContents.send('agentStatus:set', statusEvent)
@@ -2755,6 +2768,8 @@ void app.whenReady().then(async () => {
     // those rows carry the provider session mobile native chat addresses transcripts
     // by — Pi publishes identity that way and would otherwise be unreachable.
     getAgentProviderSessionSnapshot: () => agentHookServer.getStatusSnapshot(),
+    recordAgentResumeCheckpoint: (checkpoint) =>
+      agentHookServer.recordRuntimeResumeIdentity(checkpoint),
     getAgentProviderSessionRowsForPane: (paneKey) =>
       agentHookServer.getStatusSnapshotForPane(paneKey),
     attestAgentHookCompatibilityAuthority: (candidate) =>
@@ -3269,7 +3284,9 @@ void app.whenReady().then(async () => {
     const desktopStartup = startWindowsDesktopBeforeShellPathReady({
       openWindow: () => openMainWindow({ revealOnDidFinishLoad: true }),
       shellPathReady,
-      startServices: startTerminalRuntimeStartupServices
+      startServices: startTerminalRuntimeStartupServices,
+      onWindowError: (error) =>
+        console.error('[startup] Early desktop window failed; retrying:', error)
     })
     desktopWindow = desktopStartup.window
     bindTerminalRuntimeStartupServices(desktopStartup.services)
@@ -3364,18 +3381,12 @@ void app.whenReady().then(async () => {
   if (!desktopRuntimeRpc) {
     throw new Error('runtime_rpc_unavailable')
   }
-  const [win, runtimeRpcStartResult] = await Promise.all([
-    Promise.resolve(desktopWindow ?? openMainWindow()),
-    shellPathReady
-      .then(() => desktopRuntimeRpc.start())
-      .then(
-        () => ({ ok: true as const }),
-        (error: unknown) => {
-          recordRuntimeRpcStartFailure(error)
-          return { ok: false as const, error }
-        }
-      )
-  ])
+  const { window: win, rpc: runtimeRpcStartResult } = await startDesktopWindowAndRpc({
+    openWindow: () =>
+      desktopWindow ?? openMainWindow({ revealOnDidFinishLoad: process.platform === 'win32' }),
+    startRpc: () => shellPathReady.then(() => desktopRuntimeRpc.start()),
+    onRpcError: recordRuntimeRpcStartFailure
+  }).finally(() => desktopActivationGate.markReady())
   if (!runtimeRpcStartResult.ok) {
     void showRuntimeRpcStartupFailureDialog(win, runtimeRpcStartResult.error)
   }

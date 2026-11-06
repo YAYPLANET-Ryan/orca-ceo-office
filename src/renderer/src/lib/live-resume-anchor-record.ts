@@ -59,5 +59,5 @@ export function isCompletedPiCompatibleAgentWithLiveRecoveryRecord(
 export function isAutomaticHibernationAllowed(
   record: SleepingAgentSessionRecord | undefined
 ): boolean {
-  return !record?.automaticResumeBlockedBy
+  return !record?.automaticResumeBlockedBy && !record?.requiresManualResume
 }

@@ -34,6 +34,7 @@ import {
   disarmUpdateInstallExitWatchdog
 } from './update-install-exit-watchdog'
 import { registerAutoUpdaterHandlers } from './updater-events'
+import { getCeoUpdateBlockReason } from './updater-ceo-policy'
 import { recordUpdaterLifecycle } from './updater-lifecycle-diagnostics'
 import { getLinuxRootPackageType } from './linux-update-package-type'
 import {
@@ -1512,9 +1513,21 @@ function retryPrereleaseFallbackAfterMissingManifest(
 }
 
 /** Returns false when the check was deferred instead of launched, so timer-driven callers can re-arm. */
+function blockCeoUpdate(userInitiated = false): boolean {
+  const message = getCeoUpdateBlockReason(app.getVersion())
+  if (!message) {
+    return false
+  }
+  sendStatus({ state: 'error', message, userInitiated })
+  return true
+}
+
 function runBackgroundUpdateCheck(
   nudgeId: string | null = getPersistedPendingUpdateNudgeId()
 ): boolean {
+  if (blockCeoUpdate()) {
+    return false
+  }
   // Why: a pinned dev jump owns the feed until it settles; a background check
   // would repoint it mid-flight and download the wrong build.
   if (
@@ -1588,6 +1601,9 @@ function enableIncludePrerelease(): void {
 
 /** Menu-triggered check — delegates feedback to renderer toasts via userInitiated flag */
 export function checkForUpdatesFromMenu(options?: UpdateCheckOptions): void {
+  if (blockCeoUpdate(true)) {
+    return
+  }
   if (!app.isPackaged || is.dev) {
     sendStatus({ state: 'not-available', userInitiated: true })
     return
@@ -1727,6 +1743,10 @@ async function checkForLocalBuildFromMenu(): Promise<void> {
 }
 
 export async function listAvailableReleaseBuilds(channel: ReleaseChannel): Promise<ReleaseBuild[]> {
+  const blocked = getCeoUpdateBlockReason(app.getVersion())
+  if (blocked) {
+    throw new Error(blocked)
+  }
   return listReleaseBuilds(channel)
 }
 
@@ -2032,6 +2052,9 @@ export async function showLinuxPackage(): Promise<void> {
 }
 
 export function quitAndInstall(): void {
+  if (blockCeoUpdate(true)) {
+    return
+  }
   if (
     localBuildSelectionInProgress ||
     pinnedBuildSelectionInProgress ||
@@ -2187,6 +2210,11 @@ export function setupAutoUpdater(
   updateInstallMode = opts?.installMode ?? 'interactive'
   lastInstallDeferralVersion = { download: null, install: null }
 
+  // Keep electron-updater uninitialized: a cached download must not install on quit either.
+  if (blockCeoUpdate()) {
+    return
+  }
+
   const serveHandoffFailure = getServeUpdateHandoffFailure()
   if (serveHandoffFailure) {
     recordUpdaterLifecycle(
@@ -2321,6 +2349,9 @@ export function setupAutoUpdater(
 }
 
 export function downloadUpdate(): void {
+  if (blockCeoUpdate(true)) {
+    return
+  }
   if (localBuildSelectionInProgress || pinnedBuildSelectionInProgress || downloadInFlight) {
     return
   }

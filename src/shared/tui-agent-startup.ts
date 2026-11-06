@@ -19,7 +19,7 @@ import { planHermesStartupQuery } from './hermes-startup-query'
 import { inlineAgentDraftFitsPlatform } from './agent-draft-platform-limit'
 import type { TuiAgent } from './tui-agent'
 import type { SessionOptionValue } from './native-chat-session-options'
-import { resolveAgentLaunchCommand } from './tui-agent-launch-command'
+import { launchArgsApply, resolveAgentLaunchCommand } from './tui-agent-launch-command'
 import { buildAgentResumeLaunchCommand } from './agent-resume-launch-command'
 
 export type AgentStartupPlan = {
@@ -225,7 +225,9 @@ export function buildAgentResumeStartupPlan(args: {
   })
   return {
     agent: args.agent,
-    launchCommand: buildAgentResumeLaunchCommand(args.agent, baseCommand.command, argv, shell),
+    launchCommand: buildAgentResumeLaunchCommand(args.agent, baseCommand.command, argv, shell, {
+      skipLaunchArgs: !launchArgsApply({ platform: args.platform, isRemote: args.isRemote })
+    }),
     expectedProcess: config.expectedProcess,
     followupPrompt: null,
     launchConfig,

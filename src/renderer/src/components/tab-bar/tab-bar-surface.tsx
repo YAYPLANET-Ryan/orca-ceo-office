@@ -1,4 +1,5 @@
 import React from 'react'
+import { FoldedConversationTabs } from './FoldedConversationTabs'
 import { SortableContext } from '@dnd-kit/sortable'
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
@@ -184,6 +185,13 @@ export function renderTabBarSurface({
           <TabStripScrollIndicator metrics={tabStripOverflowState} />
         </div>
       </SortableContext>
+      <FoldedConversationTabs
+        worktreeId={worktreeId}
+        items={itemProjection.foldedItems}
+        showAll={itemProjection.showAll}
+        onShowAll={itemProjection.setShowAll}
+        onActivate={props.onActivate}
+      />
       {tabStripOverflowState.hasOverflow ? (
         <Tooltip>
           <TooltipTrigger asChild>

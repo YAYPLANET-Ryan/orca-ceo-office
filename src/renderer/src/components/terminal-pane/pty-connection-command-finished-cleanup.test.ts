@@ -388,6 +388,81 @@ describe('connectPanePty', () => {
     expect(window.api.agentStatus.reconcileEndedProcess).toHaveBeenCalledWith(paneKey)
   })
 
+  it.each([0, 1, 130, 137, null])(
+    'preserves the exact working conversation after confirmed exit %s',
+    async (exitCode) => {
+      vi.useFakeTimers()
+      const { connectPanePty } = await import('./pty-connection')
+      const { createTestStore, makeTab } = await import('@/store/slices/store-test-helpers')
+      vi.mocked(window.api.pty.confirmForegroundProcess).mockResolvedValue('powershell.exe')
+      const dataCallbackRef: { current: ((data: string) => void) | null } = { current: null }
+      const transport = createMockTransport('pty-continuity-exit')
+      transport.connect.mockImplementation(
+        async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+          dataCallbackRef.current = callbacks.onData ?? null
+          return { id: 'pty-continuity-exit' }
+        }
+      )
+      transportFactoryQueue.push(transport)
+      const paneKey = makePaneKey('tab-1', LEAF_1)
+      connectPanePty(
+        createPane(1) as never,
+        createManager(1) as never,
+        createDeps({ isVisibleRef: { current: false } }) as never
+      )
+      await vi.advanceTimersByTimeAsync(20)
+      await flushAsyncTicks()
+
+      const realStore = createTestStore()
+      const providerSession = { key: 'session_id' as const, id: 'synthetic-exit-session' }
+      const launchConfig = {
+        agentArgs: '--model test-model -c model_reasoning_effort="medium"',
+        agentEnv: {}
+      }
+      realStore.setState({
+        tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] }
+      })
+      realStore.getState().registerAgentLaunchConfig(paneKey, launchConfig, {
+        agentType: 'codex',
+        launchToken: 'test-launch',
+        tabId: 'tab-1',
+        leafId: LEAF_1
+      })
+      realStore
+        .getState()
+        .setAgentStatus(
+          paneKey,
+          { state: 'working', agentType: 'codex', prompt: 'synthetic work' },
+          undefined,
+          undefined,
+          { tabId: 'tab-1', worktreeId: 'wt-1' },
+          { providerSession, launchToken: 'test-launch' }
+        )
+      mockStoreState.agentStatusByPaneKey = realStore.getState().agentStatusByPaneKey
+      mockStoreState.sleepingAgentSessionsByPaneKey =
+        realStore.getState().sleepingAgentSessionsByPaneKey
+      mockStoreState.markSleepingAgentSessionExited.mockImplementation((key: string) => {
+        realStore.getState().markSleepingAgentSessionExited(key)
+        mockStoreState.sleepingAgentSessionsByPaneKey =
+          realStore.getState().sleepingAgentSessionsByPaneKey
+      })
+      mockStoreState.dropAgentStatus.mockImplementation((key: string) => {
+        realStore.getState().dropAgentStatus(key)
+        mockStoreState.agentStatusByPaneKey = realStore.getState().agentStatusByPaneKey
+      })
+
+      dataCallbackRef.current?.(`\x1b]133;D${exitCode === null ? '' : `;${exitCode}`}\x07`)
+      await vi.advanceTimersByTimeAsync(350)
+      expect(realStore.getState().agentStatusByPaneKey[paneKey]).toBeUndefined()
+      expect(realStore.getState().sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
+        providerSession,
+        launchConfig,
+        requiresManualResume: true
+      })
+      expect(transport.sendInputAccepted).not.toHaveBeenCalled()
+    }
+  )
+
   it('does NOT reconcile when the process check could not confirm a shell', async () => {
     vi.useFakeTimers()
     const { connectPanePty } = await import('./pty-connection')
@@ -428,6 +503,7 @@ describe('connectPanePty', () => {
       shellForeground: false
     })
     expect(window.api.agentStatus.reconcileEndedProcess).not.toHaveBeenCalled()
+    expect(mockStoreState.markSleepingAgentSessionExited).not.toHaveBeenCalled()
   })
 
   it('disarms stale TUI modes in the emulator after a confirmed return to shell', async () => {

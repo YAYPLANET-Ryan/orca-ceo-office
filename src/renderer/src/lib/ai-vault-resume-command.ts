@@ -170,6 +170,8 @@ function buildAiVaultResumeForWorktree(
       },
       platform,
       shell: liveShell,
+      // Why: a session stored by a remote execution host resumes there; local CLI contracts do not apply.
+      isRemote: !isLocalSession,
       agentArgs: resolveTuiAgentLaunchArgs(
         args.session.agent,
         args.state.settings?.agentDefaultArgs

@@ -64,8 +64,8 @@ jobs:
       - name: Verify CEO customization and session preservation
         shell: pwsh
         run: |
-          node --test config/scripts/custom-windows-release-workflow-contract.test.mjs
           pnpm exec vitest run --config config/vitest.config.ts `
+            config/scripts/custom-windows-release-workflow-contract.test.mjs `
             src/renderer/src/components/ceo-office `
             src/renderer/src/components/sidebar/WorktreeCardAgents.activation.test.tsx `
             src/renderer/src/components/sidebar/worktree-title-derived-agent-rows.test.ts `

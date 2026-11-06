@@ -66,6 +66,33 @@ describe('isSshReconnectOwnedTerminalError', () => {
 })
 
 describe('humanizeTerminalError', () => {
+  it('explains raw and IPC-wrapped owner changes without claiming the session was lost', () => {
+    for (const error of [
+      'terminal_pane_owner_changed',
+      "Error invoking remote method 'pty:spawn': Error: terminal_pane_owner_changed"
+    ]) {
+      const message = humanizeTerminalError(error)
+      expect(message).not.toContain('terminal_pane_owner_changed')
+      expect(message).toContain('Reopen the pane to retry')
+      expect(message).not.toContain('session exited')
+      expect(shouldOfferDaemonRestart(error)).toBe(false)
+    }
+  })
+
+  it('explains repeated owner changes and preserves unrelated errors', () => {
+    const message = humanizeTerminalError(
+      'terminal_pane_owner_changed\nPaste failed.\nError: terminal_pane_owner_changed'
+    )
+    expect(message).not.toContain('terminal_pane_owner_changed')
+    expect(message).toContain('\nPaste failed.\nError: ')
+    expect(message.match(/Reopen the pane to retry/g)).toHaveLength(2)
+  })
+
+  it('does not rewrite longer identifiers containing the owner-changed marker', () => {
+    const error = 'prefix_terminal_pane_owner_changed terminal_pane_owner_changed_suffix'
+    expect(humanizeTerminalError(error)).toBe(error)
+  })
+
   it('replaces the pane-owner-unverified code with actionable copy', () => {
     const humanized = humanizeTerminalError('terminal_pane_owner_unverified')
     expect(humanized).not.toContain('terminal_pane_owner_unverified')

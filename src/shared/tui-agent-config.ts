@@ -48,6 +48,11 @@ export type TuiAgentConfig = {
   windowsInputRecordPasteNewline?: 'alt-enter' | 'csi-u'
   /** Ctrl+Enter encoding for agents that consume CSI-u without active kitty flags. */
   ctrlEnterEncoding?: 'csi-u'
+  /** Arguments every Orca launch of this agent must carry: default command, user
+   * command override, and cold-restore resume alike. Unlike agentArgs or session
+   * options they are part of the agent contract, so they are appended whenever
+   * the command does not already contain them (see tui-agent-launch-command.ts). */
+  launchArgs?: readonly string[]
 }
 
 export const TUI_AGENT_CONFIG: Record<TuiAgent, TuiAgentConfig> = {
@@ -85,6 +90,13 @@ export const TUI_AGENT_CONFIG: Record<TuiAgent, TuiAgentConfig> = {
   codex: {
     detectCmd: 'codex',
     launchCmd: 'codex',
+    // Why: Codex 0.162+ runs a shared app-server daemon that executes the agent
+    // hooks itself. The daemon inherits ORCA_PANE_KEY from whichever pane
+    // started it, so every later pane's session was reported under that pane
+    // and the real panes never got a sleeping record to resume from after a
+    // reboot (2026-10-16). `--no-daemon` keeps hooks inside the pane's own
+    // process tree; Codex tolerates the flag twice.
+    launchArgs: ['--no-daemon'],
     expectedProcess: 'codex',
     promptInjectionMode: 'argv',
     windowsInputRecordPasteNewline: 'alt-enter',

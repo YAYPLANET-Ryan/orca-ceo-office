@@ -38,6 +38,10 @@ test('restores the exact file and live extra terminal after quit and relaunch @g
     const first = await session.launch()
     firstApp = first.app
     await waitForSessionReady(first.page)
+    // This golden flow uses English accessible names; do not inherit the OS locale.
+    await first.page.evaluate(async () => {
+      await window.__store!.getState().updateSettings({ uiLanguage: 'en' })
+    })
     const primaryWorktreeId = await attachRepoAndOpenTerminal(first.page, repoPath)
     await ensureTerminalVisible(first.page)
     await waitForActiveTerminalManager(first.page, 30_000)

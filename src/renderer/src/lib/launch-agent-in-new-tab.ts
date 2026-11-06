@@ -12,7 +12,11 @@ import {
 } from '@/lib/agent-launch-prompt-delivery'
 import { initialAgentTabViewModeProps } from '@/lib/native-chat-initial-view-mode'
 import { isNativeChatTranscriptLocalReadable } from '@/lib/native-chat-transcript-readability'
-import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import {
+  getExecutionHostIdForWorktree,
+  getRuntimeEnvironmentIdForWorktree
+} from '@/lib/worktree-runtime-owner'
+import { parseExecutionHostId } from '../../../shared/execution-host'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { isWebRuntimeSessionActive } from '@/runtime/web-runtime-session'
 import { launchAgentInWebHostTab } from '@/lib/launch-agent-web-host-tab'
@@ -95,7 +99,11 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
         )
       : CLIENT_PLATFORM)
   // Why: SSH remotes deploy the shim as plain `orca`, so skip the Linux-only `orca-ide` rename for remote launches.
-  const isRemote = repo ? repoIsRemote(repo) : false
+  // A paired remote execution host runs the agent off this machine too, so it is remote for the same reasons.
+  const executionHost = parseExecutionHostId(getExecutionHostIdForWorktree(store, worktreeId))
+  const isRemote =
+    (repo ? repoIsRemote(repo) : false) ||
+    (executionHost !== null && executionHost.kind !== 'local')
   const queuedShell = resolveLocalWindowsAgentStartupShell({
     platform: resolvedLaunchPlatform,
     isRemote,

@@ -332,7 +332,10 @@ describe('connectPanePty', () => {
       expect(deps.clearTabPtyId).toHaveBeenCalledWith('tab-1', 'restored-session')
       expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenCalledWith(2, 'restored-session')
       expect(deps.syncPanePtyLayoutBinding).toHaveBeenCalledWith(2, 'fresh-resume-pty')
-      expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledWith(paneKey)
+      expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+      expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
+        providerSession: { id: 'codex-session-1' }
+      })
       expect(window.api.pty.clearPendingPaneSerializer).toHaveBeenCalledWith(paneKey, 1)
     } finally {
       globalThis.setTimeout = originalSetTimeout
@@ -438,7 +441,7 @@ describe('connectPanePty', () => {
 
   it('quotes a cold-restore resume command for a cmd.exe Windows tab', async () => {
     await expect(runWindowsColdRestoreResume({ terminalWindowsShell: 'cmd.exe' })).resolves.toBe(
-      'codex "--dangerously-bypass-approvals-and-sandbox" "resume" "codex-session-1"'
+      'codex "--no-daemon" "--dangerously-bypass-approvals-and-sandbox" "resume" "codex-session-1"'
     )
   })
 
@@ -448,13 +451,17 @@ describe('connectPanePty', () => {
         terminalWindowsShell: 'powershell.exe',
         tabShellOverride: 'cmd.exe'
       })
-    ).resolves.toBe('codex "--dangerously-bypass-approvals-and-sandbox" "resume" "codex-session-1"')
+    ).resolves.toBe(
+      'codex "--no-daemon" "--dangerously-bypass-approvals-and-sandbox" "resume" "codex-session-1"'
+    )
   })
 
   it('keeps PowerShell quoting for a cold-restore resume on a PowerShell Windows tab', async () => {
     await expect(
       runWindowsColdRestoreResume({ terminalWindowsShell: 'powershell.exe' })
-    ).resolves.toBe("codex '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'")
+    ).resolves.toBe(
+      "codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'"
+    )
   })
 
   it('keeps a contentless reattach when the sleeping record represents a live session', async () => {

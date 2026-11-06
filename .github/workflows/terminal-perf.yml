@@ -51,7 +51,8 @@ on:
 jobs:
   terminal-perf:
     name: terminal scale perf
-    runs-on: ubuntu-latest
+    # Keep comparisons on the image family of the last passing baseline.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       NODE_OPTIONS: --max-old-space-size=4096

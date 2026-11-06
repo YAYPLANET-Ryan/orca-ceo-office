@@ -1,5 +1,4 @@
 import type { Socket } from 'node:net'
-import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { encodeNdjson } from './ndjson'
 import {
@@ -23,6 +22,7 @@ import {
 } from './daemon-client-ndjson-readers'
 import { writeNotifyWithSettlement } from './daemon-client-notify-settlement'
 import { requestDaemonRpc } from './daemon-client-rpc-request'
+import { connectWithHelloRetry, readDaemonToken } from './daemon-hello-retry'
 
 const CONNECT_TIMEOUT_MS = 5000
 const CONNECTION_ATTEMPT_WAIT_MS = CONNECT_TIMEOUT_MS * 4
@@ -105,23 +105,16 @@ export class DaemonClient {
     }
 
     const attemptGeneration = this.connectionAttemptGeneration
-    this.connectingPromise = this.doConnect(timeoutMs, attemptGeneration, sharedBudget)
+    this.connectingPromise = connectWithHelloRetry({
+      timeoutMs,
+      sharedBudget,
+      assertCurrent: () => this.assertConnectionAttemptCurrent(attemptGeneration),
+      connect: (budget, shared) => this.doConnect(budget, attemptGeneration, shared)
+    })
     try {
       await this.connectingPromise
     } finally {
       this.connectingPromise = null
-    }
-  }
-
-  // Why: a missing token must not preempt the connect that proves whether the endpoint is gone.
-  private readToken(): string {
-    try {
-      return readFileSync(this.tokenPath, 'utf-8').trim()
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
-        return ''
-      }
-      throw error
     }
   }
 
@@ -130,7 +123,7 @@ export class DaemonClient {
     attemptGeneration: number,
     sharedBudget: boolean
   ): Promise<void> {
-    const token = this.readToken()
+    const token = readDaemonToken(this.tokenPath)
     const deadlineMs = Date.now() + timeoutMs
     const remainingMs = (): number =>
       sharedBudget ? Math.max(1, deadlineMs - Date.now()) : timeoutMs

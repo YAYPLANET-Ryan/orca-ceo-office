@@ -193,6 +193,119 @@ describe('AgentHookServer ingestRemote', () => {
     )
   })
 
+  it('uses renderer foreground evidence so an idle parent keeps its identity and session in main too', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          providerSession: { key: 'session_id', id: 'claude-parent' },
+          payload: { state: 'done', prompt: 'idle claude', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+      server.recordPaneForeground(PANE, { agent: 'claude', shellForeground: false })
+      vi.setSystemTime(1_100)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          providerSession: { key: 'session_id', id: 'codex-child' },
+          payload: {
+            state: 'working',
+            prompt: 'codex exec from an idle claude',
+            agentType: 'codex'
+          }
+        },
+        'conn-1'
+      )
+
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: PANE,
+          agentType: 'claude',
+          providerSession: { key: 'session_id', id: 'claude-parent' },
+          // Why: the renderer applies this verdict verbatim instead of resolving again.
+          resolvedIdentity: { agentType: 'claude', inheritedFromActivePane: true }
+        })
+      ])
+
+      // Why: the shell returning is the proof the parent exited; the next agent takes over.
+      server.recordPaneForeground(PANE, { agent: null, shellForeground: true })
+      vi.setSystemTime(1_200)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          providerSession: { key: 'session_id', id: 'codex-new' },
+          payload: { state: 'working', prompt: 'fresh codex', agentType: 'codex' }
+        },
+        'conn-1'
+      )
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          agentType: 'codex',
+          providerSession: { key: 'session_id', id: 'codex-new' },
+          resolvedIdentity: { agentType: 'codex', inheritedFromActivePane: false }
+        })
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the parent provider session when a nested hook of another agent carries its own', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          providerSession: { key: 'session_id', id: 'claude-parent' },
+          payload: { state: 'working', prompt: 'parent claude', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+      vi.setSystemTime(1_100)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          providerSession: { key: 'session_id', id: 'codex-child' },
+          payload: { state: 'working', prompt: 'codex exec inside claude', agentType: 'codex' }
+        },
+        'conn-1'
+      )
+
+      // Why: `codex exec` run by Claude inherits the pane key; its session id must not
+      // replace the Claude session the pane will resume after a restart.
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: PANE,
+          agentType: 'claude',
+          providerSession: { key: 'session_id', id: 'claude-parent' }
+        })
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('preserves active pane identity when a nested remote hook reports another agent', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)

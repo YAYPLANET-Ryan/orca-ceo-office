@@ -9,6 +9,7 @@ const mockCreateTab = vi.fn()
 const mockQueueTabStartupCommand = vi.fn()
 
 const store = {
+  sleepingAgentSessionsByPaneKey: {} as Record<string, SleepingAgentSessionRecord>,
   settings: {
     agentCmdOverrides: {},
     agentDefaultArgs: {} as Record<string, string>,
@@ -91,6 +92,7 @@ async function launch(): Promise<string | undefined> {
 
 describe('launchSleepingAgentSession Windows shell quoting', () => {
   beforeEach(() => {
+    store.sleepingAgentSessionsByPaneKey = { [record.paneKey]: record }
     vi.clearAllMocks()
     store.settings = {
       agentCmdOverrides: {},
@@ -116,7 +118,7 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
     store.settings.terminalWindowsShell = 'cmd.exe'
 
     await expect(launch()).resolves.toBe(
-      `codex "--dangerously-bypass-approvals-and-sandbox" "resume" "${SESSION_ID}"`
+      `codex "--no-daemon" "--dangerously-bypass-approvals-and-sandbox" "resume" "${SESSION_ID}"`
     )
   })
 
@@ -124,7 +126,7 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
     store.settings.terminalWindowsShell = 'powershell.exe'
 
     await expect(launch()).resolves.toBe(
-      `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
+      `codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
     )
   })
 
@@ -132,7 +134,7 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
     store.settings.terminalWindowsShell = 'git-bash'
 
     await expect(launch()).resolves.toBe(
-      `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
+      `codex '--no-daemon' '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
     )
   })
 

@@ -98,6 +98,17 @@ export function registerAgentHookHandlers(
     'agentStatus:getMigrationUnsupportedSnapshot',
     (): MigrationUnsupportedPtyEntry[] => getMigrationUnsupportedPtySnapshot()
   )
+  ipcMain.removeAllListeners('agentHooks:paneForeground')
+  ipcMain.on('agentHooks:paneForeground', (_event, payload: unknown) => {
+    if (typeof payload !== 'object' || payload === null) {
+      return
+    }
+    const { paneKey, evidence } = payload as { paneKey?: unknown; evidence?: unknown }
+    if (typeof paneKey !== 'string' || paneKey.length === 0 || paneKey.length > 512) {
+      return
+    }
+    agentHookServer.recordPaneForeground(paneKey, evidence)
+  })
 
   // Why: errors from getStatus() (fs permission denied, homedir resolution
   // failure, etc.) must be reported inline via state:'error' so the sidebar can

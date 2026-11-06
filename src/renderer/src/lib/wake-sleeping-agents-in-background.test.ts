@@ -22,9 +22,14 @@ vi.mock('./resume-sleeping-agent-session', () => ({
 // Why: control passive-vs-non-passive classification directly so the test asserts
 // the gating, not the predicate internals.
 const isPassiveSpy = vi.fn()
+const isRestorablePreservedSpy = vi.fn((_record: unknown) => false)
+vi.mock('./in-place-restore-claims', () => ({
+  claimInPlaceRestore: vi.fn()
+}))
 vi.mock('./sleeping-agent-pane-ownership', () => ({
   isPassiveCompletedHibernationEvidence: (record: unknown) => isPassiveSpy(record),
   recordPaneIsOwnedByPreservedPane: () => false,
+  recordPaneIsRestorablePreservedPane: (record: unknown) => isRestorablePreservedSpy(record),
   getProviderSessionClaimKey: (record: {
     worktreeId: string
     agent?: string
@@ -94,6 +99,8 @@ beforeEach(() => {
   terminalTabsByWorktree = {}
   clearSleepingAgentSessionsByPaneKey.mockClear()
   isPassiveSpy.mockReset()
+  isRestorablePreservedSpy.mockReset()
+  isRestorablePreservedSpy.mockReturnValue(false)
   resumeSpy.mockReset()
   resumeSpy.mockReturnValue(0)
 })
@@ -360,6 +367,44 @@ describe('wakeSleepingAgentsForWorktreeInBackground', () => {
     // mounts it — without this mount the queued --resume never gets a PTY.
     expect(rec.events).toEqual(['wake:wt-1', 'mount:wt-1'])
     expect(rec.mountDetails[0]?.tabIds).toEqual(['tab-new'])
+  })
+
+  it('mounts the preserved pane of a non-passive record in place instead of launching a fresh tab', () => {
+    sleepingRecords = { k1: { worktreeId: 'wt-1', paneKey: 'tab-a:leaf-1', tabId: 'tab-a' } }
+    isPassiveSpy.mockReturnValue(false)
+    isRestorablePreservedSpy.mockReturnValue(true)
+    const rec = recordEvents()
+
+    wakeSleepingAgentsForWorktreeInBackground('wt-1')
+
+    rec.stop()
+    // Why: the original tab still has a restorable leaf, so its own cold restore
+    // resumes the session; a fresh "Terminal N" tab would strand that tab with a new agent.
+    expect(rec.events).toEqual(['wake:wt-1', 'mount:wt-1'])
+    expect(rec.mountDetails[0]?.tabIds).toEqual(['tab-a'])
+    const options = resumeSpy.mock.calls[0]?.[1]
+    expect(options?.skipClaimKeys?.has('wt-1\0agent\0session_id\0session')).toBe(true)
+  })
+
+  it('keeps an explicit workspace-sleep record out of the sweep without mounting it', () => {
+    sleepingRecords = {
+      k1: {
+        worktreeId: 'wt-1',
+        paneKey: 'tab-a:leaf-1',
+        tabId: 'tab-a',
+        restoreOnTabOpenOnly: true
+      } as never
+    }
+    isPassiveSpy.mockReturnValue(false)
+    isRestorablePreservedSpy.mockReturnValue(true)
+    const rec = recordEvents()
+
+    wakeSleepingAgentsForWorktreeInBackground('wt-1')
+
+    rec.stop()
+    expect(rec.events).toEqual(['wake:wt-1'])
+    const options = resumeSpy.mock.calls[0]?.[1]
+    expect(options?.skipClaimKeys?.has('wt-1\0agent\0session_id\0session')).toBe(true)
   })
 
   it('skips background-mount when only non-passive records exist and nothing launches', () => {

@@ -24,7 +24,10 @@ export function bindBuildColdRestoreAgentResumeStartup(session: ConnectPanePtySe
     const state = useAppStore.getState()
     const entry = state.agentStatusByPaneKey[session.cacheKey]
     const sleepingRecord = session.getSleepingRecordForPane(state)?.record
-    const useLiveEntry = entry && entry.state !== 'done'
+    if (sleepingRecord?.requiresManualResume) {
+      return true
+    }
+    const useLiveEntry = entry && (entry.state !== 'done' || !sleepingRecord)
     const agent =
       (useLiveEntry ? entry.agentType : sleepingRecord?.agent) ??
       session.resolveExpectedLaunchTuiAgent()
@@ -40,7 +43,9 @@ export function bindBuildColdRestoreAgentResumeStartup(session: ConnectPanePtySe
     // correct historical session instead of losing track of it behind a clone.
     return providerSession === null
   }
-  session.buildColdRestoreAgentResumeStartup = (): ColdRestoreAgentResumeStartup | null => {
+  session.buildColdRestoreAgentResumeStartup = (options?: {
+    manual?: boolean
+  }): ColdRestoreAgentResumeStartup | null => {
     if (session.pendingStartupCommand) {
       return null
     }
@@ -48,10 +53,14 @@ export function bindBuildColdRestoreAgentResumeStartup(session: ConnectPanePtySe
     const entry = state.agentStatusByPaneKey[session.cacheKey]
     const sleepingRecordEntry = session.getSleepingRecordForPane(state)
     const sleepingRecord = sleepingRecordEntry?.record
-    if (session.isLegacyWorkerAutomaticResumeBlocked()) {
+    if (
+      session.isLegacyWorkerAutomaticResumeBlocked() ||
+      (sleepingRecord?.requiresManualResume && !options?.manual)
+    ) {
       return null
     }
-    const useLiveEntry = entry && entry.state !== 'done'
+    // Why: completed turns still identify resumable conversations when no durable record was captured.
+    const useLiveEntry = entry && (entry.state !== 'done' || !sleepingRecord)
     const agent = useLiveEntry ? entry.agentType : sleepingRecord?.agent
     if (!agent || !isResumableTuiAgent(agent)) {
       return null
@@ -99,7 +108,8 @@ export function bindBuildColdRestoreAgentResumeStartup(session: ConnectPanePtySe
         ? { ompResumeFilePath: launchConfig.ompResumeFilePath }
         : {}),
       platform: resumeTarget.platform,
-      shell: resumeTarget.shell
+      shell: resumeTarget.shell,
+      isRemote: resumeTarget.isRemote
     })
     if (!startupPlan) {
       return null

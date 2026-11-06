@@ -222,3 +222,20 @@ describe('session restored banner pane state', () => {
     ).toEqual(bannerReasons([firstPane.id]))
   })
 })
+
+it('keeps unresolved recovery notices after unrelated interaction', () => {
+  const outside = document.createElement('button')
+  document.body.appendChild(outside)
+  const reasons = new Map<number, 'resume-required' | 'restored'>([
+    [1, 'resume-required'],
+    [2, 'restored']
+  ])
+  expect(
+    dismissSessionRestoredBannerPaneIds(
+      reasons,
+      eventFrom(outside, new PointerEvent('pointerdown', { bubbles: true })),
+      []
+    )
+  ).toEqual(new Map([[1, 'resume-required']]))
+  outside.remove()
+})

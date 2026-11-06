@@ -594,7 +594,7 @@ describe('tui agent startup plans', () => {
     expect(plan?.launchCommand).toBe("claude --dangerously-skip-permissions 'fix it'")
   })
 
-  it('leaves Codex command overrides untouched', () => {
+  it('keeps Codex command overrides and appends the no-daemon contract once', () => {
     const plan = buildAgentStartupPlan({
       agent: 'codex',
       prompt: 'fix it',
@@ -613,7 +613,7 @@ describe('tui agent startup plans', () => {
       platform: 'win32'
     })
 
-    expect(plan?.launchCommand).toBe("codex 'resume' 's1'")
+    expect(plan?.launchCommand).toBe("codex '--no-daemon' 'resume' 's1'")
   })
 
   it('quotes Windows resume argv for cmd.exe when shell is cmd', () => {

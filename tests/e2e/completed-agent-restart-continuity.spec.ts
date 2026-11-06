@@ -1,0 +1,155 @@
+import { readFileSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+import type { ElectronApplication } from '@stablyai/playwright-test'
+import { test, expect } from './helpers/orca-app'
+import { TEST_REPO_PATH_FILE } from './global-setup'
+import { attachRepoAndOpenTerminal, createRestartSession } from './helpers/orca-restart'
+import { cleanupE2EDaemons } from './helpers/electron-process-shutdown'
+import {
+  attachRestartTerminalEvidence,
+  watchRestartExitEvidence
+} from './helpers/restart-continuity-evidence'
+import { ensureTerminalVisible, waitForSessionReady } from './helpers/store'
+import {
+  execInTerminal,
+  getTerminalContent,
+  waitForActivePaneHookDescriptor,
+  waitForActivePanePtyId,
+  waitForActiveTerminalManager,
+  waitForPaneCount,
+  waitForTerminalOutput
+} from './helpers/terminal'
+import { DEFAULT_LOCAL_ORCA_PROFILE_ID } from '../../src/shared/orca-profiles'
+
+const SESSION_ID = 'e2e-completed-conversation'
+const MODEL = 'gpt-continuity-test'
+
+function useHermeticResume(userDataDir: string, observedExit: boolean): void {
+  const dataPath = path.join(
+    userDataDir,
+    'profiles',
+    DEFAULT_LOCAL_ORCA_PROFILE_ID,
+    'orca-data.json'
+  )
+  const data = JSON.parse(readFileSync(dataPath, 'utf8'))
+  const records = data.workspaceSession.sleepingAgentSessionsByPaneKey as Record<
+    string,
+    { providerSession?: { id: string }; launchConfig?: unknown; requiresManualResume?: boolean }
+  >
+  const record = Object.values(records).find((entry) => entry.providerSession?.id === SESSION_ID)
+  expect(record, 'the completed conversation must survive on disk').toBeDefined()
+  expect(record?.requiresManualResume === true).toBe(observedExit)
+  // Why: echo exercises the actual shell and resume command without credentials or a model call.
+  record!.launchConfig = {
+    agentCommand: `echo '--model' '${MODEL}' '-c' 'model_reasoning_effort=medium'`,
+    agentArgs: `--model ${MODEL} -c model_reasoning_effort=medium`,
+    agentEnv: {}
+  }
+  writeFileSync(dataPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
+}
+
+for (const [coldRestart, observedExit] of [
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true]
+]) {
+  test(`preserves a ${observedExit ? 'manually resumable exited' : 'completed'} conversation after ${coldRestart ? 'daemon loss' : 'app restart'}`, async (// oxlint-disable-next-line no-empty-pattern -- Restart tests own both Electron launches instead of using the single-app fixture.
+  {}, testInfo) => {
+    test.setTimeout(180_000)
+    const repoPath = readFileSync(TEST_REPO_PATH_FILE, 'utf8').trim()
+    const session = createRestartSession(testInfo)
+    let app: ElectronApplication | null = null
+    let exitEvidence: string[] = []
+    const startupEvidence: string[] = []
+    const onStderr = (chunk: string): void => {
+      if (startupEvidence.join('').length < 40_000) {
+        startupEvidence.push(chunk)
+      }
+    }
+    try {
+      const first = await session.launch({ onStderr })
+      app = first.app
+      await attachRepoAndOpenTerminal(first.page, repoPath)
+      await waitForSessionReady(first.page)
+      await ensureTerminalVisible(first.page)
+      await waitForActiveTerminalManager(first.page, 30_000)
+      await waitForPaneCount(first.page, 1, 30_000)
+      const descriptor = await waitForActivePaneHookDescriptor(first.page)
+      exitEvidence = await watchRestartExitEvidence(first.page, descriptor.paneKey)
+      const ptyId = await waitForActivePanePtyId(first.page)
+      const marker = `PRESERVED_SCROLLBACK_${Date.now()}`
+      await execInTerminal(first.page, ptyId, `echo ${marker}`)
+      await waitForTerminalOutput(first.page, marker)
+      const transcriptPath = session.seedCodexResumeRollout(SESSION_ID, repoPath)
+      await first.page.evaluate(
+        ({ paneKey, worktreeId, id, transcriptPath, observedExit }) => {
+          window.__store
+            ?.getState()
+            .setAgentStatus(
+              paneKey,
+              { state: 'done', prompt: 'completed test turn', agentType: 'codex' },
+              'Codex',
+              undefined,
+              { worktreeId },
+              { providerSession: { key: 'session_id', id, transcriptPath } }
+            )
+          if (observedExit) {
+            window.__store?.getState().markSleepingAgentSessionExited(paneKey)
+            window.__store?.getState().dropAgentStatus(paneKey)
+          }
+        },
+        { ...descriptor, id: SESSION_ID, transcriptPath, observedExit }
+      )
+      await session.close(app)
+      app = null
+      useHermeticResume(session.userDataDir, observedExit)
+      if (coldRestart) {
+        // Why: stop only this isolated fixture's daemon to model a computer restart.
+        await cleanupE2EDaemons(session.userDataDir)
+      }
+      const second = await session.launch({ onStderr })
+      app = second.app
+      await waitForSessionReady(second.page)
+      await ensureTerminalVisible(second.page)
+      await waitForActiveTerminalManager(second.page, 30_000)
+      await waitForPaneCount(second.page, 1, 30_000)
+      try {
+        await waitForTerminalOutput(second.page, marker, 30_000)
+      } finally {
+        await attachRestartTerminalEvidence(second.page, testInfo, 'restored-terminal-evidence')
+      }
+      if (observedExit) {
+        // Why: a negative resume assertion must outlive the full visible-process confirmation ladder.
+        await second.page.waitForTimeout(8500)
+        expect(await getTerminalContent(second.page, 20_000)).not.toContain(SESSION_ID)
+        if (coldRestart) {
+          await expect(
+            second.page.getByText('--- previous session not resumed; restored shell only ---')
+          ).toBeVisible()
+        }
+        const shellPtyId = await waitForActivePanePtyId(second.page)
+        await execInTerminal(second.page, shellPtyId, 'echo MANUAL_RESUME_SHELL_READY')
+        await waitForTerminalOutput(second.page, 'MANUAL_RESUME_SHELL_READY')
+      } else {
+        await waitForTerminalOutput(second.page, SESSION_ID, 30_000)
+        await waitForTerminalOutput(second.page, MODEL, 30_000)
+        await waitForTerminalOutput(second.page, 'model_reasoning_effort=medium', 30_000)
+      }
+      await second.page.screenshot({ path: testInfo.outputPath('restored-conversation.png') })
+    } finally {
+      await testInfo.attach('main-startup-evidence', {
+        body: startupEvidence.join(''),
+        contentType: 'text/plain'
+      })
+      await testInfo.attach('first-launch-exit-evidence', {
+        body: JSON.stringify(exitEvidence, null, 2),
+        contentType: 'application/json'
+      })
+      if (app) {
+        await session.close(app)
+      }
+      await session.dispose()
+    }
+  })
+}

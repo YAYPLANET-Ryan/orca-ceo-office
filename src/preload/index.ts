@@ -2272,6 +2272,9 @@ const api = {
     status: (): Promise<CodexConfigSyncStatus> => ipcRenderer.invoke('codexConfigSync:status')
   },
   agentHooks: {
+    reportPaneForeground: (paneKey: string, evidence: unknown): void => {
+      ipcRenderer.send('agentHooks:paneForeground', { paneKey, evidence })
+    },
     claudeStatus: (): Promise<AgentHookInstallStatus> =>
       ipcRenderer.invoke('agentHooks:claudeStatus'),
     openClaudeStatus: (): Promise<AgentHookInstallStatus> =>

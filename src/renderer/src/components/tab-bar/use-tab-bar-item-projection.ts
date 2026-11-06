@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useFoldedConversationTabs } from './use-folded-conversation-tabs'
 import type { GitFileStatus } from '../../../../shared/git-status-types'
 import type { Tab } from '../../../../shared/tab-types'
 import type { TabBarProps } from './tab-bar-props'
@@ -13,6 +14,9 @@ import type { DropIndicator } from './drop-indicator'
 
 export type TabBarItemProjection = {
   orderedItems: TabBarItem[]
+  foldedItems: TabBarItem[]
+  showAll: boolean
+  setShowAll: (value: boolean) => void
   sortableIds: string[]
   dropIndicatorByVisibleId: Map<string, DropIndicator>
   activeVisibleTabId: string | null
@@ -69,7 +73,7 @@ export function useTabBarItemProjection({
         .map((tab) => tab.id),
     [unifiedTabs, resolvedGroupId]
   )
-  const orderedItems = useMemo(
+  const allItems = useMemo(
     () =>
       buildOrderedTabItems({
         tabBarOrder,
@@ -94,6 +98,12 @@ export function useTabBarItemProjection({
       unifiedTabByVisibleId
     ]
   )
+  const {
+    visibleItems: orderedItems,
+    foldedItems,
+    showAll,
+    setShowAll
+  } = useFoldedConversationTabs(allItems, activeTabId)
   const sortableIds = useMemo(() => orderedItems.map((item) => item.id), [orderedItems])
   const activeIndicator =
     hoveredTabInsertion?.groupId === resolvedGroupId ? hoveredTabInsertion : null
@@ -131,6 +141,9 @@ export function useTabBarItemProjection({
   )
 
   return {
+    foldedItems,
+    showAll,
+    setShowAll,
     orderedItems,
     sortableIds,
     dropIndicatorByVisibleId,
