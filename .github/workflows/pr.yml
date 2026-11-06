@@ -1003,6 +1003,11 @@ jobs:
           filter: blob:none
           persist-credentials: false
 
+      - name: Fetch verified official wire baselines for the CEO fork
+        # Promote refs and tag-object pins together when reviewing a newer upstream release.
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        run: node .github/scripts/fetch-ceo-wire-baselines.mjs
+
       - uses: ./.github/actions/install-node-dependencies
         with:
           native-runtime: node
@@ -1010,6 +1015,11 @@ jobs:
       # R1: an upgrade from the newest release must adopt its live terminal daemon.
       - name: Daemon protocol crossing against newest release
         run: pnpm run check:daemon-protocol-crossing
+
+      - name: Daemon protocol crossing from the installed CEO source
+        # Keep this pin aligned with the inspected deployed package, not the newest PR head.
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        run: pnpm run check:daemon-protocol-crossing -- --release-ref f7c93b41a87d22a27e18716b8d713c0bb4ac7d0a
 
       # R3: a runtime launcher swap must not also bump the daemon protocol (D7.1).
       # The label is read from the event payload, so push again after applying it.
@@ -1286,6 +1296,9 @@ jobs:
         run: xvfb-run --auto-servernum node config/scripts/desktop-distribution/runtime-verification/smoke-packaged-hang-watchdog-worker.mjs --app-dir=dist/linux-unpacked
 
   package_windows:
+    permissions:
+      contents: read
+      actions: read
     name: package (windows)
     needs: [code_paths]
     if: needs.code_paths.outputs.package_windows == 'true'
@@ -1297,6 +1310,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
 
       # Electron and builder releases fix what this downloads; the lockfile churns far more often.
       - name: Resolve electron-builder download versions
@@ -1341,6 +1355,12 @@ jobs:
           --no-file-parallelism
           config/scripts/desktop-distribution/nsis/nsis-process-check.test.mjs
           config/scripts/performance/idle-cpu/idle-cpu-process-sampling.test.mjs
+
+      - name: Stamp the CEO review package
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        env:
+          ORCA_RECOVERY_SOURCE: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/stamp-ceo-build.mjs
 
       - name: Resolve the Windows Rust build scope
         id: rust-scope
@@ -1423,6 +1443,48 @@ jobs:
 
       - name: Smoke packaged CLI
         run: node config/scripts/desktop-distribution/runtime-verification/smoke-packaged-cli.mjs --app-dir=dist/win-unpacked
+
+      - name: Build the CEO review installer without publishing
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm exec electron-builder --config config/electron-builder.config.cjs --prepackaged dist/win-unpacked --win nsis --publish never --config.nsis.artifactName=orca-ceo-setup.exe --config.nsis.runAfterFinish=false
+
+      - name: Verify and record the CEO installer files
+        id: ceo-manifest
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        env:
+          ORCA_RECOVERY_SOURCE: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/write-ceo-installer-manifest.mjs
+
+      - name: Download the pinned protocol55 fallback installer
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        uses: actions/download-artifact@v8
+        with:
+          repository: YAYPLANET-Ryan/orca-ceo-office
+          run-id: 42221599759
+          name: orca-ceo-windows-e0048b332ac8d54c9612822f54323e4a825f5542-attempt-1
+          github-token: ${{ github.token }}
+          path: dist/protocol55-fallback
+
+      - name: Install and repair the CEO artifact on the disposable runner
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        timeout-minutes: 17
+        shell: pwsh
+        run: ./config/scripts/windows-release/Invoke-DisposableInstallerProbe.ps1 -ManifestPath dist/ceo-installer-manifest.json
+
+      - name: Retain the CEO review installer and hashes
+        if: always() && github.repository == 'YAYPLANET-Ryan/orca-ceo-office' && steps.ceo-manifest.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: orca-ceo-windows-${{ github.event.pull_request.head.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            dist/orca-ceo-setup.exe
+            dist/ceo-installer-manifest.json
+            dist/ceo-disposable-installer-proof.json
+            dist/ceo-protocol55-fallback-proof.json
+            dist/ceo-nsis-process-query-proof.json
+          if-no-files-found: error
 
   e2e:
     name: e2e

@@ -62,7 +62,7 @@ vi.mock('../../codex/history/index/codex-state-db-backfill-recovery', () =>
 describe('registerPtyHandlers', () => {
   const { handlers, mainWindow } = setupPtyIpcSuite()
 
-  it('repairs a stale persisted incarnation after exact same-id reattach', async () => {
+  it('reattaches the proven live owner without revalidating stale conversation provenance', async () => {
     const tabId = 'tab-persisted-owner'
     const leafId = '88888888-8888-4888-8888-888888888888'
     const paneKey = makePaneKey(tabId, leafId)
@@ -121,6 +121,7 @@ describe('registerPtyHandlers', () => {
       incarnationId: 'inc-stale-owner'
     })
     store.persistPtyBinding.mockClear()
+    const prepareResume = vi.fn(async () => null)
 
     registerPtyHandlers(
       mainWindow as never,
@@ -128,13 +129,16 @@ describe('registerPtyHandlers', () => {
       undefined,
       undefined,
       undefined,
-      store as never
+      store as never,
+      { prepareCodexSessionResume: prepareResume }
     )
     const spawnArgs = {
       cols: 80,
       rows: 24,
       cwd: '/tmp/persisted-owner',
       command: 'codex resume provider-session',
+      launchAgent: 'codex',
+      resumeProviderSession: { key: 'session_id', id: 'provider-session' },
       worktreeId,
       tabId,
       leafId,
@@ -173,6 +177,7 @@ describe('registerPtyHandlers', () => {
       })
     )
     expect(runtime.noteTerminalSpawnCommand).not.toHaveBeenCalled()
+    expect(prepareResume).not.toHaveBeenCalled()
     expect(store.persistPtyBinding).toHaveBeenCalledOnce()
     expect(store.persistPtyBinding).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -217,6 +222,18 @@ describe('registerPtyHandlers', () => {
         command: undefined
       })
     )
+    await expect(
+      handlers.get('pty:spawn')!(null, {
+        cols: 80,
+        rows: 24,
+        cwd: '/tmp/persisted-owner',
+        command: 'codex resume provider-session',
+        launchAgent: 'codex',
+        resumeProviderSession: { key: 'session_id', id: 'provider-session' }
+      })
+    ).rejects.toThrow('Orca could not verify the originating Codex session file')
+    expect(prepareResume).toHaveBeenCalledOnce()
+    expect(providerSpawn).toHaveBeenCalledTimes(3)
     clearProviderPtyState('pty-persisted-owner')
   })
   it.each([

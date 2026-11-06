@@ -43,6 +43,7 @@ export abstract class AgentHookServerPersistence extends AgentHookServerHydratio
         programStatusOnly: _programStatusOnly,
         // Hydration restamps restoredUnconfirmed.
         restoredUnconfirmed: _restoredUnconfirmed,
+        runtimeResumePendingObservation: _pendingResumeObservation,
         // Observation sequences belong to this runtime.
         observation: _observation,
         // Replay provenance is runtime-only and must not survive another restart.
@@ -126,6 +127,14 @@ export abstract class AgentHookServerPersistence extends AgentHookServerHydratio
       return
     }
     this.runStatusPersist()
+  }
+
+  flushResumeIdentityCheckpoint(): boolean {
+    if (!this.lastStatusFilePath) {
+      return false
+    }
+    this.flushStatusPersistSync()
+    return !this.statusPersistFailing
   }
 
   /** Quit, hook-disable and hydration repair need synchronous writes; routine updates are async. */

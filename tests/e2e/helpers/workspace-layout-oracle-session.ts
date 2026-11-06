@@ -18,6 +18,8 @@ export const ORACLE_REPORT_DIR_ENV = 'ORCA_LAYOUT_ORACLE_REPORT_DIR'
 export type OracleRun = {
   page: Page
   userDataDir: string
+  agentLaunchLog: string
+  seedCodexResumeRollout: (sessionId: string, cwd: string) => string
   client: RuntimeClient
   oracle: LayoutOracle
   /** Worktrees the client checks compare; scenarios add the ones they create. */
@@ -65,14 +67,32 @@ function killProcess(pid: number): void {
 export async function runOracleScenario(
   testInfo: TestInfo,
   scenarioId: string,
-  body: (run: OracleRun) => Promise<void>
+  body: (run: OracleRun) => Promise<void>,
+  extraEnv: Record<string, string> = {}
 ): Promise<OracleFinding[]> {
-  const session = createRestartSession(testInfo)
+  const session = createRestartSession(testInfo, extraEnv)
+  const agentLaunchLog = path.join(session.userDataDir, 'oracle-agent-launches.jsonl')
+  const startupErrorCodes = new Set<string>()
+  const launchOptions = {
+    extraEnv: { ORCA_GOLDEN_STUB_LAUNCH_LOG: agentLaunchLog },
+    onStderr: (chunk: string) => {
+      for (const code of [
+        'originating Codex session file',
+        'terminal_pane_owner_changed',
+        'terminal_pane_owner_unverified',
+        'terminal_liveness_unavailable'
+      ]) {
+        if (chunk.includes(code)) {
+          startupErrorCodes.add(code)
+        }
+      }
+    }
+  }
   let app: ElectronApplication | null = null
   const worktreeIds: string[] = []
   const started = Date.now()
   try {
-    const first = await session.launch()
+    const first = await session.launch(launchOptions)
     app = first.app
     const feed = new LiveLayoutFeed((current) => run.oracle.checkFrame(current))
     const target = (page: Page, client: RuntimeClient) => ({
@@ -90,6 +110,8 @@ export async function runOracleScenario(
     const run: OracleRun = {
       page: first.page,
       userDataDir: session.userDataDir,
+      agentLaunchLog,
+      seedCodexResumeRollout: session.seedCodexResumeRollout,
       client,
       oracle: new LayoutOracle(target(first.page, client), scenarioId),
       worktreeIds,
@@ -111,7 +133,7 @@ export async function runOracleScenario(
           expect(daemonPid, 'the PTY daemon pid file is missing').not.toBeNull()
           killProcess(daemonPid!)
         }
-        const next = await session.launch()
+        const next = await session.launch(launchOptions)
         app = next.app
         run.page = next.page
         run.client = new RuntimeClient(session.userDataDir, 30_000)
@@ -146,7 +168,14 @@ export async function runOracleScenario(
     })
     return run.oracle.findings
   } finally {
-    await session.dispose(app ?? undefined)
+    try {
+      await testInfo.attach('oracle-startup-error-codes', {
+        body: JSON.stringify([...startupErrorCodes]),
+        contentType: 'application/json'
+      })
+    } finally {
+      await session.dispose(app ?? undefined)
+    }
   }
 }
 

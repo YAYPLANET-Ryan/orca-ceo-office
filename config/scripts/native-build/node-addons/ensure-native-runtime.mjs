@@ -373,8 +373,11 @@ function requiresPatchedNodePtySourceBuild() {
 function rebuildNodeRuntimeModules(moduleNames) {
   for (const moduleName of moduleNames) {
     let moduleDir = dirname(require.resolve(`${moduleName}/package.json`))
-    if (isSharedNativePackage(moduleName, projectDir)) {
-      // Why: other worktrees load this very dir, so build beside it instead of over it.
+    if (
+      isSharedNativePackage(moduleName, projectDir) ||
+      (process.platform === 'win32' && moduleName === '@vscode/windows-process-tree')
+    ) {
+      // MSBuild needs short scratch paths even for a project-local pnpm package.
       buildSharedNodeRuntimeModule(moduleName, resolveNativePackageDir(moduleName, projectDir))
       continue
     }

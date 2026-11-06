@@ -250,20 +250,28 @@ describe('registerPtyHandlers Codex launch refusal on an unreadable managed home
       expect(daemonSpawn).not.toHaveBeenCalled()
     })
 
-    it('spawns a resume when the eager resume gate resolves', async () => {
+    it('spawns the verified resume when the eager resume gate resolves', async () => {
       readFileSyncMock.mockReturnValue(TEST_CODEX_AUTH_JSON)
       const daemonSpawn = setupDaemonAdapter()
-      register(() => TEST_CODEX_HOME, undefined, (() =>
-        Promise.resolve(null)) as unknown as () => Promise<never>)
+      register(
+        () => TEST_CODEX_HOME,
+        undefined,
+        async () => ({ outcome: 'resume', codexHomePath: TEST_CODEX_HOME })
+      )
 
       await handlers.get('pty:spawn')!(null, {
         cols: 80,
         rows: 24,
         launchAgent: 'codex',
+        command: 'codex resume resume-session-1',
         resumeProviderSession: RESUME_SESSION
       })
 
       expect(daemonSpawn).toHaveBeenCalledOnce()
+      expect(daemonSpawn.mock.calls[0]?.[0]).toMatchObject({
+        command: 'codex resume resume-session-1',
+        env: { CODEX_HOME: TEST_CODEX_HOME }
+      })
     })
   })
 
