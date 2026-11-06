@@ -9,23 +9,25 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/WindowsReleaseOperations.ps1"
 . "$PSScriptRoot/ReleaseStartupShortcut.ps1"
 . "$PSScriptRoot/ReleaseHelperBundle.ps1"
+. "$PSScriptRoot/ReleaseRegistrationState.ps1"
+. "$PSScriptRoot/ReleaseRegistrationPlatform.ps1"
 Assert-ReleasePlanHash $ExpectedPlanSha256
+$ExpectedPlanSha256=$ExpectedPlanSha256.ToLowerInvariant()
+if($ExpectedBundleSha256){Assert-ReleasePlanHash $ExpectedBundleSha256;$ExpectedBundleSha256=$ExpectedBundleSha256.ToLowerInvariant()}
 $PlanPath=[IO.Path]::GetFullPath($PlanPath)
 if ((Get-ReleaseHash $PlanPath) -ne $ExpectedPlanSha256) { throw 'Plan hash mismatch' }
 $plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
 Assert-ReleasePlan $plan
-$runner = Join-Path $PSScriptRoot 'Invoke-VerifiedRelease.ps1'
 $gate = Join-Path $PSScriptRoot 'Invoke-GuardedOrcaLaunch.ps1'
 $bundleAvailable=Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bundle-manifest.json')
 if($ExpectedBundleSha256){Assert-ReleaseHelperBundle $PSScriptRoot $ExpectedBundleSha256|Out-Null;$gate=Join-Path $PSScriptRoot 'Invoke-ReleaseBundleEntry.ps1'}
-$startupFolder=[Environment]::GetFolderPath('Startup')
+$startupFolder=Get-ReleaseStartupFolder
 $runBypasses=@(Get-ReleaseStartupRunBypasses $plan.installRoot)
 $shortcutArguments=@{Folder=$startupFolder;InstallRoot=$plan.installRoot;PlanPath=$PlanPath;PlanHash=$ExpectedPlanSha256;GatePath=$gate;BackupRoot=(Join-Path (Get-ReleaseStateDirectory $plan.installRoot) 'startup-shortcuts');BundleSha256=$ExpectedBundleSha256}
 $shortcutPlan=Set-ReleaseStartupShortcutGate @shortcutArguments
-foreach ($path in @($PlanPath,$runner)) { if ($path.Contains('"') -or $path.Contains("`n")) { throw 'Invalid task argument' } }
 if (-not $Register) {
     [pscustomobject]@{result='PREVIEW_ONLY';apply='On-demand only';recover='At interactive user logon';
-        executionTimeLimit='PT0S';multipleInstances='IgnoreNew';effectiveExecutionPolicy=(Get-ExecutionPolicy);liveChanges=$false;directStartupShortcuts=$shortcutPlan.eligibleShortcuts;directRunEntries=$runBypasses.Count;runtimeBundleAvailable=$bundleAvailable;
+        executionTimeLimit='PT0S';multipleInstances='IgnoreNew';effectiveExecutionPolicy=(Get-ReleaseExecutionPolicy);liveChanges=$false;directStartupShortcuts=$shortcutPlan.eligibleShortcuts;directRunEntries=$runBypasses.Count;runtimeBundleAvailable=$bundleAvailable;deploymentEligible=[bool]($bundleAvailable -and $ExpectedBundleSha256 -and -not $runBypasses.Count);plannedGatePath=$shortcutPlan.gatePath;plannedGateArguments=$shortcutPlan.gateArguments;
         limitation='Scheduler cannot survive OS shutdown. Registration routes logon through recovery and verified launch; existing direct startup requires explicit routing.'}
     exit 0
 }
@@ -46,28 +48,28 @@ $updateLock=[IO.File]::Open((Join-Path $registrationDirectory 'update.lock'),'Op
 Assert-ReleaseIdle $plan $null
 $registrationPath=Join-Path $registrationDirectory 'registration.json'
 if(Test-Path -LiteralPath $registrationPath){throw 'Previous registration intent exists; inspect partial tasks and shortcut backups before retry. No overwrite.'}
-$registration=[pscustomobject]@{schema=1;phase='PREPARING';planHash=$ExpectedPlanSha256;bundleHash=$ExpectedBundleSha256;root=$plan.installRoot;shortcuts=$shortcutPlan.shortcuts;createdTasks=@();error=$null;updatedAt=''}
+$taskNames=Get-ReleaseRegistrationTaskNames $plan.installRoot
+$registration=[pscustomobject]@{schema=1;phase='PREPARING';planHash=$ExpectedPlanSha256;bundleHash=$ExpectedBundleSha256;root=(Resolve-ReleaseRoot $plan.installRoot);planPath=$PlanPath;gatePath=$gate;taskNames=$taskNames;shortcuts=$shortcutPlan.shortcuts;createdTasks=@();error=$null;updatedAt=''}
 Write-ReleaseJournal $registrationPath $registration
 try {
-Import-Module "$env:SystemRoot/System32/WindowsPowerShell/v1.0/Modules/ScheduledTasks/ScheduledTasks.psd1" -ErrorAction Stop
-$root = Resolve-ReleaseRoot $plan.installRoot
-$algorithm = [Security.Cryptography.SHA256]::Create()
-try { $key = ([BitConverter]::ToString($algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($root.ToLowerInvariant())))).Replace('-','').Substring(0,16) }
-finally { $algorithm.Dispose() }
-$principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
+Initialize-ReleaseScheduler
+$principal = New-ReleaseSchedulerPrincipal
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 foreach ($mode in @('Apply','Recover')) {
-    $name = 'Orca-VerifiedRelease-' + $key + '-' + $mode
+    $name = $taskNames[$mode]
     if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) { throw 'Existing scheduled task must be reviewed; no overwrite' }
 }
 $registration.phase='ROUTING';Write-ReleaseJournal $registrationPath $registration
-if ($RouteExistingStartup) { $routed=Set-ReleaseStartupShortcutGate @shortcutArguments -Apply;$registration.shortcuts=$routed.shortcuts;Write-ReleaseJournal $registrationPath $registration }
-foreach ($mode in @('Recover','Apply')) {
-    $name = 'Orca-VerifiedRelease-' + $key + '-' + $mode
+if ($RouteExistingStartup) {
+    $persistShortcut={param($detail) $registration.shortcuts=@($registration.shortcuts|ForEach-Object {if($_.path -eq $detail.path){$detail}else{$_}});Write-ReleaseJournal $registrationPath $registration}
+    $routed=Set-ReleaseStartupShortcutGate @shortcutArguments -ExpectedShortcuts $shortcutPlan.shortcuts -OnItemState $persistShortcut -Apply
+    $registration.shortcuts=$routed.shortcuts;Write-ReleaseJournal $registrationPath $registration
+}
+foreach ($mode in @('Apply','Recover')) {
+    $name = $taskNames[$mode]
     $entry=Join-Path $PSScriptRoot 'Invoke-ReleaseBundleEntry.ps1'
-    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $entry + '" -PlanPath "' + $PlanPath + '" -ExpectedPlanSha256 ' + $ExpectedPlanSha256
-    $arguments+=' -ExpectedBundleSha256 '+$ExpectedBundleSha256
-    if ($mode -eq 'Apply') { $arguments+=' -Entry Invoke-VerifiedRelease.ps1 -Mode Apply' }else{$arguments+=' -Entry Invoke-GuardedOrcaLaunch.ps1'}
+    $arguments=Get-ReleaseLaunchArguments $entry $PlanPath $ExpectedPlanSha256 $ExpectedBundleSha256
+    if ($mode -eq 'Apply') { $arguments=Get-ReleaseLaunchArguments $entry $PlanPath $ExpectedPlanSha256 $ExpectedBundleSha256 'Invoke-VerifiedRelease.ps1' 'Apply' }
     $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument $arguments
     $definition = @{Action=$action;Principal=$principal;Settings=$settings}
     if ($mode -eq 'Recover') { $definition.Trigger = New-ScheduledTaskTrigger -AtLogOn -User $principal.UserId }
@@ -76,7 +78,11 @@ foreach ($mode in @('Recover','Apply')) {
     $registration.createdTasks+= $name;Write-ReleaseJournal $registrationPath $registration
 }
 $registration.phase='REGISTERED';Write-ReleaseJournal $registrationPath $registration
-}catch{$registration.phase='RECONCILIATION_REQUIRED';$registration.error=$_.Exception.Message;Write-ReleaseJournal $registrationPath $registration;throw}
+}catch{
+    $originalError=$_;$registration.phase='RECONCILIATION_REQUIRED';$registration.error=$originalError.Exception.Message
+    try{Write-ReleaseJournal $registrationPath $registration}catch{$originalError.Exception.Data['RegistrationJournalError']=$_.Exception.Message}
+    throw $originalError
+}
 }finally{if($updateLock){$updateLock.Dispose()};if($launchLock){$launchLock.Dispose()}}
 }finally{$registrationLock.Dispose()}
 # Deliberately does not start either task or close any application.

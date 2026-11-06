@@ -160,3 +160,26 @@ Policy may still refuse execution and requires isolated OS validation.
 Run both test_release_recovery.py and test_release_bootstrap.py. Real NSIS fault
 injection must run in a disposable Windows OS, never merely /D=temp on this host.
 The current branch is an operator procedure, not an embedded-updater integration.
+
+Registration review and partial-state inspection
+Preview reports the exact gate path/arguments and deploymentEligible. A preview
+without a pinned runtime bundle is diagnostic only and is ineligible for apply.
+Apply requires the identical shortcut path set and original hashes from preview;
+changes refuse before backup/routing. Each shortcut's backup and routing progress
+is flushed into registration.json before/after its corresponding file operation.
+The on-demand Apply task is created first; logon Recover is created last. Intended
+task names are recorded before creation, even if a worker dies before recording
+the returned task result. Existing registration intent always blocks blind retry.
+Inspect-ReleaseRegistration reads current-user registration only, reports the
+two exact task names and scoped LNK/backup hashes, and never unregisters, restores
+or enables anything. Task presence alone does not certify action/principal/logon
+readiness. Unknown/changed files and unrecorded outcomes still need operator review.
+Action executable/arguments are compared with recorded intent separately; this
+does not certify the principal, trigger or a real logon. Corrupt JSON is preserved
+and reported without automatic fallback to an older journal or any blind retry.
+Wrapper-based startup via cmd/bat/wscript is not exhaustively detected by direct
+Orca.exe LNK/Run checks; confirm separately before real deployment. Runtime logs
+belong in the hashed state directory, never inside the immutable bundle.
+test_release_registration.py invokes the real entry/journals/locks/LNK code with
+synthetic Scheduler and current-user boundaries. It cannot certify real Windows
+Scheduler, NSIS, AV, logon or reboot behavior; those require the disposable OS.
