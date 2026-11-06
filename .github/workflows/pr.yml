@@ -217,7 +217,8 @@ jobs:
     name: Git compatibility
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    # Git 2.25 sources predate the compiler defaults in Ubuntu 26.04.
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -314,7 +315,8 @@ jobs:
     name: shell contracts
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    # The fish release PPA used below must support the selected distribution.
+    runs-on: ubuntu-24.04
     # Why: this job's cost is almost entirely package download, and a stalled mirror has
     # no wall-clock bound of its own. A successful run finishes in ~4.5 minutes, so this
     # is generous; it exists so a wedge fails the job instead of holding the whole run
@@ -518,9 +520,11 @@ jobs:
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
     runs-on: ubuntu-latest
+    env:
+      ORCA_CROSS_VERSION_BASELINE_REF: v1.4.184
 
     steps:
-      # Why fetch-depth 0: the harness extracts the newest release tag to skew
+      # Why fetch-depth 0: the harness extracts the pinned release tag to skew
       # current code against it. The default shallow clone has no tags, which is
       # why this cannot ride along in the sharded `test` job.
       - name: Checkout
@@ -532,6 +536,11 @@ jobs:
           fetch-depth: 0
           filter: blob:none
           persist-credentials: false
+
+      - name: Fetch pinned upstream wire baseline
+        run: |
+          git fetch --no-tags --no-write-fetch-head https://github.com/stablyai/orca.git refs/tags/v1.4.184:refs/tags/v1.4.184
+          test "$(git rev-parse refs/tags/v1.4.184)" = '284a244a12dfe266f62c103cc6b1b1d13203e0b4'
 
       - uses: ./.github/actions/install-node-dependencies
         with:
@@ -574,7 +583,8 @@ jobs:
     name: package
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    # Newer glibc headers introduce symbols above the packaged application's floor.
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
