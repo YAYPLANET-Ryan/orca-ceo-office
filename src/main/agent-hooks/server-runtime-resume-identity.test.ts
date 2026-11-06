@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -145,9 +145,13 @@ describe('runtime resume identity checkpoint', () => {
     expect(restarted.getStatusChangeSnapshot()).toEqual([])
   })
 
-  it.each(['dismiss', 'reconcile', 'checkpoint-teardown'] as const)(
-    'does not attach a retained old identity to a new OSC turn after %s',
-    async (teardown) => {
+  it.each(
+    (['dismiss', 'reconcile', 'checkpoint-teardown'] as const).flatMap((teardown) =>
+      (['working', 'done'] as const).map((state) => ({ teardown, state }))
+    )
+  )(
+    'does not attach a retained old identity to a new $state OSC turn after $teardown',
+    async ({ teardown, state }) => {
       const { server } = await open()
       server.recordRuntimeResumeIdentity(checkpoint('codex'))
       server.ingestTerminalStatus({
@@ -169,7 +173,7 @@ describe('runtime resume identity checkpoint', () => {
         tabId: 'tab-1',
         worktreeId: 'wt-1',
         connectionId: null,
-        payload: { agentType: 'codex', state: 'working', prompt: '' }
+        payload: { agentType: 'codex', state, prompt: '' }
       })
       expect(server.getStatusSnapshotForPane(PANE)[0].providerSession).toBeUndefined()
       expect(() =>
@@ -262,8 +266,17 @@ describe('runtime resume identity checkpoint', () => {
     expect(restarted.getStatusChangeSnapshot()).toEqual([])
   })
 
+  it('does not persist the process-local first-observation marker', async () => {
+    const { server } = await open()
+    server.recordRuntimeResumeIdentity(checkpoint('codex'))
+    const path = (server as unknown as { lastStatusFilePath: string }).lastStatusFilePath
+    const persisted = JSON.parse(readFileSync(path, 'utf8'))
+    expect(persisted.entries[PANE]).not.toHaveProperty('runtimeResumePendingObservation')
+  })
+
   it('reports an unknown outcome when the durable write cannot complete', async () => {
     const { server } = await open()
+    server.retirePaneAuthority(PANE)
     const internals = server as unknown as { lastStatusFilePath: string }
     const original = internals.lastStatusFilePath
     internals.lastStatusFilePath = join(original, 'impossible-child.json')
@@ -272,6 +285,14 @@ describe('runtime resume identity checkpoint', () => {
       expect(() => server.recordRuntimeResumeIdentity(checkpoint('codex'))).toThrow(
         expect.objectContaining({ agentSessionOperationOutcome: 'unknown' })
       )
+      server.ingestTerminalStatus({
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        connectionId: null,
+        payload: { agentType: 'codex', state: 'working', prompt: '' }
+      })
+      expect(server.getStatusSnapshotForPane(PANE)[0].providerSessionOnly).toBe(true)
     } finally {
       internals.lastStatusFilePath = original
       warn.mockRestore()

@@ -7,6 +7,9 @@ import {
   encodeTerminalStreamJson,
   encodeTerminalStreamText
 } from '../../../../shared/terminal-stream-protocol'
+const { toastWarning } = vi.hoisted(() => ({ toastWarning: vi.fn() }))
+vi.mock('sonner', () => ({ toast: { warning: toastWarning, error: vi.fn() } }))
+
 describe('createRemoteRuntimePtyTransport', () => {
   const originalWindow = (globalThis as { window?: typeof window }).window
   const runtimeCall = vi.fn()
@@ -24,6 +27,7 @@ describe('createRemoteRuntimePtyTransport', () => {
   let unsubscribeFn: ReturnType<typeof vi.fn<() => void>> | null = null
 
   beforeEach(() => {
+    toastWarning.mockClear()
     vi.resetModules()
     runtimeCall.mockReset()
     runtimeSubscribe.mockReset()
@@ -51,6 +55,9 @@ describe('createRemoteRuntimePtyTransport', () => {
             result: {
               terminal: {
                 handle: 'term-remote',
+                ...(args.method === 'terminal.ensureAgentSession'
+                  ? { warning: 'Checkpoint test warning' }
+                  : {}),
                 worktreeId: 'repo1::/remote/wt',
                 title: null,
                 surface: 'background'
@@ -323,6 +330,7 @@ describe('createRemoteRuntimePtyTransport', () => {
 
     await transport.connect({ url: '', callbacks: {} })
 
+    expect(toastWarning).toHaveBeenCalledWith('Checkpoint test warning', { duration: 10_000 })
     expect(runtimeCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'terminal.ensureAgentSession',

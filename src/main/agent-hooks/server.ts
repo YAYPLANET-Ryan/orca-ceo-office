@@ -887,7 +887,6 @@ export class AgentHookServer {
     ) {
       throw new Error('agent_session_resume_checkpoint_superseded')
     }
-    this.restorePaneAuthority(checkpoint.paneKey)
     if (
       previous &&
       !previous.providerSessionOnly &&
@@ -931,6 +930,7 @@ export class AgentHookServer {
         agentSessionOperationOutcome: 'unknown' as const
       })
     }
+    this.restorePaneAuthority(checkpoint.paneKey)
   }
 
   getStatusSnapshotForPane(paneKey: string): AgentStatusIpcPayload[] {
@@ -2333,8 +2333,8 @@ export class AgentHookServer {
       previous?.providerSession &&
       (claimedAgentType === undefined || claimedAgentType === previous.payload.agentType) &&
       (previous.runtimeResumePendingObservation ||
-        (!previous.providerSessionOnly && previous.payload.state !== 'done') ||
-        event.payload.state === 'done')
+        (!previous.providerSessionOnly &&
+          (previous.payload.state !== 'done' || event.payload.state === 'done')))
         ? previous.providerSession
         : undefined
     // Why: OSC status is a runtime observation, not a prompt boundary; keep prompt-sent telemetry tied to native hooks.
@@ -3454,6 +3454,7 @@ export class AgentHookServer {
         restoredUnconfirmed: _restoredUnconfirmed,
         // Why: same — the sequencer that issued it dies with the process (see PersistedAgentHookEventPayload).
         observation: _observation,
+        runtimeResumePendingObservation: _pendingObservation,
         launchToken,
         ...persistedPayload
       } = enrichedPayload
