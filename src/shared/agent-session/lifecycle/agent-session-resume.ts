@@ -4,9 +4,9 @@ import type {
   AgentStatusCacheIdentity,
   RefusedPaneResume
 } from '../../agent-status/contracts/agent-status-ipc-payload'
-import type { AgentStatusState } from '../../agent-status/contracts/agent-status-types'
-import type { AgentMainAgentStatus } from '../../agent-status/lifecycle/main-agent-status'
 import type { TuiAgent } from '../../agent-launch/catalog/tui-agent'
+import type { SleepingAgentSessionRecord } from './sleeping-agent-session-record'
+export type { SleepingAgentSessionRecord } from './sleeping-agent-session-record'
 
 export const RESUMABLE_TUI_AGENTS = [
   'claude',
@@ -57,30 +57,6 @@ export type SleepingAgentLaunchConfig = {
   agentArgs: string
   agentEnv: Record<string, string>
   ompResumeFilePath?: string
-}
-
-export type SleepingAgentSessionRecord = {
-  paneKey: string
-  tabId?: string
-  worktreeId: string
-  agent: ResumableTuiAgent
-  providerSession: AgentProviderSessionMetadata
-  prompt: string
-  state: AgentStatusState
-  capturedAt: number
-  updatedAt: number
-  terminalTitle?: string
-  lastAssistantMessage?: string
-  interrupted?: boolean
-  /** The main agent's own status when captured, copied with `interrupted` by `agentVerdictFields`;
-   *  read the verdict through `agentMainAgentVerdict`. */
-  mainAgent?: AgentMainAgentStatus
-  connectionId?: string | null
-  launchConfig?: SleepingAgentLaunchConfig
-  /** Worktree-sleep/legacy records open fresh tabs on activation. quit/live records belong to restored panes; only their cold-restore path consumes them to avoid duplicating warm sessions (#5232). */
-  origin?: 'worktree-sleep' | 'quit' | 'live'
-  /** Explicit-sleep finished panes resume only when their own tab opens; mobile wake must not mount/respawn every slept tab (#11598). */
-  restoreOnTabOpenOnly?: boolean
 }
 
 /** A record of a slept pane (worktree sleep, or a legacy record); 'quit'/'live' resume a running agent. */
