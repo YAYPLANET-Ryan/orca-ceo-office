@@ -97,6 +97,10 @@ try {
   for (const directory of [home, profile, workspace]) {
     mkdirSync(directory, { recursive: true })
   }
+  writeFileSync(
+    path.join(workspace, 'protocol55-input-collector.mjs'),
+    readFileSync(new URL('./protocol55-input-collector.mjs', import.meta.url))
+  )
   const env = {
     ...process.env,
     HOME: home,
@@ -121,6 +125,8 @@ try {
     fallbackInstallerSha256: fallbackHash
   })
   let app = null
+  let diagnosticPage = null
+  let diagnosticPtyId = null
   async function launch() {
     const phase = evidence.phase
     app = await electron.launch({
@@ -130,6 +136,7 @@ try {
     })
     checkpoint(`${phase}_WAIT_WINDOW`, { guiPid: app.process().pid })
     const page = await app.firstWindow({ timeout: 120000 })
+    diagnosticPage = page
     checkpoint(`${phase}_WAIT_BRIDGE`)
     await page.waitForFunction(
       () => Boolean(window.api) && Boolean(document.getElementById('root')?.firstElementChild),
@@ -199,12 +206,15 @@ try {
   async function marker(page, id, phase) {
     const text = `ORCA_PROTOCOL55_${phase}`
     const filename = `orca-protocol55-${phase.toLowerCase()}.txt`
+    if (existsSync(path.join(workspace, filename))) {
+      throw new Error('Synthetic input marker existed before the write being tested')
+    }
     const accepted = await page.evaluate(
-      ({ id, text, filename }) =>
-        window.api.pty.writeAccepted(id, `echo ${text}>${filename}\r`, 'driving', {
+      ({ id, text }) =>
+        window.api.pty.writeAccepted(id, `${text}\r`, 'driving', {
           requireWriteSettlement: true
         }),
-      { id, text, filename }
+      { id, text }
     )
     if (!accepted) {
       throw new Error('Synthetic terminal input was refused')
@@ -237,18 +247,54 @@ try {
       throw new Error('Synthetic fixture unexpectedly owns prior terminals')
     }
     checkpoint('CREATE_SYNTHETIC_TERMINAL')
+    if (/[\s"%!&|<>^]/.test(process.execPath)) {
+      throw new Error(
+        'The hosted Node fixture requires a space-free path without shell metacharacters'
+      )
+    }
     const created = await first.evaluate(
-      (cwd) =>
+      ({ cwd, command }) =>
         window.api.pty.spawn({
           cols: 80,
           rows: 24,
           cwd,
           shellOverride: 'cmd.exe',
+          command,
+          commandDelivery: 'provider',
           spawnIntent: 'interactive'
         }),
-      workspace
+      { cwd: workspace, command: `${process.execPath} protocol55-input-collector.mjs` }
     )
+    diagnosticPtyId = created.id
     const before = await identity(first, created.id)
+    const observed = (await backend(first))[0]
+    checkpoint('WAIT_INPUT_COLLECTOR', {
+      before,
+      initialShell: {
+        cwd: observed.cwd,
+        shellState: observed.shellState,
+        foregroundProcess: observed.foregroundProcess ?? null
+      }
+    })
+    const readyFile = path.join(workspace, 'orca-protocol55-ready.json')
+    await expect
+      .poll(
+        () => {
+          try {
+            return Boolean(readJson(readyFile).instanceId)
+          } catch {
+            return false
+          }
+        },
+        { timeout: 30000 }
+      )
+      .toBe(true)
+    const workerBefore = readJson(readyFile)
+    if (!Number.isInteger(workerBefore.pid) || workerBefore.pid <= 0 || !workerBefore.instanceId) {
+      throw new Error('Synthetic input collector identity is missing')
+    }
+    evidence.inputCollectorBefore = workerBefore
+    process.kill(workerBefore.pid, 0)
     checkpoint('WRITE_BEFORE', { before })
     await marker(first, created.id, 'BEFORE')
     checkpoint('QUIT_CANDIDATE')
@@ -290,6 +336,11 @@ try {
     }
     checkpoint('WRITE_AFTER')
     await marker(second, attached.id, 'AFTER')
+    evidence.inputCollectorAfter = readJson(readyFile)
+    if (JSON.stringify(workerBefore) !== JSON.stringify(evidence.inputCollectorAfter)) {
+      throw new Error('Fallback restarted the synthetic input collector')
+    }
+    process.kill(workerBefore.pid, 0)
     evidence.before = before
     evidence.after = after
     evidence.fallbackInstallerExitCode = installed.code
@@ -307,6 +358,31 @@ try {
     evidence.result = 'FAIL'
     checkpoint('ERROR', { failedPhase: evidence.phase, error: error.message })
     console.error(error.message)
+    let diagnosticTimeout
+    try {
+      const collectorError = path.join(workspace, 'orca-protocol55-input-error.json')
+      if (existsSync(collectorError)) {
+        evidence.collectorFailure = readJson(collectorError)
+      }
+      if (diagnosticPage && diagnosticPtyId) {
+        const snapshot = await Promise.race([
+          diagnosticPage.evaluate(
+            (id) => window.api.pty.getMainBufferSnapshot(id, { scrollbackRows: 20 }),
+            diagnosticPtyId
+          ),
+          new Promise((resolve) => {
+            diagnosticTimeout = setTimeout(() => resolve(null), 2000)
+            diagnosticTimeout.unref()
+          })
+        ])
+        evidence.syntheticTerminalOutput = snapshot?.data?.slice(-4000) ?? 'UNAVAILABLE'
+      }
+    } catch {
+      evidence.syntheticTerminalOutput = 'UNAVAILABLE'
+    } finally {
+      clearTimeout(diagnosticTimeout)
+      checkpoint('ERROR_DIAGNOSTIC')
+    }
     throw error
   } finally {
     try {
