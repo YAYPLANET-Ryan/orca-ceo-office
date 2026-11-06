@@ -1,7 +1,7 @@
 // Drive user/CLI/paired-client layout journeys; compare structural rules, window DOM, client/CLI views, expected layout and restart preservation after every step.
 // Fail findings absent from workspace-layout-oracle-known-on-main.ts. ORCA_LAYOUT_ORACLE_RECORD=1 records without failing; ORCA_LAYOUT_ORACLE_REPEAT=<n> repeats.
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { Page } from '@stablyai/playwright-test'
@@ -10,8 +10,11 @@ import {
   moveTerminalPaneByLeafId,
   readTerminalPaneDomLeafOrder,
   splitActiveTerminalPane,
-  waitForActiveTerminalManager
+  waitForActiveTerminalManager,
+  waitForTerminalOutput
 } from './helpers/terminal'
+import { splitWorktreeIdForFilesystem } from '../../src/shared/worktree/id'
+import { getGoldenStubAgentLaunchEnv, GOLDEN_STUB_READY_MARKER } from './helpers/golden-stub-agent'
 import { bootstrapFirstLaunch, seededRepoPathOrSkip } from './helpers/terminal-restart-persistence'
 import { createTerminalTabFromMenu, SORTABLE_TAB } from './helpers/terminal-tab-menu'
 import { ensureTerminalVisible, waitForSessionReady } from './helpers/store'
@@ -40,6 +43,7 @@ type Scenario = {
   journey: (run: OracleRun, worktreeId: string) => Promise<void>
   /** False where a pane runs an agent, not a shell, so an echo proves nothing. */
   endMarkers?: false
+  launchEnv?: Record<string, string>
 }
 
 async function listTerminals(run: OracleRun, worktreeId: string) {
@@ -447,17 +451,41 @@ const SCENARIOS: Scenario[] = [
   },
   {
     id: 'sleep-quit-resume',
+    launchEnv: getGoldenStubAgentLaunchEnv(),
     endMarkers: false,
     journey: async (run, worktreeId) => {
-      await sleepAgentPane(run.page, worktreeId)
+      const worktree = splitWorktreeIdForFilesystem(worktreeId)
+      if (!worktree) {
+        throw new Error('Sleep recovery fixture needs a worktree path')
+      }
+      const transcriptPath = run.seedCodexResumeRollout(
+        'parity-sleep-session',
+        worktree.worktreePath
+      )
+      await sleepAgentPane(run.page, worktreeId, transcriptPath)
       await run.oracle.step('sleep agent pane', { worktreeId, panesPerTab: [2] })
       await run.relaunch({
         worktreeId,
         paneCount: 2,
         panesPerTab: [2],
         terminalsRestart: true,
-        reopen: wakeByClick
+        reopen: async (page, id) => {
+          await wakeByClick(page, id)
+          await waitForBoundPanes(page, 2)
+          await waitForTerminalOutput(page, GOLDEN_STUB_READY_MARKER)
+        }
       })
+      const launches: { argv: string[] }[] = readFileSync(run.agentLaunchLog, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+      expect(launches).toHaveLength(1)
+      const argv = launches[0]!.argv
+      expect(argv).toContain('resume')
+      expect(argv.slice(argv.indexOf('resume'), argv.indexOf('resume') + 2)).toEqual([
+        'resume',
+        'parity-sleep-session'
+      ])
     }
   }
 ]
@@ -471,28 +499,33 @@ for (const scenario of SCENARIOS) {
     // oxlint-disable-next-line no-empty-pattern -- Each scenario owns its launches.
     test(`layout oracle: ${scenario.id}${suffix}`, async ({}, testInfo) => {
       const repoPath = seededRepoPathOrSkip()
-      const findings = await runOracleScenario(testInfo, scenario.id, async (run) => {
-        let cleanup: (() => void) | undefined
-        try {
-          let worktreeId: string
-          if (scenario.setup) {
-            const setup = await scenario.setup(run)
-            worktreeId = setup.worktreeId
-            cleanup = setup.cleanup
-          } else {
-            worktreeId = (await bootstrapFirstLaunch(run.page, repoPath)).worktreeId
+      const findings = await runOracleScenario(
+        testInfo,
+        scenario.id,
+        async (run) => {
+          let cleanup: (() => void) | undefined
+          try {
+            let worktreeId: string
+            if (scenario.setup) {
+              const setup = await scenario.setup(run)
+              worktreeId = setup.worktreeId
+              cleanup = setup.cleanup
+            } else {
+              worktreeId = (await bootstrapFirstLaunch(run.page, repoPath)).worktreeId
+            }
+            run.worktreeIds.push(worktreeId)
+            await waitForBoundPanes(run.page, 1)
+            await run.oracle.step('start', { worktreeId, panesPerTab: [1] })
+            await scenario.journey(run, worktreeId)
+            if (scenario.endMarkers !== false) {
+              await run.oracle.checkMarkers('end', worktreeId)
+            }
+          } finally {
+            cleanup?.()
           }
-          run.worktreeIds.push(worktreeId)
-          await waitForBoundPanes(run.page, 1)
-          await run.oracle.step('start', { worktreeId, panesPerTab: [1] })
-          await scenario.journey(run, worktreeId)
-          if (scenario.endMarkers !== false) {
-            await run.oracle.checkMarkers('end', worktreeId)
-          }
-        } finally {
-          cleanup?.()
-        }
-      })
+        },
+        scenario.launchEnv
+      )
       for (const finding of findings) {
         console.log(
           `[layout-oracle] ${scenario.id}: ${finding.check} @ ${finding.step}\n  ${finding.details.join('\n  ')}`

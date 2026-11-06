@@ -2,11 +2,20 @@
 
 const READY_MARKER = 'GOLDEN_STUB_AGENT_READY'
 const EXIT_MARKER = 'GOLDEN_STUB_AGENT_EXITED'
+const { appendFileSync } = require('node:fs')
 
 // The interactive fixture does not implement Codex's JSONL app-server API.
 if (process.argv[2] === 'app-server') {
   process.stderr.write("error: unrecognized subcommand 'app-server'\n")
   process.exit(2)
+}
+
+// Rejected app-server probes above are not interactive agent sessions.
+if (process.env.ORCA_GOLDEN_STUB_LAUNCH_LOG) {
+  appendFileSync(
+    process.env.ORCA_GOLDEN_STUB_LAUNCH_LOG,
+    `${JSON.stringify({ argv: process.argv.slice(2) })}\n`
+  )
 }
 
 const ESC = '\x1b'

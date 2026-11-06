@@ -1003,6 +1003,16 @@ jobs:
           filter: blob:none
           persist-credentials: false
 
+      - name: Fetch verified official wire baselines for the CEO fork
+        # Promote refs and tag-object pins together when reviewing a newer upstream release.
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        run: |
+          git fetch --no-tags --no-write-fetch-head https://github.com/stablyai/orca.git \
+            refs/tags/v1.4.250:refs/tags/v1.4.250 \
+            refs/tags/v1.4.251:refs/tags/v1.4.251
+          test "$(git rev-parse refs/tags/v1.4.250)" = '5aee991610dd5748da54024829f940853d2369d2'
+          test "$(git rev-parse refs/tags/v1.4.251)" = '1999923fed4b00515550b18ba82ed52349967ac7'
+
       - uses: ./.github/actions/install-node-dependencies
         with:
           native-runtime: node
@@ -1010,6 +1020,11 @@ jobs:
       # R1: an upgrade from the newest release must adopt its live terminal daemon.
       - name: Daemon protocol crossing against newest release
         run: pnpm run check:daemon-protocol-crossing
+
+      - name: Daemon protocol crossing from the installed CEO source
+        # Keep this pin aligned with the inspected deployed package, not the newest PR head.
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        run: pnpm run check:daemon-protocol-crossing -- --release-ref f7c93b41a87d22a27e18716b8d713c0bb4ac7d0a
 
       # R3: a runtime launcher swap must not also bump the daemon protocol (D7.1).
       # The label is read from the event payload, so push again after applying it.

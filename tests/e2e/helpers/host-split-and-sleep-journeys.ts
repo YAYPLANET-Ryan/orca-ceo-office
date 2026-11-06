@@ -7,6 +7,7 @@ import { expect } from './orca-app'
 import { RuntimeClient } from '../../../src/cli/runtime/client'
 import type { RuntimeTerminalListResult } from '../../../src/shared/runtime-types'
 import type { RuntimeWorktreeCreateResult } from '../../../src/shared/runtime-worktree-contracts'
+import { configureGoldenStubAgent } from './golden-stub-agent'
 import { activateWorkspaceByClick, sleepWorkspaceViaSidebar } from './slept-workspace-probe'
 import { ensureTerminalVisible, waitForSessionReady } from './store'
 import { splitActiveTerminalPane, waitForActiveTerminalManager } from './terminal'
@@ -97,23 +98,34 @@ export async function openHostSplitWorktree(page: Page, userDataDir: string): Pr
   return setupWorktreeId!
 }
 
-export async function sleepAgentPane(page: Page, worktreeId: string): Promise<void> {
+export async function sleepAgentPane(
+  page: Page,
+  worktreeId: string,
+  transcriptPath: string
+): Promise<void> {
+  await configureGoldenStubAgent(page)
   await splitActiveTerminalPane(page, 'vertical')
   await waitForBoundPanes(page, 2)
-  await page.evaluate((id) => {
-    const state = window.__store!.getState()
-    const tabId = state.activeTabId!
-    const manager = window.__paneManagers!.get(tabId)!
-    const leafId = manager.getLeafId(manager.getActivePane()!.id)!
-    state.setAgentStatus(
-      `${tabId}:${leafId}`,
-      { state: 'working', prompt: 'finish the task', agentType: 'codex' },
-      'Codex',
-      undefined,
-      { worktreeId: id },
-      { providerSession: { key: 'session_id', id: 'parity-sleep-session' } }
-    )
-  }, worktreeId)
+  await page.evaluate(
+    ({ id, transcriptPath }) => {
+      const state = window.__store!.getState()
+      const tabId = state.activeTabId!
+      const manager = window.__paneManagers!.get(tabId)!
+      const leafId = manager.getLeafId(manager.getActivePane()!.id)!
+      state.setAgentStatus(
+        `${tabId}:${leafId}`,
+        { state: 'working', prompt: 'finish the task', agentType: 'codex' },
+        'Codex',
+        undefined,
+        { worktreeId: id },
+        {
+          providerSession: { key: 'session_id', id: 'parity-sleep-session', transcriptPath },
+          launchConfig: { agentCommand: 'golden-stub-agent', agentArgs: '', agentEnv: {} }
+        }
+      )
+    },
+    { id: worktreeId, transcriptPath }
+  )
   await sleepWorkspaceViaSidebar(page, worktreeId)
   await expect
     .poll(() =>
