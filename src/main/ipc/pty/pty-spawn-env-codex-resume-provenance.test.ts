@@ -150,51 +150,34 @@ describe('registerPtyHandlers', () => {
         return daemonSpawn
       }
 
-      posixOnlyIt(
-        'launches plain codex when a REAL rollout sits under a home Orca no longer trusts',
-        async () => {
-          // The rollout exists; only provenance trust can reject cross-account resume.
-          const mockProc = createMockProc()
-          spawnMock.mockReturnValue(mockProc.proc)
-          vi.useFakeTimers()
-
-          try {
-            const selectedHome = registerWithTrustedHomes([OTHER_HOME], OTHER_HOME)
-            const spawned = await spawnCodexResume(ORIGIN_ROLLOUT)
-
-            await Promise.resolve()
-            vi.runAllTimers()
-            await Promise.resolve()
-            vi.runAllTimers()
-
-            expect(mockProc.proc.write).not.toHaveBeenCalled()
-            expect(mockProc.proc.write).not.toHaveBeenCalledWith(
-              expect.stringContaining(RESUME_SESSION_ID)
-            )
-            expect(spawned.agentResumeUnavailable).toBe(true)
-            const env = spawnMock.mock.calls.at(-1)![2].env as Record<string, string>
-            expect(env.CODEX_HOME).toBe(OTHER_HOME)
-            expect(env[POSIX_SHELL_STARTUP_COMMAND_ENV]).toBe('codex')
-            expect(selectedHome).toHaveBeenCalled()
-          } finally {
-            vi.useRealTimers()
-          }
+      it.each([
+        { name: 'untrusted original home', path: ORIGIN_ROLLOUT },
+        { name: 'cross-agent metadata', path: '/Users/example/.claude/projects/repo/x.jsonl' },
+        { name: 'missing transcript', path: undefined },
+        {
+          name: 'unstrippable command',
+          path: ORIGIN_ROLLOUT,
+          command: `codex 'resume' '${RESUME_SESSION_ID}' --sandbox`
+        },
+        {
+          name: 'nested cross-agent command',
+          path: '/Users/example/.claude/projects/repo/x.jsonl',
+          command: `cd '/tmp/${RESUME_SESSION_ID}' && codex 'resume' '${RESUME_SESSION_ID}'`
+        },
+        {
+          name: 'sequenced startup command',
+          path: ORIGIN_ROLLOUT,
+          env: { ORCA_SEQUENCED_STARTUP_COMMAND: `codex 'resume' '${RESUME_SESSION_ID}'` }
         }
-      )
-      it('reports the dropped resume so the pane can say it started fresh', async () => {
-        registerWithTrustedHomes([OTHER_HOME], OTHER_HOME)
-        const spawned = await spawnCodexResume(ORIGIN_ROLLOUT)
-
-        expect(spawned.agentResumeUnavailable).toBe(true)
-      })
-      it('stays silent for cross-agent provenance on a pane relabeled codex', async () => {
+      ])('refuses $name before a different conversation can start', async (request) => {
+        const daemonSpawn = setupResumeDaemonProvider()
         registerWithTrustedHomes([OTHER_HOME], OTHER_HOME)
 
-        const spawned = await spawnCodexResume(
-          '/Users/example/.claude/projects/repo/019f81b9.jsonl'
+        await expect(spawnCodexResume(request.path, request)).rejects.toThrow(
+          'Orca could not verify the originating Codex session file, so automatic resume was stopped to avoid using a different account.'
         )
-
-        expect(spawned.agentResumeUnavailable).toBeUndefined()
+        expect(daemonSpawn).not.toHaveBeenCalled()
+        expect(spawnMock).not.toHaveBeenCalled()
       })
       posixOnlyIt('still pins CODEX_HOME and resumes when provenance is verified', async () => {
         const mockProc = createMockProc()
@@ -220,79 +203,6 @@ describe('registerPtyHandlers', () => {
           vi.useRealTimers()
         }
       })
-      posixOnlyIt('reports a dropped resume that carried no transcript path at all', async () => {
-        // Legacy records may lack transcript paths; stripped resume arguments still need an explanation.
-        const mockProc = createMockProc()
-        spawnMock.mockReturnValue(mockProc.proc)
-        vi.useFakeTimers()
-
-        try {
-          registerWithTrustedHomes([OTHER_HOME], OTHER_HOME)
-          const spawned = await spawnCodexResume(undefined)
-
-          await Promise.resolve()
-          vi.runAllTimers()
-          await Promise.resolve()
-          vi.runAllTimers()
-
-          expect(mockProc.proc.write).not.toHaveBeenCalled()
-          const env = spawnMock.mock.calls.at(-1)![2].env as Record<string, string>
-          expect(env[POSIX_SHELL_STARTUP_COMMAND_ENV]).toBe('codex')
-          expect(spawned.agentResumeUnavailable).toBe(true)
-        } finally {
-          vi.useRealTimers()
-        }
-      })
-      it('refuses an unstrippable resume whose metadata claimed Codex layout', async () => {
-        // A retained locator could still resume across accounts.
-        registerWithTrustedHomes([OTHER_HOME], OTHER_HOME)
-
-        await expect(
-          spawnCodexResume(ORIGIN_ROLLOUT, {
-            command: `codex 'resume' '${RESUME_SESSION_ID}' --sandbox`
-          })
-        ).rejects.toThrow(/could not verify the originating Codex session file/)
-      })
-      posixOnlyIt(
-        'launches an unstrippable resume unchanged when metadata never claimed Codex layout',
-        async () => {
-          // Other-agent metadata must not turn a mislabeled Codex pane into a new hard failure.
-          const mockProc = createMockProc()
-          spawnMock.mockReturnValue(mockProc.proc)
-          vi.useFakeTimers()
-
-          try {
-            registerWithTrustedHomes([OTHER_HOME], OTHER_HOME)
-            const command = `cd '/tmp/${RESUME_SESSION_ID}' && codex 'resume' '${RESUME_SESSION_ID}'`
-            const spawned = await spawnCodexResume('/Users/example/.claude/projects/repo/x.jsonl', {
-              command
-            })
-
-            await Promise.resolve()
-            vi.runAllTimers()
-            await Promise.resolve()
-            vi.runAllTimers()
-
-            expect(mockProc.proc.write).toHaveBeenCalledWith(`${command}\r`)
-            expect(spawned.agentResumeUnavailable).toBeUndefined()
-          } finally {
-            vi.useRealTimers()
-          }
-        }
-      )
-      it('strips the resume argv from the sequenced startup command too', async () => {
-        // Sequenced startup overrides the launch command; strip its resume arguments too.
-        const daemonSpawn = setupResumeDaemonProvider()
-        registerWithTrustedHomes([OTHER_HOME], OTHER_HOME)
-
-        await spawnCodexResume(ORIGIN_ROLLOUT, {
-          env: { ORCA_SEQUENCED_STARTUP_COMMAND: `codex 'resume' '${RESUME_SESSION_ID}'` }
-        })
-
-        const spawnOptions = daemonSpawn.mock.calls.at(-1)![0]
-        expect(spawnOptions.env.ORCA_SEQUENCED_STARTUP_COMMAND).toBe('codex')
-        expect(spawnOptions.command).toBe('codex')
-      })
       it('leaves the sequenced startup command alone when provenance is verified', async () => {
         const daemonSpawn = setupResumeDaemonProvider()
         registerWithTrustedHomes([ORIGIN_HOME], OTHER_HOME)
@@ -304,48 +214,17 @@ describe('registerPtyHandlers', () => {
 
         expect(daemonSpawn.mock.calls.at(-1)![0].env.ORCA_SEQUENCED_STARTUP_COMMAND).toBe(sequenced)
       })
-      posixOnlyIt(
-        'strips the sequenced startup command on the local-provider spawn path too',
-        async () => {
-          // Local spawning must use the stripped environment even though only daemon spawning rebuilds it.
-          const mockProc = createMockProc()
-          spawnMock.mockReturnValue(mockProc.proc)
-          registerWithTrustedHomes([OTHER_HOME], OTHER_HOME)
 
-          await spawnCodexResume(ORIGIN_ROLLOUT, {
-            env: { ORCA_SEQUENCED_STARTUP_COMMAND: `codex 'resume' '${RESUME_SESSION_ID}'` }
-          })
-
-          const env = spawnMock.mock.calls.at(-1)![2].env as Record<string, string>
-          expect(env.ORCA_SEQUENCED_STARTUP_COMMAND).toBe('codex')
-        }
-      )
-      posixOnlyIt(
-        'leaves the local-provider sequenced startup command alone when provenance is verified',
-        async () => {
-          const mockProc = createMockProc()
-          spawnMock.mockReturnValue(mockProc.proc)
-          registerWithTrustedHomes([ORIGIN_HOME], OTHER_HOME)
-          const sequenced = `codex 'resume' '${RESUME_SESSION_ID}'`
-
-          await spawnCodexResume(ORIGIN_ROLLOUT, {
-            env: { ORCA_SEQUENCED_STARTUP_COMMAND: sequenced }
-          })
-
-          const env = spawnMock.mock.calls.at(-1)![2].env as Record<string, string>
-          expect(env.ORCA_SEQUENCED_STARTUP_COMMAND).toBe(sequenced)
-        }
-      )
-      it('omits the notice on a reattach that never ran this launch command', async () => {
-        setupResumeDaemonProvider({ isReattach: true })
+      it('refuses an unverified request before a provider can claim reattachment', async () => {
+        const daemonSpawn = setupResumeDaemonProvider({ isReattach: true })
         registerWithTrustedHomes([OTHER_HOME], OTHER_HOME)
 
-        const spawned = await spawnCodexResume(ORIGIN_ROLLOUT)
-
-        expect(spawned.agentResumeUnavailable).toBeUndefined()
+        await expect(spawnCodexResume(ORIGIN_ROLLOUT)).rejects.toThrow(
+          'Orca could not verify the originating Codex session file'
+        )
+        expect(daemonSpawn).not.toHaveBeenCalled()
       })
-      it('drops the resume argv on the runtime controller spawn path', async () => {
-        // Runtime/relay spawning needs the same guard despite having no notice channel.
+      it('refuses unverified identity on the runtime controller path', async () => {
         const daemonSpawn = setupResumeDaemonProvider()
         const runtime = {
           setPtyController: vi.fn(),
@@ -370,23 +249,22 @@ describe('registerPtyHandlers', () => {
           spawn(args: Record<string, unknown>): Promise<{ id: string }>
         }
 
-        await controller.spawn({
-          cols: 80,
-          rows: 24,
-          command: `codex 'resume' '${RESUME_SESSION_ID}'`,
-          env: { ORCA_SEQUENCED_STARTUP_COMMAND: `codex 'resume' '${RESUME_SESSION_ID}'` },
-          launchAgent: 'codex',
-          resumeProviderSession: {
-            key: 'session_id',
-            id: RESUME_SESSION_ID,
-            transcriptPath: ORIGIN_ROLLOUT
-          }
-        })
-
-        const spawnOptions = daemonSpawn.mock.calls.at(-1)![0]
-        expect(spawnOptions.command).toBe('codex')
-        expect(spawnOptions.env.ORCA_SEQUENCED_STARTUP_COMMAND).toBe('codex')
-        expect(runtime.noteTerminalSpawnCommand).toHaveBeenCalledWith(expect.any(String), 'codex')
+        await expect(
+          controller.spawn({
+            cols: 80,
+            rows: 24,
+            command: `codex 'resume' '${RESUME_SESSION_ID}'`,
+            env: { ORCA_SEQUENCED_STARTUP_COMMAND: `codex 'resume' '${RESUME_SESSION_ID}'` },
+            launchAgent: 'codex',
+            resumeProviderSession: {
+              key: 'session_id',
+              id: RESUME_SESSION_ID,
+              transcriptPath: ORIGIN_ROLLOUT
+            }
+          })
+        ).rejects.toThrow('Orca could not verify the originating Codex session file')
+        expect(daemonSpawn).not.toHaveBeenCalled()
+        expect(runtime.registerPty).not.toHaveBeenCalled()
       })
     })
   })

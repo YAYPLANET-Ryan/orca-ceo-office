@@ -64,32 +64,34 @@ export abstract class OrcaRuntimeWithAgentSessionResumeOwnership extends OrcaRun
 
   /**
    * The pane's resume launch: undefined when it owns no record, `{}` (plain shell, record kept)
-   * when a stored record cannot be resumed here or another resume took it. A record read from the
-   * hook store is no promise to keep: its vetoes give undefined, so the tab's agent launches fresh.
+   * when a recorded conversation cannot be resumed here or another resume took it.
    */
   protected async resolvePaneOwnedResumeStartup(
     worktreeId: string,
     tab: RuntimeMobileSessionTerminalTab
   ): Promise<PaneResumeStartup | Record<string, never> | undefined> {
     const stored = this.getPaneSleepingAgentRecord(worktreeId, tab)
+    const paneRows =
+      this.getAgentProviderSessionRowsForPaneFn?.(makePaneKey(tab.parentTabId, tab.leafId)) ?? []
     const record = stored
       ? this.isPaneOwnedResumeRecord(stored)
         ? stored
         : null
       : // Resume the hook store's conversation, never replay the pane's original launch.
         hookRowPaneResumeRecord({
-          rows:
-            this.getAgentProviderSessionRowsForPaneFn?.(makePaneKey(tab.parentTabId, tab.leafId)) ??
-            [],
+          rows: paneRows,
           worktreeId,
           tab: this.getWorkspaceSessionForWorktree(worktreeId)?.tabsByWorktree?.[worktreeId]?.find(
             (candidate) => candidate.id === tab.parentTabId
           )
         })
     if (!record) {
-      return undefined
+      return stored ||
+        paneRows.some((row) => row.providerSession && isPaneLocalHookRow(row, worktreeId))
+        ? {}
+        : undefined
     }
-    const vetoed = stored ? {} : undefined
+    const vetoed = {}
     // Records are unspent here; exclude aliases and already-live panes to prevent duplicate transcript writers.
     const records = this.getWorkspaceSessionForWorktree(worktreeId)?.sleepingAgentSessionsByPaneKey
     const aliases = this.findPaneSleepingAgentRecord(worktreeId, tab)?.aliases ?? []
