@@ -128,6 +128,14 @@ export abstract class AgentHookServerPersistence extends AgentHookServerHydratio
     this.runStatusPersist()
   }
 
+  flushResumeIdentityCheckpoint(): boolean {
+    if (!this.lastStatusFilePath) {
+      return false
+    }
+    this.flushStatusPersistSync()
+    return !this.statusPersistFailing
+  }
+
   /** Quit, hook-disable and hydration repair need synchronous writes; routine updates are async. */
   protected runStatusPersist(): void {
     const writer = this.getStatusSnapshotWriter()

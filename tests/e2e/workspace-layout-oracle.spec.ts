@@ -10,8 +10,7 @@ import {
   moveTerminalPaneByLeafId,
   readTerminalPaneDomLeafOrder,
   splitActiveTerminalPane,
-  waitForActiveTerminalManager,
-  waitForTerminalOutput
+  waitForActiveTerminalManager
 } from './helpers/terminal'
 import { splitWorktreeIdForFilesystem } from '../../src/shared/worktree/id'
 import { getGoldenStubAgentLaunchEnv, GOLDEN_STUB_READY_MARKER } from './helpers/golden-stub-agent'
@@ -462,7 +461,7 @@ const SCENARIOS: Scenario[] = [
         'parity-sleep-session',
         worktree.worktreePath
       )
-      await sleepAgentPane(run.page, worktreeId, transcriptPath)
+      const agentPane = await sleepAgentPane(run.page, worktreeId, transcriptPath)
       await run.oracle.step('sleep agent pane', { worktreeId, panesPerTab: [2] })
       await run.relaunch({
         worktreeId,
@@ -472,7 +471,26 @@ const SCENARIOS: Scenario[] = [
         reopen: async (page, id) => {
           await wakeByClick(page, id)
           await waitForBoundPanes(page, 2)
-          await waitForTerminalOutput(page, GOLDEN_STUB_READY_MARKER)
+          await expect
+            .poll(() =>
+              page.evaluate(
+                ({ tabId, leafId, marker }) => {
+                  const state = window.__store!.getState()
+                  const ptyId = state.terminalLayoutsByTabId[tabId]?.ptyIdsByLeafId[leafId]
+                  const pane = window.__paneManagers
+                    ?.get(tabId)
+                    ?.getPanes()
+                    .find((candidate) => candidate.leafId === leafId)
+                  return Boolean(
+                    ptyId &&
+                    pane?.container.dataset.ptyId === ptyId &&
+                    pane.serializeAddon?.serialize().includes(marker)
+                  )
+                },
+                { ...agentPane, marker: GOLDEN_STUB_READY_MARKER }
+              )
+            )
+            .toBe(true)
         }
       })
       const launches: { argv: string[] }[] = readFileSync(run.agentLaunchLog, 'utf8')

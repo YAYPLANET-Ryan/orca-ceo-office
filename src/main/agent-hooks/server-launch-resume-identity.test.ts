@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { AtomicSnapshotWriter } from '../persistence/atomic-snapshot-writer'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentHookServer, _internals } from './server'
@@ -41,6 +42,27 @@ describe('a resume launch seeds the pane identity', () => {
     await server.start({ env: 'production', userDataPath })
     return server
   }
+
+  it('commits resume identity synchronously and reports a failed disk checkpoint without dropping it', async () => {
+    const server = await startServer()
+    server.recordLaunchResumeIdentity({
+      paneKey: PANE,
+      worktreeId: 'wt-1',
+      agentType: 'codex',
+      providerSession: RESUMED,
+      launchedAt: 1
+    })
+    expect(server.flushResumeIdentityCheckpoint()).toBe(true)
+    const saved = JSON.parse(readFileSync(server.lastStatusPath!, 'utf8'))
+    expect(saved.entries[PANE].providerSession.id).toBe('resumed-session')
+    vi.spyOn(AtomicSnapshotWriter.prototype, 'writeSync').mockImplementation(() => {
+      throw new Error('synthetic disk checkpoint failure')
+    })
+    expect(server.flushResumeIdentityCheckpoint()).toBe(false)
+    expect(server.getStatusSnapshotForPane(PANE)).toEqual([
+      expect.objectContaining({ providerSession: RESUMED })
+    ])
+  })
 
   it('publishes an identity-only row before the agent reports', async () => {
     const server = await startServer()

@@ -102,11 +102,11 @@ export async function sleepAgentPane(
   page: Page,
   worktreeId: string,
   transcriptPath: string
-): Promise<void> {
+): Promise<{ tabId: string; leafId: string }> {
   await configureGoldenStubAgent(page)
   await splitActiveTerminalPane(page, 'vertical')
   await waitForBoundPanes(page, 2)
-  await page.evaluate(
+  const identity = await page.evaluate(
     ({ id, transcriptPath }) => {
       const state = window.__store!.getState()
       const tabId = state.activeTabId!
@@ -123,6 +123,7 @@ export async function sleepAgentPane(
           launchConfig: { agentCommand: 'golden-stub-agent', agentArgs: '', agentEnv: {} }
         }
       )
+      return { tabId, leafId }
     },
     { id: worktreeId, transcriptPath }
   )
@@ -141,6 +142,7 @@ export async function sleepAgentPane(
       }, worktreeId)
     )
     .toBe(true)
+  return identity
 }
 
 /** A slept worktree is not active after relaunch; the user's click wakes it and resumes the agent. */

@@ -1,3 +1,4 @@
+import { notifyResumeCheckpointFailure } from './resume-checkpoint-notice'
 import { applyTerminalLaunchResult } from './terminal-launch-result-policy'
 import { armPaneOwnerRetry, isPaneOwnerRefusal } from './pane-owner-recovery'
 import type { SpawnDeferralReason } from '../../../../../shared/host-spawn-admission'
@@ -156,6 +157,7 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
             : null
         // Legacy replies may omit incarnationId; remote evidence remains unverifiable until a stamped attach result.
         session.remotePtyIncarnationId = connectResult?.incarnationId ?? null
+        notifyResumeCheckpointFailure(connectResult, resolvedPtyId)
         session.noteBoundProcessIncarnation(connectResult?.incarnationId)
         if (connectResult?.isReattach) {
           if (

@@ -1006,12 +1006,7 @@ jobs:
       - name: Fetch verified official wire baselines for the CEO fork
         # Promote refs and tag-object pins together when reviewing a newer upstream release.
         if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
-        run: |
-          git fetch --no-tags --no-write-fetch-head https://github.com/stablyai/orca.git \
-            refs/tags/v1.4.250:refs/tags/v1.4.250 \
-            refs/tags/v1.4.251:refs/tags/v1.4.251
-          test "$(git rev-parse refs/tags/v1.4.250)" = '5aee991610dd5748da54024829f940853d2369d2'
-          test "$(git rev-parse refs/tags/v1.4.251)" = '1999923fed4b00515550b18ba82ed52349967ac7'
+        run: node .github/scripts/fetch-ceo-wire-baselines.mjs
 
       - uses: ./.github/actions/install-node-dependencies
         with:
@@ -1312,6 +1307,13 @@ jobs:
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Stamp the CEO review package
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        env:
+          ORCA_RECOVERY_SOURCE: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/stamp-ceo-build.mjs
 
       # Electron and builder releases fix what this downloads; the lockfile churns far more often.
       - name: Resolve electron-builder download versions
@@ -1438,6 +1440,28 @@ jobs:
 
       - name: Smoke packaged CLI
         run: node config/scripts/desktop-distribution/runtime-verification/smoke-packaged-cli.mjs --app-dir=dist/win-unpacked
+
+      - name: Build the CEO review installer without publishing
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm exec electron-builder --config config/electron-builder.config.cjs --prepackaged dist/win-unpacked --win nsis --publish never --config.artifactName=orca-ceo-setup.exe
+
+      - name: Verify and record the CEO installer files
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        env:
+          ORCA_RECOVERY_SOURCE: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/write-ceo-installer-manifest.mjs
+
+      - name: Retain the CEO review installer and hashes
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        uses: actions/upload-artifact@v7
+        with:
+          name: orca-ceo-windows-${{ github.event.pull_request.head.sha }}
+          path: |
+            dist/orca-ceo-setup.exe
+            dist/ceo-installer-manifest.json
+          if-no-files-found: error
 
   e2e:
     name: e2e

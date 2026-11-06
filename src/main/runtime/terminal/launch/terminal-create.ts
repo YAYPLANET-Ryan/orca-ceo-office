@@ -5,6 +5,7 @@ import {
   terminalLaunchPublicFacts
 } from './terminal-launch-result'
 import { revealCreatedTerminal } from './terminal-create-reveal'
+import { resumeCheckpointWarning } from '../../../../shared/agent-session/lifecycle/resume-checkpoint-warning'
 import type { PaneSpawnOperation } from '../../../ipc/pty/pane/pane-spawn-operation'
 import { OrcaRuntimeWithTerminalCreateDeduplication } from './terminal-create-deduplication'
 import { type PaneStartArgsOf, spawnInAdmittedPane } from './runtime-pane-admission'
@@ -297,7 +298,7 @@ export abstract class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTermi
           ...this.getPtyExecutionHostMetadata(result.id),
           surface,
           ...(result.startupCwdFallback ? { startupCwdFallback: result.startupCwdFallback } : {}),
-          ...(warning ? { warning } : {})
+          ...resumeCheckpointWarning(warning, result.resumeCheckpointFailed)
         }
       } finally {
         teamAllocation.release()
