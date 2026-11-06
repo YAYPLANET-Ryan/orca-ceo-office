@@ -209,13 +209,22 @@ export function materializeReleaseCheckout(ref: string): ReleaseCheckout {
   rmSync(staging, { recursive: true, force: true })
   mkdirSync(staging, { recursive: true })
   try {
-    // `git archive | tar -x` keeps the extraction independent of the working tree,
-    // so an injected violation in the working tree cannot leak into the old side.
+    // Pass native paths as argv; a shell pipeline corrupts Windows extraction paths.
+    const archive = join(staging, 'release-source.tar')
     execFileSync(
-      'sh',
-      ['-c', `git archive ${commit} ${ARCHIVE_PATHS.join(' ')} | tar -x -C "${staging}"`],
-      { cwd: REPO_ROOT, stdio: ['ignore', 'ignore', 'pipe'] }
+      'git',
+      ['archive', '--format=tar', '--output', archive, commit, ...ARCHIVE_PATHS],
+      {
+        cwd: REPO_ROOT,
+        windowsHide: true
+      }
     )
+    execFileSync('tar', ['-x', '-f', archive, '-C', staging], {
+      cwd: REPO_ROOT,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true
+    })
+    rmSync(archive)
     prepareExtractedTree(staging)
     writeFileSync(
       join(staging, 'checkout-stamp.json'),
