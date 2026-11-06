@@ -82,5 +82,125 @@
     "text": "ghostty",
     "dynamic": false,
     "count": 1
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:title",
+    "text": "CEO Office",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "Businesses",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "CEO Office",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "OilDealer",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "CubePlanet",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "YieldCore",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "GasStation",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "Compagnon",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "Family",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "Personal",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "Personal Office",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "Shared",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "Shared Controls",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "Review Queue",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
+  },
+  {
+    "filePath": "src/renderer/src/components/ceo-office/CeoOfficeSidebar.tsx",
+    "kind": "object-property:label",
+    "text": "Approval Gates",
+    "dynamic": false,
+    "count": 1,
+    "reason": "Workspace navigation catalog labels mirror the user-authored CEO manifest and retain its proper names; they are data, not application chrome."
   }
 ]

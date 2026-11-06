@@ -126,8 +126,12 @@ export async function prepareRuntimePtySpawn(
     ? await ctx.deps.resolveCodexResumeLaunch(args.command, codexResumePreparation)
     : ctx.deps.noCodexResumeLaunch(ctx.preAdoptedStablePane ? undefined : args.command)
   const codexResumeHome = codexResumeLaunch.codexResumeHome
-  // Why: the drop still applies here, but this controller's result has no field for
-  // notifyResumeUnavailable — runtime/relay panes start fresh without the notice.
+  // Runtime callers cannot display the renderer's fresh-start notice; preserve explicit resume intent.
+  if (codexResumeLaunch.droppedResumeArgv) {
+    throw new Error(
+      'Cannot resume the requested Codex conversation: its transcript or runtime provenance could not be verified. Restore the original session source and retry.'
+    )
+  }
   ctx.launchCommand = codexResumeLaunch.command
   ctx.claudeAuth =
     ctx.isClaudeLaunch && ctx.deps.prepareClaudeAuth

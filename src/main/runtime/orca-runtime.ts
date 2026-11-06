@@ -67,6 +67,7 @@ import type {
   RuntimeCreateAgentSessionRequest,
   RuntimeCreateAgentSessionResult,
   RuntimeEnsureAgentSessionRequest,
+  RuntimeAgentResumeCheckpoint,
   RuntimeEnsureAgentSessionResult
 } from '../../shared/agent-session-host-authority'
 import {
@@ -1536,6 +1537,7 @@ type RuntimeLeafRecord = RuntimeSyncedLeaf & {
 type RuntimePtyWorktreeRecord = {
   ptyId: string
   incarnationId: PtyIncarnationId | null
+  preservedExitIncarnationId?: string
   worktreeId: string
   connectionId: string | null
   runtimeSessionOwned: boolean
@@ -3725,6 +3727,9 @@ export class OrcaRuntimeService {
   private terminalSideEffectLocalConsumerAvailable = false
   private terminalSideEffectConsumerAvailable = false
   private readonly getAgentStatusSnapshotFn: (() => AgentStatusIpcPayload[]) | null
+  private readonly recordAgentResumeCheckpointFn:
+    | ((checkpoint: RuntimeAgentResumeCheckpoint) => void)
+    | null
   private readonly getAgentProviderSessionSnapshotFn: (() => AgentStatusIpcPayload[]) | null
   private readonly getAgentProviderSessionRowsForPaneFn:
     | ((paneKey: string) => AgentStatusIpcPayload[])
@@ -3810,6 +3815,7 @@ export class OrcaRuntimeService {
       // terminal output. worktree.ps reads this at query time so mobile shows the
       // same inline agent rows the desktop sidebar does — same source, 1:1.
       getAgentStatusSnapshot?: () => AgentStatusIpcPayload[]
+      recordAgentResumeCheckpoint?: (checkpoint: RuntimeAgentResumeCheckpoint) => void
       /** Same rows, but including the resume-identity-only ones `getAgentStatusSnapshot`
        *  filters out so they can't read as running agents. Mobile native chat needs
        *  them: for an agent that publishes identity separately (Pi), that row is the
@@ -3862,6 +3868,7 @@ export class OrcaRuntimeService {
       this.stats = stats
     }
     this.getAgentStatusSnapshotFn = deps?.getAgentStatusSnapshot ?? null
+    this.recordAgentResumeCheckpointFn = deps?.recordAgentResumeCheckpoint ?? null
     this.getAgentProviderSessionSnapshotFn =
       deps?.getAgentProviderSessionSnapshot ?? deps?.getAgentStatusSnapshot ?? null
     this.getAgentProviderSessionRowsForPaneFn = deps?.getAgentProviderSessionRowsForPane ?? null
@@ -15680,6 +15687,8 @@ export class OrcaRuntimeService {
        *  also drives the SSH surface decision and the liveness verdict: node-pty reports real exits
        *  as -1, so the numeric code alone cannot tell a dead process from a failed stop. */
       providerExitObserved?: boolean
+      /** A proven-dead binding is being replaced; its user-owned surface remains. */
+      preserveSurfaceForRecovery?: boolean
     }
   ): void {
     const pty = this.ptysById.get(ptyId)
@@ -15768,8 +15777,12 @@ export class OrcaRuntimeService {
     }
     const intentionalStopIncarnation = this.intentionalHandlelessPtyStops.get(ptyId)
     const preservesIntentionalHandlelessSurface =
-      this.intentionalHandlelessPtyStops.has(ptyId) &&
-      (intentionalStopIncarnation === null || intentionalStopIncarnation === incarnationId)
+      (this.intentionalHandlelessPtyStops.has(ptyId) &&
+        (intentionalStopIncarnation === null || intentionalStopIncarnation === incarnationId)) ||
+      pty?.preservedExitIncarnationId === incarnationId
+    if (pty && (preservesIntentionalHandlelessSurface || options?.preserveSurfaceForRecovery)) {
+      pty.preservedExitIncarnationId = incarnationId
+    }
     advertisedUrlWatcher.unbindPty(ptyId)
     // Clean up new mobile state for this PTY
     this.mobileSubscribers.delete(ptyId)
@@ -15869,7 +15882,11 @@ export class OrcaRuntimeService {
       this.resolvePtyExitWaiters(pty, ptyId)
       this.pruneDisconnectedPtyTranscript(pty)
     }
-    if (preservesIntentionalHandlelessSurface || preservesAbnormalSshSurface) {
+    if (
+      preservesIntentionalHandlelessSurface ||
+      preservesAbnormalSshSurface ||
+      options?.preserveSurfaceForRecovery === true
+    ) {
       // Why: relay loss is recoverable; keep the HUB-owned pane addressable through the bounded reconnect grace.
       this.touchMobileSessionSnapshotsForPty(ptyId, { immediate: true })
     } else {
@@ -28287,6 +28304,7 @@ export class OrcaRuntimeService {
     if (!this.store) {
       throw new Error('runtime_unavailable')
     }
+    const requestedAt = Date.now()
     const workspace = await this.resolveTerminalWorkspaceLaunchScope(request.worktree)
     const namespace = this.getAgentSessionExecutionNamespace(workspace, request.agent)
     if (
@@ -28349,12 +28367,34 @@ export class OrcaRuntimeService {
       env: startup.env,
       launchConfig: startup.launchConfig,
       launchAgent: request.agent,
+      resumeProviderSession: identity.providerSession,
       presentation: request.presentation ?? 'background',
       tabId: request.placement?.tabId,
       leafId: request.placement?.leafId,
       agentSessionClaim: claim,
       signal: _caller.signal
     })
+    if (terminal.paneKey && terminal.tabId) {
+      try {
+        this.recordAgentResumeCheckpointFn?.({
+          paneKey: terminal.paneKey,
+          tabId: terminal.tabId,
+          worktreeId: workspace.id,
+          connectionId: workspace.connectionId ?? null,
+          agent: request.agent,
+          providerSession: identity.providerSession,
+          requestedAt
+        })
+      } catch {
+        // Why: physical work committed; return its handle so persistence failure cannot strand or duplicate it.
+        terminal.warning = [
+          terminal.warning,
+          'The terminal is running, but its resume identity could not be checkpointed. Verify the original conversation before restarting.'
+        ]
+          .filter(Boolean)
+          .join('\n')
+      }
+    }
     return {
       terminal,
       disposition: terminal.agentSessionDisposition ?? 'created'
@@ -31201,10 +31241,12 @@ export class OrcaRuntimeService {
       const stopResults = await Promise.allSettled(
         orderedLivePtyIds.map(async (ptyId) => ({
           ptyId,
-          stopped: await stopAndWait(ptyId, {
-            keepHistory: true,
-            deadlineMs: teardownRpcDeadline(sleepDeadline)
-          })
+          stopped: await this.withPreservedTerminalSurface(ptyId, () =>
+            stopAndWait(ptyId, {
+              keepHistory: true,
+              deadlineMs: teardownRpcDeadline(sleepDeadline)
+            })
+          )
         }))
       )
       const successfulStopPtyIds = orderedLivePtyIds.filter((_, index) => {
@@ -31379,18 +31421,12 @@ export class OrcaRuntimeService {
 
     const stoppedPtyIds: string[] = []
     for (const ptyId of [...expected].sort()) {
-      if (opts.keepHistory) {
-        this.intentionalHandlelessPtyStops.set(
-          ptyId,
-          this.ptysById.get(ptyId)?.incarnationId ?? null
-        )
-      }
-      try {
-        if (!(await this.ptyController.stopAndWait(ptyId, { keepHistory: opts.keepHistory }))) {
-          throw Object.assign(new Error('terminal_exact_stop_failed'), { ptyId })
-        }
-      } finally {
-        this.intentionalHandlelessPtyStops.delete(ptyId)
+      const stop = () => this.ptyController!.stopAndWait!(ptyId, { keepHistory: opts.keepHistory })
+      const stopped = opts.keepHistory
+        ? await this.withPreservedTerminalSurface(ptyId, stop)
+        : await stop()
+      if (!stopped) {
+        throw Object.assign(new Error('terminal_exact_stop_failed'), { ptyId })
       }
       stoppedPtyIds.push(ptyId)
     }
@@ -31479,6 +31515,20 @@ export class OrcaRuntimeService {
     terminalHandlesByPtyId: Readonly<Record<string, readonly string[]>>
   ): string[] {
     return [...new Set([...ptyIds].flatMap((ptyId) => terminalHandlesByPtyId[ptyId] ?? []))].sort()
+  }
+
+  private async withPreservedTerminalSurface<T>(ptyId: string, stop: () => Promise<T>): Promise<T> {
+    const previous = this.intentionalHandlelessPtyStops.get(ptyId)
+    this.intentionalHandlelessPtyStops.set(ptyId, this.ptysById.get(ptyId)?.incarnationId ?? null)
+    try {
+      return await stop()
+    } finally {
+      if (previous === undefined) {
+        this.intentionalHandlelessPtyStops.delete(ptyId)
+      } else {
+        this.intentionalHandlelessPtyStops.set(ptyId, previous)
+      }
+    }
   }
 
   private commitWorktreeTerminalSleepPtys(args: {
@@ -33064,6 +33114,9 @@ export class OrcaRuntimeService {
     }
     if (state.connected !== undefined) {
       pty.connected = state.connected
+      if (state.connected) {
+        pty.preservedExitIncarnationId = undefined
+      }
       pty.disconnectedAt = state.connected ? null : (pty.disconnectedAt ?? Date.now())
     }
     if (state.lastOutputAt !== undefined) {

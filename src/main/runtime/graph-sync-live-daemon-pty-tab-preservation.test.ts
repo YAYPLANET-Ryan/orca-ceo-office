@@ -15,6 +15,7 @@ import type {
   RuntimeMobileSessionTabsResult
 } from '../../shared/runtime-types'
 import { OrcaRuntimeService } from './orca-runtime'
+import { OrchestrationDb } from './orchestration/db'
 
 vi.mock('electron', () => ({
   BrowserWindow: { fromId: vi.fn(() => ({ isDestroyed: () => false })) },
@@ -234,12 +235,17 @@ function createHarness() {
 }
 
 describe('graph sync must not prune a tab whose daemon PTY is live', () => {
+  let database: OrchestrationDb
   beforeEach(() => {
+    database = new OrchestrationDb(':memory:')
+    vi.spyOn(OrcaRuntimeService.prototype, 'getOrchestrationDb').mockReturnValue(database)
     vi.useFakeTimers({ shouldAdvanceTime: true })
   })
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
+    database.close()
   })
 
   it('keeps a live CLI terminal when the renderer syncs a DIFFERENT worktree', async () => {

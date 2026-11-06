@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDefaultWorkspaceSession } from '../../shared/constants'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type {
@@ -8,6 +8,17 @@ import type {
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { sanitizeWorkspaceSessionTerminalRetirements } from './mobile-session-terminal-persistence-retirement'
 import { OrcaRuntimeService } from './orca-runtime'
+import { OrchestrationDb } from './orchestration/db'
+
+let database: OrchestrationDb
+beforeEach(() => {
+  database = new OrchestrationDb(':memory:')
+  vi.spyOn(OrcaRuntimeService.prototype, 'getOrchestrationDb').mockReturnValue(database)
+})
+afterEach(() => {
+  vi.restoreAllMocks()
+  database.close()
+})
 
 const WORKTREE_ID = 'repo::/worktree'
 const REPO_ID = 'repo'

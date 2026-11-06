@@ -3,6 +3,7 @@ import type { SleepingAgentSessionRecord } from '../../../shared/agent-session-r
 import { makePaneKey } from '../../../shared/stable-pane-id'
 import { useAppStore } from '@/store'
 import { resumeSleepingAgentSessionsForWorktree } from './resume-sleeping-agent-session'
+import { recordPaneIsOwnedByPreservedPane } from './sleeping-agent-pane-ownership'
 
 const initialAppStoreState = useAppStore.getState()
 const LEAF_ID = '33333333-3333-4333-8333-333333333333'
@@ -54,6 +55,17 @@ function makeLayout(leafId: string, ptyId = 'pty-1'): Record<string, unknown> {
 }
 
 describe('waking panes slept by a manual workspace sleep', () => {
+  it('retains ownership of an active resume identity after its dead PTY binding is cleared', () => {
+    const record = makeRecord({ origin: 'live', interrupted: true })
+    useAppStore.setState({
+      activeWorktreeId: 'wt-1',
+      tabsByWorktree: { 'wt-1': [makeTerminalTab('tab-1', 'wt-1')] },
+      terminalLayoutsByTabId: { 'tab-1': { ...makeLayout(LEAF_ID), ptyIdsByLeafId: {} } },
+      ptyIdsByTabId: {},
+      sleepingAgentSessionsByPaneKey: { [record.paneKey]: record }
+    } as never)
+    expect(recordPaneIsOwnedByPreservedPane(record, useAppStore.getState())).toBe(true)
+  })
   it('keeps an interrupted worktree-sleep record owned by a preserved pane', () => {
     const record = makeRecord({ interrupted: true })
     useAppStore.setState({

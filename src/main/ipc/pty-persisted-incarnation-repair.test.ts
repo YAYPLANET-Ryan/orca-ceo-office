@@ -353,7 +353,8 @@ describe('registerPtyHandlers', () => {
         expect(runtime.onPtyExit).toHaveBeenCalledWith(
           'pty-dead-persisted-owner',
           0,
-          'inc-dead-persisted-owner'
+          'inc-dead-persisted-owner',
+          { preserveSurfaceForRecovery: true }
         )
         return
       }
@@ -377,7 +378,8 @@ describe('registerPtyHandlers', () => {
       expect(runtime.onPtyExit).toHaveBeenCalledWith(
         'pty-dead-persisted-owner',
         0,
-        'inc-dead-persisted-owner'
+        'inc-dead-persisted-owner',
+        { preserveSurfaceForRecovery: true }
       )
     }
   )

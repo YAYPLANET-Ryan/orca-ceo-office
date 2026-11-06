@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import test from 'node:test'
+import { test } from 'vitest'
 
-const workflowPath = new URL(
-  '../../.github/workflows/custom-windows-release.yml',
-  import.meta.url
-)
+const workflowPath = new URL('../../.github/workflows/custom-windows-release.yml', import.meta.url)
 const workflow = readFileSync(workflowPath, 'utf8')
 
 test('keeps the CEO Office repository as the packaged update feed', () => {
@@ -19,7 +16,8 @@ test('keeps the CEO Office repository as the packaged update feed', () => {
 
 test('isolates fake-timer updater gates from parallel release regressions', () => {
   const command = 'pnpm exec vitest run --config config/vitest.config.ts'
-  const invocations = workflow.match(/pnpm exec vitest run --config config\/vitest\.config\.ts/g) ?? []
+  const invocations =
+    workflow.match(/pnpm exec vitest run --config config\/vitest\.config\.ts/g) ?? []
   assert.equal(invocations.length, 3)
   const first = workflow.indexOf(command)
   const second = workflow.indexOf(command, first + command.length)

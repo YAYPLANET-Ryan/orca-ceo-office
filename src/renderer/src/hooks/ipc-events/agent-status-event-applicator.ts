@@ -1,5 +1,6 @@
 import { isWslHookRelayConnectionId } from '../../../../shared/wsl-hook-relay-contract'
 import type { AgentStatusIpcPayload } from '../../../../shared/agent-status-types'
+import { isResumableTuiAgent } from '../../../../shared/agent-session-resume'
 import {
   resolveAgentStatusIdentity,
   shouldSuppressInheritedTerminalStatus
@@ -141,13 +142,13 @@ export function createAgentStatusEventApplicator(args: {
       return 'dropped'
     }
     if (data.providerSessionOnly) {
-      if (!data.providerSession || data.agentType !== 'pi') {
+      if (!data.providerSession || !isResumableTuiAgent(data.agentType)) {
         return 'dropped'
       }
       const providerSessionUpdate: AgentStatusBatchUpdate = {
         kind: 'providerSession',
         paneKey,
-        agent: 'pi',
+        agent: data.agentType,
         providerSession: data.providerSession,
         timing: { updatedAt: data.receivedAt },
         routing: {
@@ -155,7 +156,10 @@ export function createAgentStatusEventApplicator(args: {
           worktreeId: data.worktreeId ?? owningWorktreeId,
           ...(ownershipConnectionId !== undefined ? { connectionId: ownershipConnectionId } : {})
         },
-        metadata: data.launchToken ? { launchToken: data.launchToken } : undefined
+        metadata: {
+          ...(data.launchToken ? { launchToken: data.launchToken } : {}),
+          ...(data.observation?.origin === 'launch' ? { preserveLiveStatus: true } : {})
+        }
       }
       if (options?.batch) {
         return options.batch.transaction.apply(providerSessionUpdate) ? 'applied' : 'dropped'
