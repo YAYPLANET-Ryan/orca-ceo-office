@@ -17,6 +17,7 @@ import {
 } from './web-runtime-session-test-harness'
 
 const mocks = vi.hoisted(() => ({
+  toastWarning: vi.fn(),
   getState: vi.fn(),
   setState: vi.fn(),
   subscribe: vi.fn(),
@@ -36,6 +37,8 @@ const mocks = vi.hoisted(() => ({
   getRuntimeEnvironmentIdForWorktree: vi.fn(),
   hasMaterializedWebRuntimeBrowserPage: vi.fn()
 }))
+
+vi.mock('sonner', () => ({ toast: { warning: mocks.toastWarning, error: vi.fn() } }))
 
 vi.mock('../store', () => ({
   useAppStore: {
@@ -78,6 +81,7 @@ afterEach(() => resetWebSessionCloseIntentForTests())
 
 describe('createWebRuntimeSessionTerminal', () => {
   beforeEach(() => {
+    mocks.toastWarning.mockClear()
     stubTerminalCreateEnvironment(mocks)
   })
 
@@ -145,6 +149,7 @@ describe('createWebRuntimeSessionTerminal', () => {
             result: {
               terminal: {
                 handle: `term-${sessionKind}`,
+                ...(sessionKind === 'resume' ? { warning: 'Checkpoint test warning' } : {}),
                 worktreeId: WORKTREE_ID,
                 tabId: hostTabId,
                 paneKey: `${hostTabId}:${FOCUS_LEAF_ID}`
@@ -174,6 +179,11 @@ describe('createWebRuntimeSessionTerminal', () => {
         })
       ).resolves.toEqual({ status: 'created' })
 
+      if (sessionKind === 'resume') {
+        expect(mocks.toastWarning).toHaveBeenCalledWith('Checkpoint test warning', {
+          duration: 10_000
+        })
+      }
       const authorityMethod =
         sessionKind === 'resume' ? 'terminal.ensureAgentSession' : 'terminal.createAgentSession'
       const authorityRequest = runtimeCall.mock.calls.find(

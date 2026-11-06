@@ -2768,6 +2768,8 @@ void app.whenReady().then(async () => {
     // those rows carry the provider session mobile native chat addresses transcripts
     // by — Pi publishes identity that way and would otherwise be unreachable.
     getAgentProviderSessionSnapshot: () => agentHookServer.getStatusSnapshot(),
+    recordAgentResumeCheckpoint: (checkpoint) =>
+      agentHookServer.recordRuntimeResumeIdentity(checkpoint),
     getAgentProviderSessionRowsForPane: (paneKey) =>
       agentHookServer.getStatusSnapshotForPane(paneKey),
     attestAgentHookCompatibilityAuthority: (candidate) =>

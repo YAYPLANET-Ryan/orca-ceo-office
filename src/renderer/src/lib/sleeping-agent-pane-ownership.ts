@@ -1,5 +1,8 @@
 import type { useAppStore } from '@/store'
-import type { SleepingAgentSessionRecord } from '../../../shared/agent-session-resume'
+import {
+  getAgentResumeArgv,
+  type SleepingAgentSessionRecord
+} from '../../../shared/agent-session-resume'
 import type {
   TerminalLayoutSnapshot,
   TerminalPaneLayoutNode,
@@ -152,13 +155,14 @@ export function recordPaneIsRestorablePreservedPane(
   }
   return (
     hasMatchingStablePaneLayout(tabId, stable.leafId, state.terminalLayoutsByTabId) &&
-    hasRestorableStablePanePty(
+    (hasRestorableStablePanePty(
       tab,
       tabId,
       stable.leafId,
       state.ptyIdsByTabId,
       state.terminalLayoutsByTabId
-    )
+    ) ||
+      getAgentResumeArgv(record.agent, record.providerSession) !== null)
   )
 }
 
@@ -192,19 +196,16 @@ export function recordPaneIsOwnedByPreservedPane(
     ) {
       return true
     }
-    // Why: active sessions rely on pane-level cold restore. A preserved leaf
-    // without a PTY/session id can repaint scrollback but cannot resume. A
-    // background wake that mounted this very pane holds a bounded claim on its
-    // pane key so the sweep (and its mirror replay) does not fork the session
-    // meanwhile; a sibling pane of the same tab finishing does not release it.
+    // Preserve exact in-place identity and bounded background restore claims.
     return (
-      hasRestorableStablePanePty(
+      (hasRestorableStablePanePty(
         tab,
         tabId,
         stable.leafId,
         state.ptyIdsByTabId,
         state.terminalLayoutsByTabId
-      ) &&
+      ) ||
+        getAgentResumeArgv(record.agent, record.providerSession) !== null) &&
       (paneWillConnectOnActivation(record.worktreeId, tabId, state) ||
         hasInPlaceRestoreClaim(record.paneKey))
     )

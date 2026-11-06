@@ -22,7 +22,7 @@ jobs:
   # detector keeps verify as the required aggregate and skips the expensive jobs.
   code_paths:
     name: detect code-relevant changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       should_run: ${{ steps.filter.outputs.should_run }}
     steps:
@@ -56,7 +56,7 @@ jobs:
     name: static analysis
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -167,7 +167,7 @@ jobs:
 
   root_directory_guard:
     name: root directory guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -189,7 +189,7 @@ jobs:
   typecheck:
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -217,7 +217,7 @@ jobs:
     name: Git compatibility
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -284,7 +284,7 @@ jobs:
     name: xterm patch sync
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -314,7 +314,7 @@ jobs:
     name: shell contracts
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Why: this job's cost is almost entirely package download, and a stalled mirror has
     # no wall-clock bound of its own. A successful run finishes in ~4.5 minutes, so this
     # is generous; it exists so a wedge fails the job instead of holding the whole run
@@ -432,7 +432,7 @@ jobs:
     name: tests node ${{ matrix.node }} ${{ matrix.shard }}/${{ matrix.shard_total }}
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -481,7 +481,7 @@ jobs:
     name: orcad browser provider
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -514,10 +514,13 @@ jobs:
             src/main/orcad/external-chromium-browser-process.integration.test.ts
 
   cross-version-wire:
+    # Custom stable releases carry a suffix, so explicitly select the published compatibility baseline.
+    env:
+      ORCA_CROSS_VERSION_BASELINE_REF: ${{ github.repository == 'YAYPLANET-Ryan/orca-ceo-office' && 'v1.4.191-ceo.20260903.27' || '' }}
     name: cross-version wire compatibility
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       # Why fetch-depth 0: the harness extracts the newest release tag to skew
@@ -532,6 +535,9 @@ jobs:
           fetch-depth: 0
           filter: blob:none
           persist-credentials: false
+
+      - name: Fetch the historical browser wire baseline
+        run: git fetch --no-tags https://github.com/stablyai/orca.git refs/tags/v1.4.184:refs/tags/v1.4.184
 
       - uses: ./.github/actions/install-node-dependencies
         with:
@@ -549,7 +555,7 @@ jobs:
     name: managed hooks on Node 18
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -574,7 +580,7 @@ jobs:
     name: package
     needs: [code_paths]
     if: needs.code_paths.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -653,6 +659,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup pnpm
@@ -720,6 +727,17 @@ jobs:
       # Why the :parallel variant: identical to build:release except the three
       # electron-vite targets overlap instead of running back to back. The Linux package
       # job already packages and smoke-tests an AppImage built that way.
+      - name: Stamp recovery build provenance
+        if: github.head_ref == 'fix/session-recovery-20261105' || startsWith(github.head_ref, 'ryan/session-recovery-integration-')
+        shell: pwsh
+        env:
+          RECOVERY_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          RECOVERY_BUILD_DATE: ${{ startsWith(github.head_ref, 'ryan/session-recovery-integration-') && '20261106' || '20261105' }}
+        run: |
+          node -e "const fs=require('node:fs');const p=require('./package.json');p.version += '-ceo.' + process.env.RECOVERY_BUILD_DATE + '.' + process.env.GITHUB_RUN_NUMBER;p.orcaRecoverySource=process.env.RECOVERY_SOURCE_SHA;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');"
+          "ORCA_UPDATE_OWNER=YAYPLANET-Ryan" >> $env:GITHUB_ENV
+          "ORCA_UPDATE_REPO=orca-ceo-office" >> $env:GITHUB_ENV
+
       - name: Build package inputs
         run: pnpm run build:release:parallel
 
@@ -737,12 +755,27 @@ jobs:
       - name: Smoke packaged CLI
         run: node config/scripts/smoke-packaged-cli.mjs --app-dir=dist/win-unpacked
 
+      - name: Package recovery installer without publishing
+        if: github.head_ref == 'fix/session-recovery-20261105' || startsWith(github.head_ref, 'ryan/session-recovery-integration-')
+        run: pnpm exec electron-builder --config config/electron-builder.config.cjs --prepackaged dist/win-unpacked --win nsis --publish never
+
+      - name: Retain verified recovery installer
+        if: github.head_ref == 'fix/session-recovery-20261105' || startsWith(github.head_ref, 'ryan/session-recovery-integration-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-recovery-windows-${{ github.event.pull_request.head.sha }}
+          path: |
+            dist/orca-windows-setup.exe
+            dist/orca-windows-setup.exe.blockmap
+          if-no-files-found: error
+          retention-days: 7
+
   # Why: PR E2E is advisory and only validates changed specs; scheduled and
   # release runs retain full-suite coverage.
   e2e-paths:
     name: detect changed e2e specs
     needs: [code_paths]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event.pull_request.draft != true && needs.code_paths.outputs.should_run == 'true'
     # Why: detector only needs to read the checkout; do not inherit repo defaults.
     permissions:
@@ -806,7 +839,7 @@ jobs:
       - managed_hook_node18
       - package
       - package_windows
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       # Why: e2e is deliberately absent from needs. The suite is currently red on

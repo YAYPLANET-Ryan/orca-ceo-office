@@ -119,6 +119,16 @@ export type RuntimeEnsureAgentSessionResult = {
   disposition: 'created' | 'adopted'
 }
 
+export type RuntimeAgentResumeCheckpoint = {
+  paneKey: string
+  tabId: string
+  worktreeId: string
+  connectionId: string | null
+  agent: ResumableTuiAgent
+  providerSession: AgentProviderSessionMetadata
+  requestedAt: number
+}
+
 export type RuntimeCreateAgentSessionRequest = {
   clientOperationId: string
   worktree: string

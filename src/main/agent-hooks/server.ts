@@ -113,10 +113,12 @@ import type { LegacyPaneKeyAliasEntry } from '../../shared/persisted-state-types
 import {
   agentProviderSessionsEqual,
   getAgentResumeArgv,
+  isResumableTuiAgent,
   normalizeAgentProviderSession,
   type AgentProviderSessionMetadata
 } from '../../shared/agent-session-resume'
 import { isCommandCodeNewTurnWhileWorking } from '../../shared/command-code-turn-boundary'
+import type { RuntimeAgentResumeCheckpoint } from '../../shared/agent-session-host-authority'
 
 export type { AgentHookSource }
 
@@ -130,6 +132,10 @@ type EnrichedAgentHookEventPayload = AgentHookEventPayload & {
   restoredUnconfirmed?: true
   /** User-hidden resume identity retained solely for destructive liveness checks. */
   retainedForLiveness?: true
+  /** Explicit runtime resume checkpoint; ordinary user-hidden liveness rows retain their teardown semantics. */
+  runtimeResumeCheckpoint?: true
+  /** Consumed by the first OSC observation; teardown and hydration never carry it forward. */
+  runtimeResumePendingObservation?: true
   /** Persisted proof that a lead boundary was held working only by child agents. */
   claudeLeadBoundaryChildOnly?: true
   /** Live-only: the identity this server resolved, applied verbatim by the renderer. */
@@ -389,6 +395,8 @@ function sanitizeHydratedEntry(
     providerSession,
     providerSessionOnly: providerSessionOnly ? true : undefined,
     retainedForLiveness: retainedForLiveness ? true : undefined,
+    runtimeResumeCheckpoint:
+      record.runtimeResumeCheckpoint === true && providerSession ? true : undefined,
     payload,
     receivedAt,
     stateStartedAt
@@ -463,6 +471,10 @@ function toAgentStatusIpcPayload(entry: EnrichedAgentHookEventPayload): AgentSta
     stateStartedAt: entry.stateStartedAt,
     ...(entry.providerSession ? { providerSession: entry.providerSession } : {}),
     ...(entry.providerSessionOnly ? { providerSessionOnly: true } : {}),
+    ...(entry.runtimeResumeCheckpoint ? { runtimeResumeCheckpoint: true } : {}),
+    ...(entry.retainedForLiveness && !entry.runtimeResumeCheckpoint
+      ? { retainedForLiveness: true }
+      : {}),
     ...(entry.promptInteractionKey ? { promptInteractionKey: entry.promptInteractionKey } : {}),
     ...(entry.restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
     ...(entry.observation ? { observation: entry.observation } : {}),
@@ -885,6 +897,89 @@ export class AgentHookServer {
   /** Provider-session identities, including Pi's metadata-only rows. */
   getProviderSessionIdentities(): AgentHookProviderSessionIdentity[] {
     return this.buildStatusChangeNotification().providerSessions
+  }
+
+  recordRuntimeResumeIdentity(checkpoint: RuntimeAgentResumeCheckpoint): void {
+    const pane = parsePaneKey(checkpoint.paneKey)
+    const providerSession = normalizeAgentProviderSession(checkpoint.providerSession)
+    if (
+      !pane ||
+      pane.tabId !== checkpoint.tabId ||
+      !providerSession ||
+      !checkpoint.worktreeId ||
+      !Number.isFinite(checkpoint.requestedAt) ||
+      !getAgentResumeArgv(checkpoint.agent, providerSession)
+    ) {
+      throw new Error('agent_session_identity_required')
+    }
+    if (this.closedAgentStatusTabIds.has(checkpoint.tabId)) {
+      throw new Error('agent_session_resume_checkpoint_superseded')
+    }
+    if (!this.lastStatusFilePath) {
+      throw new Error('agent_session_resume_checkpoint_unavailable')
+    }
+    const previous = this.state.lastStatusByPaneKey.get(checkpoint.paneKey) as
+      | EnrichedAgentHookEventPayload
+      | undefined
+    const sameIdentity =
+      previous?.payload.agentType === checkpoint.agent &&
+      agentProviderSessionsEqual(checkpoint.agent, previous.providerSession, providerSession)
+    // A late launch completion must not replace a newer provider observation.
+    if (
+      previous &&
+      (previous.receivedAt >= checkpoint.requestedAt ||
+        (!previous.providerSessionOnly &&
+          !previous.restoredUnconfirmed &&
+          previous.payload.state !== 'done')) &&
+      (previous.payload.agentType !== checkpoint.agent ||
+        (previous.providerSession && !sameIdentity))
+    ) {
+      throw new Error('agent_session_resume_checkpoint_superseded')
+    }
+    if (
+      previous &&
+      !previous.providerSessionOnly &&
+      previous.payload.agentType === checkpoint.agent &&
+      (sameIdentity ||
+        (!previous.providerSession && !previous.restoredUnconfirmed) ||
+        previous.receivedAt >= checkpoint.requestedAt)
+    ) {
+      const enriched = {
+        ...previous,
+        runtimeResumeCheckpoint: true as const,
+        providerSession: sameIdentity
+          ? { ...previous.providerSession, ...providerSession }
+          : providerSession
+      }
+      this.state.lastStatusByPaneKey.set(checkpoint.paneKey, enriched)
+      this.scheduleStatusPersist()
+      this.notifyStatusChangeListeners()
+      this.emitEnrichedStatus({ ...enriched, isReplay: true })
+    } else {
+      const enriched = this.applyNormalizedStatus(
+        {
+          paneKey: checkpoint.paneKey,
+          tabId: checkpoint.tabId,
+          worktreeId: checkpoint.worktreeId,
+          connectionId: checkpoint.connectionId,
+          providerSession,
+          providerSessionOnly: true,
+          payload: { agentType: checkpoint.agent, state: 'done', prompt: '' }
+        },
+        undefined,
+        'launch'
+      )
+      enriched.retainedForLiveness = true
+      enriched.runtimeResumeCheckpoint = true
+      enriched.runtimeResumePendingObservation = true
+    }
+    this.flushStatusPersistSync()
+    if (this.lastWrittenJson !== this.serializeStatusFile()) {
+      throw Object.assign(new Error('agent_session_resume_checkpoint_failed'), {
+        agentSessionOperationOutcome: 'unknown' as const
+      })
+    }
+    this.restorePaneAuthority(checkpoint.paneKey)
   }
 
   getStatusSnapshotForPane(paneKey: string): AgentStatusIpcPayload[] {
@@ -1524,14 +1619,15 @@ export class AgentHookServer {
       }
     }
     const identity = resolveAgentStatusIdentity({
-      existing: previous
-        ? {
-            agentType: previous.payload.agentType,
-            state: previous.payload.state,
-            updatedAt: previous.receivedAt,
-            restoredUnconfirmed: previous.restoredUnconfirmed
-          }
-        : undefined,
+      existing:
+        previous && !previous.providerSessionOnly
+          ? {
+              agentType: previous.payload.agentType,
+              state: previous.payload.state,
+              updatedAt: previous.receivedAt,
+              restoredUnconfirmed: previous.restoredUnconfirmed
+            }
+          : undefined,
       incoming: rootContextPreservingPayload.payload.agentType,
       now,
       foreground: this.paneForegroundByPaneKey.get(payload.paneKey) ?? null
@@ -1553,8 +1649,12 @@ export class AgentHookServer {
             // Why: a nested child's session id is not the pane's resumable session;
             // keeping the parent's id with the parent's identity is what lets a
             // cold restore bring back the agent the user actually runs here.
-            ...(identity.inheritedFromActivePane && previous?.providerSession
-              ? { providerSession: previous.providerSession }
+            ...(identity.inheritedFromActivePane
+              ? {
+                  providerSession: previous?.providerSessionOnly
+                    ? undefined
+                    : previous?.providerSession
+                }
               : {}),
             payload: {
               ...rootContextPreservingPayload.payload,
@@ -1605,6 +1705,17 @@ export class AgentHookServer {
     }
     const enriched = {
       ...this.attachStatusTiming(boundaryAwarePayload, now),
+      ...(previous?.runtimeResumeCheckpoint &&
+      previous.payload.agentType === boundaryAwarePayload.payload.agentType &&
+      isResumableTuiAgent(boundaryAwarePayload.payload.agentType) &&
+      (agentProviderSessionsEqual(
+        boundaryAwarePayload.payload.agentType,
+        previous.providerSession,
+        boundaryAwarePayload.providerSession
+      ) ||
+        (origin === 'hook' && boundaryAwarePayload.providerSession))
+        ? { runtimeResumeCheckpoint: true as const }
+        : {}),
       observation: this.stampObservation(boundaryAwarePayload, origin, now),
       // Why: the renderer must not re-derive the nested-hook identity from
       // evidence that may have moved on since this server resolved it.
@@ -2006,7 +2117,7 @@ export class AgentHookServer {
       this.restartedStatusLaunchTokenHashByPaneKey.delete(key)
       this.clearAssistantMessageRetry(key)
       this.clearCodexSubagentPoll(key)
-      clearPaneCacheState(this.state, key)
+      this.clearPaneClaimsRetainingCheckpoint(key)
       this.activeHookTurnCompletedAtByPaneKey.delete(key)
       this.runtimeObservedStatusPaneKeys.delete(key)
       this.currentAuthorityObservations.delete(key)
@@ -2099,7 +2210,7 @@ export class AgentHookServer {
           statusChanged = true
         }
         this.legacyPaneKeyAliases.delete(legacyPaneKey)
-        clearPaneCacheState(this.state, legacyPaneKey)
+        this.clearPaneClaimsRetainingCheckpoint(legacyPaneKey)
         this.activeHookTurnCompletedAtByPaneKey.delete(legacyPaneKey)
         this.currentAuthorityObservations.delete(legacyPaneKey)
         this.promptSentDedupeByPaneKey.delete(legacyPaneKey)
@@ -2109,7 +2220,7 @@ export class AgentHookServer {
         }
         if (shouldClearStablePaneKey) {
           // Why: hydrated rows live under the stable key; if this PTY dies before ptyPaneKey rebuilds, alias cleanup is the only evictor.
-          clearPaneCacheState(this.state, entry.stablePaneKey)
+          this.clearPaneClaimsRetainingCheckpoint(entry.stablePaneKey)
           this.activeHookTurnCompletedAtByPaneKey.delete(entry.stablePaneKey)
           this.runtimeObservedStatusPaneKeys.delete(entry.stablePaneKey)
           this.currentAuthorityObservations.delete(entry.stablePaneKey)
@@ -2265,6 +2376,7 @@ export class AgentHookServer {
       previous.payload.turnCompletedAt === this.activeHookTurnCompletedAtByPaneKey.get(paneKey)
     if (
       !previous?.restoredUnconfirmed &&
+      !previous?.providerSessionOnly &&
       previous?.connectionId === connectionId &&
       previous.tabId === tabId &&
       previous.worktreeId === worktreeId &&
@@ -2287,7 +2399,9 @@ export class AgentHookServer {
     const preservedProviderSession =
       previous?.providerSession &&
       (claimedAgentType === undefined || claimedAgentType === previous.payload.agentType) &&
-      (previous.payload.state !== 'done' || event.payload.state === 'done')
+      (previous.runtimeResumePendingObservation ||
+        (!previous.providerSessionOnly &&
+          (previous.payload.state !== 'done' || event.payload.state === 'done')))
         ? previous.providerSession
         : undefined
     // Why: OSC status is a runtime observation, not a prompt boundary; keep prompt-sent telemetry tied to native hooks.
@@ -2752,7 +2866,11 @@ export class AgentHookServer {
     ) {
       return null
     }
-    const { launchToken: _launchToken, ...resumeIdentity } = entry
+    const {
+      launchToken: _launchToken,
+      runtimeResumePendingObservation: _pendingObservation,
+      ...resumeIdentity
+    } = entry
     return { ...resumeIdentity, providerSessionOnly: true, retainedForLiveness: true }
   }
 
@@ -2832,7 +2950,8 @@ export class AgentHookServer {
     )
     this.connectionTimestampWatermarkById.set(normalizedConnectionId, clearedAt)
     let statusChanged = false
-    for (const [paneKey, rawEntry] of this.state.lastStatusByPaneKey) {
+    // Why: deleting and restoring a checkpoint row during live Map iteration revisits it forever.
+    for (const [paneKey, rawEntry] of Array.from(this.state.lastStatusByPaneKey)) {
       const entry = rawEntry as EnrichedAgentHookEventPayload
       // Why: unstamped rows can't be attributed to one host; leave them for normal pane teardown.
       if (entry.connectionId !== normalizedConnectionId) {
@@ -2840,6 +2959,12 @@ export class AgentHookServer {
       }
       const deleted = this.deleteStatusEntry(paneKey, { preserveAuthority: true })
       if (deleted) {
+        if (deleted.runtimeResumeCheckpoint) {
+          const retained = this.toRetainedProviderSessionRow(deleted)
+          if (retained) {
+            this.state.lastStatusByPaneKey.set(paneKey, retained)
+          }
+        }
         statusChanged = true
         if (deleted.payload.agentType === 'codex') {
           // Why: a replacement remote process may reuse the pane; don't merge it with the lost connection's children.
@@ -2980,6 +3105,20 @@ export class AgentHookServer {
     }
   }
 
+  private clearPaneClaimsRetainingCheckpoint(paneKey: string): void {
+    const existing = this.state.lastStatusByPaneKey.get(paneKey) as
+      | EnrichedAgentHookEventPayload
+      | undefined
+    const retained =
+      existing?.runtimeResumeCheckpoint && !this.isClosedAgentStatusTabForPaneKey(paneKey)
+        ? this.toRetainedProviderSessionRow(existing)
+        : null
+    clearPaneCacheState(this.state, paneKey)
+    if (retained) {
+      this.state.lastStatusByPaneKey.set(paneKey, retained)
+    }
+  }
+
   clearPaneState(paneKey: string): void {
     const resolvedPaneKey = this.resolvePaneKeyAlias(paneKey)
     const paneKeys = new Set([paneKey, resolvedPaneKey])
@@ -2987,7 +3126,7 @@ export class AgentHookServer {
     const hadStatus = this.state.lastStatusByPaneKey.has(resolvedPaneKey)
     this.clearAssistantMessageRetry(resolvedPaneKey)
     this.clearCodexSubagentPoll(resolvedPaneKey)
-    clearPaneCacheState(this.state, resolvedPaneKey)
+    this.clearPaneClaimsRetainingCheckpoint(resolvedPaneKey)
     this.activeHookTurnCompletedAtByPaneKey.delete(resolvedPaneKey)
     this.currentAuthorityObservations.delete(resolvedPaneKey)
     this.promptSentDedupeByPaneKey.delete(resolvedPaneKey)
@@ -2998,7 +3137,7 @@ export class AgentHookServer {
         this.legacyPaneKeyAliases.delete(legacyPaneKey)
         paneKeys.add(legacyPaneKey)
         paneKeys.add(stablePaneKey.stablePaneKey)
-        clearPaneCacheState(this.state, legacyPaneKey)
+        this.clearPaneClaimsRetainingCheckpoint(legacyPaneKey)
         this.activeHookTurnCompletedAtByPaneKey.delete(legacyPaneKey)
         this.currentAuthorityObservations.delete(legacyPaneKey)
         this.promptSentDedupeByPaneKey.delete(legacyPaneKey)
@@ -3384,6 +3523,7 @@ export class AgentHookServer {
         observation: _observation,
         // Why: a verdict is for the event it rode on; hydrate resolves afresh.
         resolvedIdentity: _resolvedIdentity,
+        runtimeResumePendingObservation: _pendingObservation,
         launchToken,
         ...persistedPayload
       } = enrichedPayload

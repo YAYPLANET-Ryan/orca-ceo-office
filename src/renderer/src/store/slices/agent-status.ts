@@ -165,7 +165,11 @@ export type AgentProviderSessionRouting = {
   connectionId?: string | null
 }
 
-export type AgentProviderSessionRecordMetadata = { launchToken?: string }
+export type AgentProviderSessionRecordMetadata = {
+  launchToken?: string
+  preserveLiveStatus?: boolean
+  preserveResumeCheckpoint?: boolean
+}
 
 export type AgentProviderSessionUpdate = {
   kind: 'providerSession'
@@ -2117,10 +2121,22 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           ...(preservesCompletedRecoveryRecord && existingRecord.interrupted !== undefined
             ? { interrupted: existingRecord.interrupted }
             : {}),
-          origin: preservesQuitOrigin ? 'quit' : 'live'
+          origin: preservesQuitOrigin ? 'quit' : 'live',
+          ...(metadata?.preserveResumeCheckpoint ? { resumeTargetPaneKey: paneKey } : {})
         }
-        removedLiveStatus = existingStatus !== undefined
-        const nextLive = removedLiveStatus ? { ...s.agentStatusByPaneKey } : s.agentStatusByPaneKey
+        const preserveLiveStatus =
+          metadata?.preserveLiveStatus === true &&
+          existingStatus?.agentType === agent &&
+          (!existingStatus.providerSession ||
+            agentProviderSessionsEqual(agent, existingStatus.providerSession, providerSession))
+        removedLiveStatus = existingStatus !== undefined && !preserveLiveStatus
+        const nextLive =
+          removedLiveStatus || preserveLiveStatus
+            ? { ...s.agentStatusByPaneKey }
+            : s.agentStatusByPaneKey
+        if (preserveLiveStatus) {
+          nextLive[paneKey] = { ...existingStatus, providerSession }
+        }
         if (removedLiveStatus) {
           delete nextLive[paneKey]
         }

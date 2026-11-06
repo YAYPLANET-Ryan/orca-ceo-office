@@ -49,6 +49,8 @@ export type AgentStatusIpcPayload = ParsedAgentStatusPayload & {
   providerSession?: AgentProviderSessionMetadata
   /** Resume identity update only; the status-shaped fields are transport placeholders. */
   providerSessionOnly?: boolean
+  runtimeResumeCheckpoint?: boolean
+  retainedForLiveness?: boolean
   /** Live-only Command Code turn boundary key; not persisted to last-status.json. */
   promptInteractionKey?: string
   /** See AgentStatusEntry.restoredUnconfirmed — hydrated nonterminal provenance. */

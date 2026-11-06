@@ -418,6 +418,9 @@ async function createWebRuntimeSessionTerminalResult(
         }
       })
       hostCreated = true
+      if ('warning' in created.terminal && typeof created.terminal.warning === 'string') {
+        toast.warning(created.terminal.warning, { duration: 10_000 })
+      }
       createdTabId = created.terminal.tabId
       createdLeafId = legacyAlreadyPlacedInGroup
         ? created.terminal.leafId

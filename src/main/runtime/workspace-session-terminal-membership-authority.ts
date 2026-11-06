@@ -35,7 +35,8 @@ function layoutHasSameMembership(
 
 function rebaseLayout(
   candidate: TerminalLayoutSnapshot | undefined,
-  current: TerminalLayoutSnapshot | undefined
+  current: TerminalLayoutSnapshot | undefined,
+  staleTopology: boolean
 ): TerminalLayoutSnapshot | undefined {
   if (!current) {
     return undefined
@@ -47,7 +48,7 @@ function rebaseLayout(
     ...candidate,
     // Why: renderer layout metadata may move, but only host-persisted live bindings may name PTYs.
     ptyIdsByLeafId: {
-      ...candidate.ptyIdsByLeafId,
+      ...(staleTopology ? {} : candidate.ptyIdsByLeafId),
       ...current.ptyIdsByLeafId
     }
   }
@@ -116,6 +117,11 @@ function rebaseIncarnationBindings(
     Object.values(session.tabsByWorktree).flatMap((tabs) => tabs.map((tab) => tab.id))
   )
   const allowedPaneKeys = new Set<string>()
+  const tabsById = new Map(
+    Object.values(session.tabsByWorktree).flatMap((tabs) =>
+      tabs.map((tab) => [tab.id, tab] as const)
+    )
+  )
   for (const tabId of terminalTabIds) {
     const layout = session.terminalLayoutsByTabId[tabId]
     if (!layout) {
@@ -124,7 +130,14 @@ function rebaseIncarnationBindings(
     const leafIds = new Set<string>()
     collectLeafIds(layout.root, leafIds)
     for (const leafId of leafIds) {
-      allowedPaneKeys.add(`${tabId}:${leafId}`)
+      if (
+        layout.ptyIdsByLeafId?.[leafId] ||
+        (layout.root?.type === 'leaf' &&
+          layout.root.leafId === leafId &&
+          tabsById.get(tabId)?.ptyId)
+      ) {
+        allowedPaneKeys.add(`${tabId}:${leafId}`)
+      }
     }
   }
   const merged = {
@@ -227,7 +240,8 @@ export function rebaseWorkspaceSessionTerminalMembership(
     for (const tabId of terminalTabIds) {
       const layout = rebaseLayout(
         incoming.terminalLayoutsByTabId[tabId],
-        prior.terminalLayoutsByTabId[tabId]
+        prior.terminalLayoutsByTabId[tabId],
+        incomingRevision < priorRevision
       )
       if (layout) {
         terminalLayoutsByTabId[tabId] = layout

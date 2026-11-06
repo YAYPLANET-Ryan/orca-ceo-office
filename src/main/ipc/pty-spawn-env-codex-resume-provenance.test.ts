@@ -262,9 +262,12 @@ describe('registerPtyHandlers', () => {
         )
         expect(daemonSpawn).not.toHaveBeenCalled()
       })
-      it('blocks an unverifiable resume on the runtime controller spawn path', async () => {
-        // Why: the runtime/relay controller is a second spawn entry point; the invariant
-        // has to hold there too even though it has no channel for the notice.
+      it.each([
+        { transcriptPath: ORIGIN_ROLLOUT, trusted: false },
+        { transcriptPath: undefined, trusted: false },
+        { transcriptPath: '/Users/example/.claude/projects/repo/session.jsonl', trusted: false },
+        { transcriptPath: ORIGIN_ROLLOUT, trusted: true }
+      ])('preserves explicit runtime resume intent: %j', async ({ transcriptPath, trusted }) => {
         const daemonSpawn = setupResumeDaemonProvider()
         const runtime = {
           setPtyController: vi.fn(),
@@ -282,29 +285,41 @@ describe('registerPtyHandlers', () => {
           undefined,
           undefined,
           undefined,
-          { prepareCodexSessionResume: prepareResumeWithTrustedHomes([OTHER_HOME]) }
+          {
+            prepareCodexSessionResume: prepareResumeWithTrustedHomes([
+              trusted ? ORIGIN_HOME : OTHER_HOME
+            ])
+          }
         )
         const controller = runtime.setPtyController.mock.calls[0]?.[0] as {
           spawn(args: Record<string, unknown>): Promise<{ id: string }>
         }
 
-        await expect(
-          controller.spawn({
-            cols: 80,
-            rows: 24,
-            command: `codex 'resume' '${RESUME_SESSION_ID}'`,
-            env: { ORCA_SEQUENCED_STARTUP_COMMAND: `codex 'resume' '${RESUME_SESSION_ID}'` },
-            launchAgent: 'codex',
-            resumeProviderSession: {
-              key: 'session_id',
-              id: RESUME_SESSION_ID,
-              transcriptPath: ORIGIN_ROLLOUT
-            }
-          })
-        ).rejects.toThrow(/could not verify the originating Codex session file/)
+        const spawn = controller.spawn({
+          cols: 80,
+          rows: 24,
+          command: `codex 'resume' '${RESUME_SESSION_ID}'`,
+          env: { ORCA_SEQUENCED_STARTUP_COMMAND: `codex 'resume' '${RESUME_SESSION_ID}'` },
+          launchAgent: 'codex',
+          resumeProviderSession: {
+            key: 'session_id',
+            id: RESUME_SESSION_ID,
+            ...(transcriptPath ? { transcriptPath } : {})
+          }
+        })
 
-        expect(daemonSpawn).not.toHaveBeenCalled()
-        expect(runtime.noteTerminalSpawnCommand).not.toHaveBeenCalled()
+        if (!trusted) {
+          await expect(spawn).rejects.toThrow('could not verify the originating Codex session file')
+          expect(daemonSpawn).not.toHaveBeenCalled()
+          expect(runtime.registerPty).not.toHaveBeenCalled()
+          return
+        }
+        await spawn
+        const spawnOptions = daemonSpawn.mock.calls.at(-1)![0]
+        expect(spawnOptions.command).toBe(`codex 'resume' '${RESUME_SESSION_ID}'`)
+        expect(spawnOptions.env.ORCA_SEQUENCED_STARTUP_COMMAND).toBe(
+          `codex 'resume' '${RESUME_SESSION_ID}'`
+        )
       })
     })
   })

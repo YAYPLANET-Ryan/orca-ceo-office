@@ -161,7 +161,7 @@ describe('runtime-owned worktree activation with an unhydrated host mirror', () 
     expect(after.sleepingAgentSessionsByPaneKey[paneKey]).toBeDefined()
   })
 
-  it('control: a local worktree with a dead pane still gets the resume fallback', () => {
+  it('control: a local PTY-less pane retains its exact identity for in-place cold restore', () => {
     const worktree = { ...makeCreatedAgentWorktree(), createdWithAgent: undefined }
     const state = baseState(worktree)
     // Local husk tab: same shape, non-mirror tab id.
@@ -220,9 +220,9 @@ describe('runtime-owned worktree activation with an unhydrated host mirror', () 
 
     const after = useAppStore.getState()
     const tabs = after.tabsByWorktree[worktree.id] ?? []
-    expect(tabs).toHaveLength(2)
-    const replacement = tabs.find((tab) => tab.id !== localTabId)!
-    expect(after.automaticAgentResumeClaimsByTabId[replacement.id]?.providerSession).toEqual({
+    expect(tabs.map((tab) => tab.id)).toEqual([localTabId])
+    expect(after.automaticAgentResumeClaimsByTabId).toEqual({})
+    expect(after.sleepingAgentSessionsByPaneKey[paneKey]?.providerSession).toEqual({
       key: 'session_id',
       id: 'codex-session-dead-1'
     })

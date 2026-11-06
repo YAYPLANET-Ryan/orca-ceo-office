@@ -132,10 +132,12 @@ export async function prepareRuntimePtySpawn(
     ? await ctx.deps.resolveCodexResumeLaunch(args.command, codexResumePreparation)
     : ctx.deps.noCodexResumeLaunch(ctx.preAdoptedStablePane ? undefined : args.command)
   const codexResumeHome = codexResumeLaunch.codexResumeHome
-  // Why: the drop still applies here, but this controller's result has no field for
-  // notifyResumeUnavailable — runtime/relay panes start fresh without the notice.
-  // Why: same contract as the IPC spawn path (spawn-env-codex.ts); runtime-created
-  // terminals carry user-authored commands too.
+  // Runtime callers cannot display the renderer's fresh-start notice; preserve explicit resume intent.
+  if (codexResumeLaunch.droppedResumeArgv) {
+    throw new Error(
+      'Cannot resume the requested Codex conversation: its transcript or runtime provenance could not be verified. Restore the original session source and retry.'
+    )
+  }
   const customCommandShell = resolveCustomCommandContractShell({
     applies:
       !isTuiAgent(args.launchAgent) &&

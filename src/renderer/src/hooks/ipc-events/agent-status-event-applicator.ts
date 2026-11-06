@@ -1,5 +1,6 @@
 import { isWslHookRelayConnectionId } from '../../../../shared/wsl-hook-relay-contract'
 import type { AgentStatusIpcPayload } from '../../../../shared/agent-status-types'
+import { providerSessionStatusUpdate } from './agent-provider-session-update'
 import {
   resolveAgentStatusIdentity,
   shouldSuppressInheritedTerminalStatus
@@ -10,7 +11,7 @@ import { shouldSuppressCodexAutoApprovalStatus } from '@/components/terminal-pan
 import { resolveAgentStatusTerminalTitle } from '@/lib/agent-status-terminal-title'
 import { track } from '@/lib/telemetry'
 import { resolveAgentPaneAuthorityKey } from '@/store/slices/agent-pane-authority'
-import type { AgentStatusBatchUpdate, AgentStatusUpdate } from '@/store/slices/agent-status'
+import type { AgentStatusUpdate } from '@/store/slices/agent-status'
 import { observeAgentHookCompletionForNotification } from '../agent-hook-completion-notifications'
 import { useAppStore } from '../../store'
 import {
@@ -141,21 +142,15 @@ export function createAgentStatusEventApplicator(args: {
       return 'dropped'
     }
     if (data.providerSessionOnly) {
-      if (!data.providerSession || data.agentType !== 'pi') {
-        return 'dropped'
-      }
-      const providerSessionUpdate: AgentStatusBatchUpdate = {
-        kind: 'providerSession',
+      const providerSessionUpdate = providerSessionStatusUpdate(
+        data,
         paneKey,
-        agent: 'pi',
-        providerSession: data.providerSession,
-        timing: { updatedAt: data.receivedAt },
-        routing: {
-          tabId: ownerTabId,
-          worktreeId: data.worktreeId ?? owningWorktreeId,
-          ...(ownershipConnectionId !== undefined ? { connectionId: ownershipConnectionId } : {})
-        },
-        metadata: data.launchToken ? { launchToken: data.launchToken } : undefined
+        ownerTabId,
+        owningWorktreeId,
+        ownershipConnectionId
+      )
+      if (!providerSessionUpdate) {
+        return 'dropped'
       }
       if (options?.batch) {
         return options.batch.transaction.apply(providerSessionUpdate) ? 'applied' : 'dropped'
