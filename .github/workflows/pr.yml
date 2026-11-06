@@ -1483,6 +1483,7 @@ jobs:
             dist/ceo-installer-manifest.json
             dist/ceo-disposable-installer-proof.json
             dist/ceo-protocol55-fallback-proof.json
+            dist/ceo-nsis-process-query-proof.json
           if-no-files-found: error
 
   e2e:

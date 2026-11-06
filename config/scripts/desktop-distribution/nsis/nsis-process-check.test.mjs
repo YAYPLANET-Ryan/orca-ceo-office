@@ -8,7 +8,9 @@ const processCheck = readFileSync(
 )
 
 function readPowerShellProbe(source = processCheck) {
-  const match = source.match(/nsExec::Exec `"\$PowerShellPath"(.*?) -(?:C|Command) "([^"\n]+)"`/)
+  const match = source.match(
+    /nsExec::Exec(?: \/TIMEOUT=\d+)? `"\$PowerShellPath"(.*?) -(?:C|Command) "([^"\n]+)"`/
+  )
   if (!match) {
     throw new Error('The NSIS PowerShell invocation was not found')
   }

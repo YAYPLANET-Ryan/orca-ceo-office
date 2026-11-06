@@ -59,6 +59,9 @@ function Assert-ProbeFiles {
 }
 try {
     $env:ORCA_BACKGROUND_LAUNCH='1'
+    Set-ProbePhase 'PROCESS_QUERY_POLICY'
+    & node .github/scripts/check-nsis-process-query-abort.mjs
+    if($LASTEXITCODE -ne 0){throw 'NSIS unsafe process-query continuation policy failed'}
     Set-ProbePhase 'NORMAL_INSTALL'
     Install-Probe
     Set-ProbePhase 'VERIFY_NORMAL_INSTALL'
