@@ -1309,12 +1309,6 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Stamp the CEO review package
-        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
-        env:
-          ORCA_RECOVERY_SOURCE: ${{ github.event.pull_request.head.sha }}
-        run: node .github/scripts/stamp-ceo-build.mjs
-
       # Electron and builder releases fix what this downloads; the lockfile churns far more often.
       - name: Resolve electron-builder download versions
         id: eb-versions
@@ -1358,6 +1352,12 @@ jobs:
           --no-file-parallelism
           config/scripts/desktop-distribution/nsis/nsis-process-check.test.mjs
           config/scripts/performance/idle-cpu/idle-cpu-process-sampling.test.mjs
+
+      - name: Stamp the CEO review package
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        env:
+          ORCA_RECOVERY_SOURCE: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/stamp-ceo-build.mjs
 
       - name: Resolve the Windows Rust build scope
         id: rust-scope
@@ -1445,22 +1445,29 @@ jobs:
         if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: pnpm exec electron-builder --config config/electron-builder.config.cjs --prepackaged dist/win-unpacked --win nsis --publish never --config.artifactName=orca-ceo-setup.exe
+        run: pnpm exec electron-builder --config config/electron-builder.config.cjs --prepackaged dist/win-unpacked --win nsis --publish never --config.nsis.artifactName=orca-ceo-setup.exe --config.nsis.runAfterFinish=false
 
       - name: Verify and record the CEO installer files
+        id: ceo-manifest
         if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
         env:
           ORCA_RECOVERY_SOURCE: ${{ github.event.pull_request.head.sha }}
         run: node .github/scripts/write-ceo-installer-manifest.mjs
 
-      - name: Retain the CEO review installer and hashes
+      - name: Install and repair the CEO artifact on the disposable runner
         if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        shell: pwsh
+        run: ./config/scripts/windows-release/Invoke-DisposableInstallerProbe.ps1 -ManifestPath dist/ceo-installer-manifest.json
+
+      - name: Retain the CEO review installer and hashes
+        if: always() && github.repository == 'YAYPLANET-Ryan/orca-ceo-office' && steps.ceo-manifest.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
-          name: orca-ceo-windows-${{ github.event.pull_request.head.sha }}
+          name: orca-ceo-windows-${{ github.event.pull_request.head.sha }}-attempt-${{ github.run_attempt }}
           path: |
             dist/orca-ceo-setup.exe
             dist/ceo-installer-manifest.json
+            dist/ceo-disposable-installer-proof.json
           if-no-files-found: error
 
   e2e:

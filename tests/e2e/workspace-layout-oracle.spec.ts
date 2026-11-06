@@ -476,7 +476,7 @@ const SCENARIOS: Scenario[] = [
               page.evaluate(
                 ({ tabId, leafId, marker }) => {
                   const state = window.__store!.getState()
-                  const ptyId = state.terminalLayoutsByTabId[tabId]?.ptyIdsByLeafId[leafId]
+                  const ptyId = state.terminalLayoutsByTabId[tabId]?.ptyIdsByLeafId?.[leafId]
                   const pane = window.__paneManagers
                     ?.get(tabId)
                     ?.getPanes()

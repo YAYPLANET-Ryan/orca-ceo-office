@@ -52,16 +52,17 @@ export function seedResumeLaunchIdentity(args: {
     return true
   }
   try {
-    agentHookServer.recordLaunchResumeIdentity({
+    const outcome = agentHookServer.recordLaunchResumeIdentity({
       paneKey: args.paneKey,
       ...(typeof args.worktreeId === 'string' ? { worktreeId: args.worktreeId } : {}),
       agentType: agent,
       providerSession,
       launchedAt: args.launchedAt
     })
-    return agentHookServer.flushResumeIdentityCheckpoint()
+    return outcome !== 'refused' && agentHookServer.flushResumeIdentityCheckpoint()
   } catch {
     // The physical terminal already exists; preserve its handle and report the failed checkpoint.
+    console.warn('[agent-hooks] Resume identity checkpoint unavailable')
     return false
   }
 }

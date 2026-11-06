@@ -94,12 +94,13 @@ describe('a resume launch seeds the pane identity', () => {
       '/hook/codex'
     )
     expect(response.status).toBe(204)
-    server.recordLaunchResumeIdentity({
+    const outcome = server.recordLaunchResumeIdentity({
       paneKey: PANE,
       agentType: 'codex',
       providerSession: RESUMED,
       launchedAt
     })
+    expect(outcome).toBe('refused')
     expect(server.getStatusSnapshotForPane(PANE)[0]?.providerSession?.id).toBe('agent-reported')
   })
 
@@ -149,6 +150,36 @@ describe('a resume launch seeds the pane identity', () => {
       state: 'working',
       providerSession: RESUMED
     })
+    server.reconcileEndedProcessForPaneKeys([PANE], {
+      preserveResumeIdentity: true,
+      endedPresence: { agent: 'opencode2', session: RESUMED.id, ended: true }
+    })
+    expect(
+      server.recordLaunchResumeIdentity({
+        paneKey: PANE,
+        agentType: 'opencode2',
+        providerSession: RESUMED,
+        launchedAt: 1
+      })
+    ).toBe('seeded')
+    server.ingestTerminalStatus({
+      paneKey: PANE,
+      origin: 'process',
+      payload: { state: 'working', prompt: '', agentType: 'opencode2' }
+    })
+    const [resumed] = server.getStatusSnapshotForPane(PANE)
+    expect(resumed).toMatchObject({ state: 'working', providerSession: RESUMED })
+    expect(resumed?.providerSessionOnly).toBeUndefined()
+    server.reconcileEndedProcessForPaneKeys([PANE], {
+      preserveResumeIdentity: true,
+      endedPresence: { agent: 'opencode2', session: RESUMED.id, ended: true }
+    })
+    server.ingestTerminalStatus({
+      paneKey: PANE,
+      origin: 'process',
+      payload: { state: 'working', prompt: '', agentType: 'opencode2' }
+    })
+    expect(server.getStatusSnapshotForPane(PANE)[0]?.providerSession).toBeUndefined()
   })
 
   it('keeps the seeded identity across a host restart', async () => {
@@ -160,6 +191,15 @@ describe('a resume launch seeds the pane identity', () => {
       providerSession: RESUMED,
       launchedAt: Date.now()
     })
+    server.ingestTerminalStatus({
+      paneKey: PANE,
+      origin: 'process',
+      payload: { state: 'working', prompt: '', agentType: 'codex' }
+    })
+    server.reconcileEndedProcessForPaneKeys([PANE], {
+      preserveResumeIdentity: true,
+      endedPresence: { agent: 'codex', session: RESUMED.id, ended: true }
+    })
     server.stop()
     servers.length = 0
     const restarted = await startServer()
@@ -170,6 +210,12 @@ describe('a resume launch seeds the pane identity', () => {
         providerSessionOnly: true
       })
     ])
+    restarted.ingestTerminalStatus({
+      paneKey: PANE,
+      origin: 'process',
+      payload: { state: 'working', prompt: '', agentType: 'codex' }
+    })
+    expect(restarted.getStatusSnapshotForPane(PANE)[0]?.providerSession).toBeUndefined()
   })
 
   it('ignores a pane key that is not a stable tab:leaf key', async () => {
