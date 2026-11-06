@@ -278,6 +278,29 @@ async function runMaterializationJourney(
       { timeout: 20_000, message: 'Reconnect never materialized the sleeping host surface' }
     )
     .toBe(true)
+    .catch(async (error: unknown) => {
+      const snapshot = await callRuntime<RuntimeMobileSessionTabsResult>(
+        page,
+        environmentId,
+        'session.tabs.list',
+        { worktree: `id:${worktreeId}` }
+      )
+      await test.info().attach('pending-host-materialization-evidence', {
+        body: JSON.stringify(
+          {
+            originalHandle,
+            replacementHandle,
+            tabs: snapshot.tabs.filter(
+              (entry) => entry.type === 'terminal' && entry.parentTabId === created.tab.parentTabId
+            )
+          },
+          null,
+          2
+        ),
+        contentType: 'application/json'
+      })
+      throw error
+    })
   expect(replacementHandle).not.toBeNull()
 
   // Why: parking the host PTY can clear this client's active-worktree selection, so reselect the

@@ -5,6 +5,10 @@ import { test, expect } from './helpers/orca-app'
 import { TEST_REPO_PATH_FILE } from './global-setup'
 import { attachRepoAndOpenTerminal, createRestartSession } from './helpers/orca-restart'
 import { cleanupE2EDaemons } from './helpers/electron-process-shutdown'
+import {
+  attachRestartTerminalEvidence,
+  watchRestartExitEvidence
+} from './helpers/restart-continuity-evidence'
 import { ensureTerminalVisible, waitForSessionReady } from './helpers/store'
 import {
   execInTerminal,
@@ -56,6 +60,7 @@ for (const [coldRestart, observedExit] of [
     const repoPath = readFileSync(TEST_REPO_PATH_FILE, 'utf8').trim()
     const session = createRestartSession(testInfo)
     let app: ElectronApplication | null = null
+    let exitEvidence: string[] = []
     try {
       const first = await session.launch()
       app = first.app
@@ -65,6 +70,7 @@ for (const [coldRestart, observedExit] of [
       await waitForActiveTerminalManager(first.page, 30_000)
       await waitForPaneCount(first.page, 1, 30_000)
       const descriptor = await waitForActivePaneHookDescriptor(first.page)
+      exitEvidence = await watchRestartExitEvidence(first.page, descriptor.paneKey)
       const ptyId = await waitForActivePanePtyId(first.page)
       const marker = `PRESERVED_SCROLLBACK_${Date.now()}`
       await execInTerminal(first.page, ptyId, `echo ${marker}`)
@@ -102,7 +108,11 @@ for (const [coldRestart, observedExit] of [
       await ensureTerminalVisible(second.page)
       await waitForActiveTerminalManager(second.page, 30_000)
       await waitForPaneCount(second.page, 1, 30_000)
-      await waitForTerminalOutput(second.page, marker, 30_000)
+      try {
+        await waitForTerminalOutput(second.page, marker, 30_000)
+      } finally {
+        await attachRestartTerminalEvidence(second.page, testInfo, 'restored-terminal-evidence')
+      }
       if (observedExit) {
         // Why: a negative resume assertion must outlive the full visible-process confirmation ladder.
         await second.page.waitForTimeout(8500)
@@ -122,6 +132,10 @@ for (const [coldRestart, observedExit] of [
       }
       await second.page.screenshot({ path: testInfo.outputPath('restored-conversation.png') })
     } finally {
+      await testInfo.attach('first-launch-exit-evidence', {
+        body: JSON.stringify(exitEvidence, null, 2),
+        contentType: 'application/json'
+      })
       if (app) {
         await session.close(app)
       }
