@@ -212,10 +212,11 @@ export abstract class AgentHookServerIngestTerminal extends AgentHookServerLaunc
       previous?.payload.turnCompletedAt !== undefined &&
       previous.payload.turnCompletedAt === this.activeHookTurnCompletedAtByPaneKey.get(paneKey)
     const retiredIdentity =
-      newRun &&
       previous?.providerSessionOnly === true &&
-      previous.agentPresence?.ended === true &&
-      previous.observation?.origin !== 'launch'
+      ((previous.runtimeResumeCheckpoint === true && !previous.runtimeResumePendingObservation) ||
+        (newRun &&
+          previous.agentPresence?.ended === true &&
+          previous.observation?.origin !== 'launch'))
     if (
       !retiredIdentity &&
       (previous?.providerSessionOnly !== true || previous.observation?.origin !== 'launch') &&

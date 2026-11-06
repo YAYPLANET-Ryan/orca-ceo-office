@@ -43,6 +43,7 @@ export abstract class AgentHookServerPersistence extends AgentHookServerHydratio
         programStatusOnly: _programStatusOnly,
         // Hydration restamps restoredUnconfirmed.
         restoredUnconfirmed: _restoredUnconfirmed,
+        runtimeResumePendingObservation: _pendingResumeObservation,
         // Observation sequences belong to this runtime.
         observation: _observation,
         // Replay provenance is runtime-only and must not survive another restart.

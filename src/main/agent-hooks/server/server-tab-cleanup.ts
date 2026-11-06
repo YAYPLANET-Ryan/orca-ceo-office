@@ -1,12 +1,12 @@
 import { clearPaneCacheState } from '../../../shared/agent-hook-listener/listener-state'
 import { paneCacheKeyMatchesTab } from './server-status-identity'
-import { AgentHookServerCleanup } from './server-cleanup'
+import { AgentHookServerConnectionCleanup } from './server-connection-cleanup'
 import type { EnrichedAgentHookEventPayload } from './server-types'
 import { releaseAgentExitKey } from './agent-exit-evidence'
 import type { RefusedPaneResume } from '../../../shared/agent-status/contracts/agent-status-ipc-payload'
 import { agentProviderSessionsEqual } from '../../../shared/agent-session/lifecycle/agent-session-resume'
 
-export abstract class AgentHookServerTabCleanup extends AgentHookServerCleanup {
+export abstract class AgentHookServerTabCleanup extends AgentHookServerConnectionCleanup {
   /** The host refused `paneKey`'s saved resume because a native chat is its conversation's home:
    *  forget the pane's claim here, with no resumable remnant, and tell renderers to forget theirs. */
   forgetRefusedPaneResume(paneKey: string, refused: RefusedPaneResume): void {
@@ -171,7 +171,7 @@ export abstract class AgentHookServerTabCleanup extends AgentHookServerCleanup {
     const hadStatus = previousStatus !== undefined
     this.clearAssistantMessageRetry(resolvedPaneKey)
     this.clearTranscriptPoll(resolvedPaneKey)
-    clearPaneCacheState(this.state, resolvedPaneKey)
+    this.clearPaneClaimsRetainingCheckpoint(resolvedPaneKey)
     this.activeHookTurnCompletedAtByPaneKey.delete(resolvedPaneKey)
     this.currentAuthorityObservations.delete(resolvedPaneKey)
     this.promptSentDedupeByPaneKey.delete(resolvedPaneKey)
@@ -187,7 +187,7 @@ export abstract class AgentHookServerTabCleanup extends AgentHookServerCleanup {
         this.legacyPaneKeyAliases.delete(legacyPaneKey)
         paneKeys.add(legacyPaneKey)
         paneKeys.add(alias.stablePaneKey)
-        clearPaneCacheState(this.state, legacyPaneKey)
+        this.clearPaneClaimsRetainingCheckpoint(legacyPaneKey)
         this.activeHookTurnCompletedAtByPaneKey.delete(legacyPaneKey)
         this.currentAuthorityObservations.delete(legacyPaneKey)
         this.promptSentDedupeByPaneKey.delete(legacyPaneKey)

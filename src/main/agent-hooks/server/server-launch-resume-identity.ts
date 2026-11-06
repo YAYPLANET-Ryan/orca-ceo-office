@@ -24,7 +24,8 @@ export abstract class AgentHookServerLaunchResumeIdentity extends AgentHookServe
       previous.observation &&
       typeof previous.observation === 'object' &&
       'origin' in previous.observation &&
-      previous.observation.origin === 'launch'
+      previous.observation.origin === 'launch' &&
+      previous.runtimeResumePendingObservation === true
     if (
       previous &&
       (previous.providerSessionOnly === true
@@ -33,10 +34,33 @@ export abstract class AgentHookServerLaunchResumeIdentity extends AgentHookServe
           typeof previous.receivedAt === 'number' &&
           previous.receivedAt >= event.launchedAt)
     ) {
+      if (
+        sameIdentity &&
+        !previous.providerSessionOnly &&
+        'receivedAt' in previous &&
+        typeof previous.receivedAt === 'number' &&
+        'stateStartedAt' in previous &&
+        typeof previous.stateStartedAt === 'number'
+      ) {
+        if (
+          !this.writeLegacyStatusRow({
+            ...previous,
+            receivedAt: previous.receivedAt,
+            stateStartedAt: previous.stateStartedAt,
+            runtimeResumeCheckpoint: true
+          })
+        ) {
+          return 'refused'
+        }
+        this.scheduleStatusPersist()
+      }
       return sameIdentity ? 'deduped' : 'refused'
     }
     const identity: AgentHookEventPayload &
-      Pick<EnrichedAgentHookEventPayload, 'retainedForLiveness'> = {
+      Pick<
+        EnrichedAgentHookEventPayload,
+        'retainedForLiveness' | 'runtimeResumeCheckpoint' | 'runtimeResumePendingObservation'
+      > = {
       paneKey,
       tabId: parsedPaneKey.tabId,
       ...(event.worktreeId?.trim() ? { worktreeId: event.worktreeId.trim() } : {}),
@@ -45,6 +69,8 @@ export abstract class AgentHookServerLaunchResumeIdentity extends AgentHookServe
       providerSessionOnly: true,
       // Hydration must retain this identity even if no first turn occurs before restart.
       retainedForLiveness: true,
+      runtimeResumeCheckpoint: true,
+      runtimeResumePendingObservation: true,
       payload: { state: 'done', prompt: '', agentType: event.agentType }
     }
     return this.applyNormalizedStatus(identity, undefined, 'launch') ? 'seeded' : 'refused'
