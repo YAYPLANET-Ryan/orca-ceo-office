@@ -17,12 +17,18 @@ if((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvarian
 [IO.Directory]::CreateDirectory($root)|Out-Null
 $evidence=[ordered]@{result='FAIL';source=$manifest.source;version=$manifest.version;rounds=@();
     securityClearance='NOT_ESTABLISHED';protocolRollback='NOT_TESTED';actualConversationLaptopReboot='NOT_TESTED';
-    installedWindowResponse='NOT_TESTED';sameMainProcess6768='NOT_TESTED';installedNativePty='NOT_TESTED'}
+    installedWindowResponse='NOT_TESTED';sameMainProcess6768='NOT_TESTED';installedNativePty='NOT_TESTED';phase='PREPARE'}
+$completed=$false
+function Set-ProbePhase([string]$Name) {
+    $evidence.phase=$Name
+    Write-Host ('[disposable-install] '+$Name)
+    $evidence|ConvertTo-Json -Depth 8|Set-Content -LiteralPath 'dist/ceo-disposable-installer-proof.json' -Encoding UTF8
+}
 function Stop-ProbeApp {
-    foreach($entry in @(Get-CimInstance Win32_Process -Filter "Name='Orca.exe'")){
-        if($entry.ExecutablePath -and $entry.ExecutablePath.StartsWith($install+'\',[StringComparison]::OrdinalIgnoreCase)){
-            & taskkill.exe /PID $entry.ProcessId /T /F 2>$null|Out-Null
-            Wait-Process -Id $entry.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
+    foreach($entry in @(Get-Process -Name Orca -ErrorAction SilentlyContinue)){
+        if($entry.Path -and $entry.Path.StartsWith($install+'\',[StringComparison]::OrdinalIgnoreCase)){
+            & taskkill.exe /PID $entry.Id /T /F 2>$null|Out-Null
+            Wait-Process -Id $entry.Id -Timeout 15 -ErrorAction SilentlyContinue
         }
     }
 }
@@ -53,7 +59,9 @@ function Assert-ProbeFiles {
 }
 try {
     $env:ORCA_BACKGROUND_LAUNCH='1'
+    Set-ProbePhase 'NORMAL_INSTALL'
     Install-Probe
+    Set-ProbePhase 'VERIFY_NORMAL_INSTALL'
     Assert-ProbeFiles
     $evidence.rounds+=@{kind='NORMAL_INSTALL';result='PASS'}
     Stop-ProbeApp
@@ -65,10 +73,13 @@ try {
     Remove-Item -LiteralPath $asar
     [IO.File]::WriteAllBytes($pak,[byte[]]@())
     [IO.File]::WriteAllBytes($cli,[byte[]]@())
+    Set-ProbePhase 'REPAIR_INSTALL'
     Install-Probe
+    Set-ProbePhase 'VERIFY_REPAIR'
     Assert-ProbeFiles
     $evidence.rounds+=@{kind='REPAIR_MISSING_ASAR_ZERO_PAK_CLI';result='PASS'}
     Stop-ProbeApp
+    Set-ProbePhase 'WINDOW_SERVER_READINESS'
     $busy=@(Get-NetTCPConnection -LocalPort 6768,9335 -State Listen -ErrorAction SilentlyContinue)
     if($busy.Count){throw 'Disposable readiness ports are already occupied'}
     $probeProfile=Join-Path $root 'isolated-profile'
@@ -94,17 +105,29 @@ try {
     & node .github/scripts/check-installed-window.mjs
     if($LASTEXITCODE -ne 0){throw 'Installed renderer did not respond over CDP'}
     $evidence.installedWindowResponse='PASS_HIDDEN_RENDERER_CDP'
+    Set-ProbePhase 'STOP_READINESS_APP'
     Stop-ProbeApp
+    Set-ProbePhase 'NATIVE_PTY_SMOKE'
     & node tests/tools/windows-pty-native-capability-smoke/run.mjs ('--exe='+(Join-Path $install 'Orca.exe'))
     if($LASTEXITCODE -ne 0){throw 'Installed Windows native PTY capability smoke failed'}
     $evidence.installedNativePty='PASS'
+    Set-ProbePhase 'CLI_SMOKE'
     & node config/scripts/desktop-distribution/runtime-verification/smoke-packaged-cli.mjs ('--app-dir='+$install)
     if($LASTEXITCODE -ne 0){throw 'Installed package CLI smoke failed'}
+    Set-ProbePhase 'PROTOCOL55_FALLBACK'
     & node .github/scripts/check-installed-protocol55-fallback.mjs $install $root
     if($LASTEXITCODE -ne 0){throw 'Disposable protocol55 program fallback failed'}
     $evidence.protocolRollback='PASS_SYNTHETIC_PROTOCOL55_FALLBACK_ONLY'
-    $evidence.result='PASS_INSTALLED_ARTIFACT_ONLY'
+    $completed=$true
+} catch {
+    $evidence.error=$_.Exception.Message
+    $evidence.failedPhase=$evidence.phase
+    Set-ProbePhase 'ERROR'
+    throw
 } finally {
+    if(-not $completed -and -not $evidence.failedPhase){$evidence.failedPhase=$evidence.phase}
+    Set-ProbePhase 'CLEANUP'
     Stop-ProbeApp
+    if($completed){$evidence.result='PASS_INSTALLED_ARTIFACT_ONLY'}
     $evidence|ConvertTo-Json -Depth 8|Set-Content -LiteralPath 'dist/ceo-disposable-installer-proof.json' -Encoding UTF8
 }

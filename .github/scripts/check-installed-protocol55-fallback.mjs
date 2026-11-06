@@ -11,6 +11,13 @@ const evidence = {
   securityClearance: 'NOT_ESTABLISHED',
   daemonExecutablePath: 'NOT_OBSERVED_IDENTITY_AND_INPUT_ORACLES_REQUIRED'
 }
+let deadline
+const deadlineAbort = new AbortController()
+function checkpoint(phase, facts = {}) {
+  Object.assign(evidence, facts, { phase })
+  writeFileSync('dist/ceo-protocol55-fallback-proof.json', `${JSON.stringify(evidence, null, 2)}\n`)
+  console.log(`[protocol55-fallback] ${phase}`)
+}
 try {
   if (
     process.env.GITHUB_ACTIONS !== 'true' ||
@@ -115,24 +122,41 @@ try {
   })
   let app = null
   async function launch() {
+    const phase = evidence.phase
     app = await electron.launch({
       executablePath: path.join(install, 'Orca.exe'),
       env,
       timeout: 120000
     })
+    checkpoint(`${phase}_WAIT_WINDOW`, { guiPid: app.process().pid })
     const page = await app.firstWindow({ timeout: 120000 })
+    checkpoint(`${phase}_WAIT_BRIDGE`)
     await page.waitForFunction(
       () => Boolean(window.api) && Boolean(document.getElementById('root')?.firstElementChild),
       undefined,
       { timeout: 30000 }
     )
+    checkpoint(`${phase}_WAIT_STARTUP_SERVICES`)
     await page.evaluate(() => window.api.app.awaitFirstWindowStartupServices())
     return page
   }
   async function closeGracefully() {
     const closing = app
-    await closing.close()
-    await expect.poll(() => closing.process().exitCode, { timeout: 10000 }).toBe(0)
+    const child = closing.process()
+    const closed = closing.close().then(
+      () => null,
+      (error) => error
+    )
+    await expect.poll(() => child.exitCode, { timeout: 30000 }).toBe(0)
+    checkpoint('GUI_EXIT_ZERO', { guiExitCode: child.exitCode })
+    // Detached hosts can retain controller pipes after the GUI has exited normally.
+    for (const stream of child.stdio) {
+      stream?.destroy()
+    }
+    const error = await closed
+    if (error) {
+      throw error
+    }
     app = null
   }
   async function backend(page) {
@@ -194,10 +218,23 @@ try {
       .toBe(text)
   }
   try {
+    deadline = setTimeout(
+      () => {
+        evidence.result = 'FAIL_TIMEOUT'
+        checkpoint('DEADLINE_EXCEEDED', { interruptedPhase: evidence.phase })
+        process.exitCode = 1
+        deadlineAbort.abort()
+        setTimeout(() => process.exit(1), 15000).unref()
+      },
+      8 * 60 * 1000
+    )
+    deadline.unref()
+    checkpoint('LAUNCH_CANDIDATE')
     const first = await launch()
     if ((await backend(first)).length) {
       throw new Error('Synthetic fixture unexpectedly owns prior terminals')
     }
+    checkpoint('CREATE_SYNTHETIC_TERMINAL')
     const created = await first.evaluate(
       (cwd) =>
         window.api.pty.spawn({
@@ -210,19 +247,25 @@ try {
       workspace
     )
     const before = await identity(first, created.id)
+    checkpoint('WRITE_BEFORE', { before })
     await marker(first, created.id, 'BEFORE')
+    checkpoint('QUIT_CANDIDATE')
     await closeGracefully()
+    checkpoint('INSTALL_PINNED_FALLBACK')
     const installed = await runProcess({
       program: fallbackInstaller,
       args: ['/S', `/D=${install}`],
       env,
-      timeoutMs: 180000
+      timeoutMs: 180000,
+      signal: deadlineAbort.signal
     })
     if (installed.code !== 0) {
       throw new Error(`Pinned fallback NSIS exited ${installed.code}`)
     }
     verifyInstalled(fallback)
+    checkpoint('LAUNCH_FALLBACK', { fallbackInstallerExitCode: installed.code })
     const second = await launch()
+    checkpoint('REATTACH_ORIGINAL_TERMINAL')
     const attached = await second.evaluate(
       ({ id, cwd }) =>
         window.api.pty.spawn({
@@ -239,14 +282,17 @@ try {
       throw new Error('Fallback did not reattach the original PTY')
     }
     const after = await identity(second, attached.id)
+    checkpoint('VERIFY_IDENTITIES', { after })
     if (JSON.stringify(before) !== JSON.stringify(after)) {
       throw new Error('Fallback changed PTY, incarnation, process or protocol identity')
     }
+    checkpoint('WRITE_AFTER')
     await marker(second, attached.id, 'AFTER')
     evidence.before = before
     evidence.after = after
     evidence.fallbackInstallerExitCode = installed.code
     evidence.result = 'PASS_SYNTHETIC_PROTOCOL55_PROGRAM_FALLBACK'
+    checkpoint('CLEANUP_SYNTHETIC_TERMINAL')
     await second.evaluate(
       (sessionId) => window.api.pty.management.killOne({ sessionId }),
       before.sessionId
@@ -254,12 +300,12 @@ try {
     await closeGracefully()
   } catch (error) {
     evidence.result = 'FAIL'
-    evidence.error = error.message
+    checkpoint('ERROR', { failedPhase: evidence.phase, error: error.message })
     throw error
   } finally {
     try {
       if (app) {
-        await app.close()
+        await closeGracefully()
       }
     } catch (error) {
       evidence.result = 'FAIL_CLEANUP'
@@ -277,4 +323,13 @@ try {
   evidence.error = error.message
   writeFileSync('dist/ceo-protocol55-fallback-proof.json', `${JSON.stringify(evidence, null, 2)}\n`)
   throw error
+} finally {
+  clearTimeout(deadline)
+  if (deadlineAbort.signal.aborted) {
+    evidence.result = 'FAIL_TIMEOUT'
+    writeFileSync(
+      'dist/ceo-protocol55-fallback-proof.json',
+      `${JSON.stringify(evidence, null, 2)}\n`
+    )
+  }
 }

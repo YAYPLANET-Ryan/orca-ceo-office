@@ -1469,6 +1469,7 @@ jobs:
 
       - name: Install and repair the CEO artifact on the disposable runner
         if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        timeout-minutes: 17
         shell: pwsh
         run: ./config/scripts/windows-release/Invoke-DisposableInstallerProbe.ps1 -ManifestPath dist/ceo-installer-manifest.json
 
