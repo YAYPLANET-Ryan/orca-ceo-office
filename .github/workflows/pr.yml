@@ -1296,6 +1296,9 @@ jobs:
         run: xvfb-run --auto-servernum node config/scripts/desktop-distribution/runtime-verification/smoke-packaged-hang-watchdog-worker.mjs --app-dir=dist/linux-unpacked
 
   package_windows:
+    permissions:
+      contents: read
+      actions: read
     name: package (windows)
     needs: [code_paths]
     if: needs.code_paths.outputs.package_windows == 'true'
@@ -1454,6 +1457,16 @@ jobs:
           ORCA_RECOVERY_SOURCE: ${{ github.event.pull_request.head.sha }}
         run: node .github/scripts/write-ceo-installer-manifest.mjs
 
+      - name: Download the pinned protocol55 fallback installer
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        uses: actions/download-artifact@v8
+        with:
+          repository: YAYPLANET-Ryan/orca-ceo-office
+          run-id: 42221599759
+          name: orca-ceo-windows-e0048b332ac8d54c9612822f54323e4a825f5542-attempt-1
+          github-token: ${{ github.token }}
+          path: dist/protocol55-fallback
+
       - name: Install and repair the CEO artifact on the disposable runner
         if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
         shell: pwsh
@@ -1468,6 +1481,7 @@ jobs:
             dist/orca-ceo-setup.exe
             dist/ceo-installer-manifest.json
             dist/ceo-disposable-installer-proof.json
+            dist/ceo-protocol55-fallback-proof.json
           if-no-files-found: error
 
   e2e:

@@ -100,6 +100,9 @@ try {
     $evidence.installedNativePty='PASS'
     & node config/scripts/desktop-distribution/runtime-verification/smoke-packaged-cli.mjs ('--app-dir='+$install)
     if($LASTEXITCODE -ne 0){throw 'Installed package CLI smoke failed'}
+    & node .github/scripts/check-installed-protocol55-fallback.mjs $install $root
+    if($LASTEXITCODE -ne 0){throw 'Disposable protocol55 program fallback failed'}
+    $evidence.protocolRollback='PASS_SYNTHETIC_PROTOCOL55_FALLBACK_ONLY'
     $evidence.result='PASS_INSTALLED_ARTIFACT_ONLY'
 } finally {
     Stop-ProbeApp
