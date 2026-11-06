@@ -9,6 +9,7 @@ import {
 } from './helpers/terminal'
 import { clickFileInExplorer } from './helpers/file-explorer'
 import { ensureTerminalVisible, waitForActiveWorktree, waitForSessionReady } from './helpers/store'
+import { getRepoHostIdentity } from '../../src/renderer/src/store/slices/repo-host-identity'
 
 type SeededActivityThread = {
   paneKey: string
@@ -148,18 +149,29 @@ async function readActivityPaneVisibility(page: Page): Promise<ActivityPaneVisib
 }
 
 async function enableInlineAgentCards(page: Page): Promise<void> {
-  await page.evaluate(() => {
+  const repos = await page.evaluate(() =>
+    (window.__store?.getState().repos ?? []).map(({ id, connectionId, executionHostId }) => ({
+      id,
+      connectionId,
+      executionHostId
+    }))
+  )
+  await page.evaluate((repoHostIdentities) => {
     const store = window.__store
     if (!store) {
       throw new Error('window.__store is not available')
     }
 
     const state = store.getState()
+    // Seed completed setup so delayed suggestions cannot cover agent rows after focus changes.
+    for (const identity of repoHostIdentities) {
+      state.dismissSetupScriptPrompt(identity)
+    }
     if (!state.worktreeCardProperties.includes('inline-agents')) {
-      state.toggleWorktreeCardProperty('inline-agents')
+      state.setWorktreeCardProperties([...state.worktreeCardProperties, 'inline-agents'])
     }
     state.closeActivityPage()
-  })
+  }, repos.map(getRepoHostIdentity))
 }
 
 async function enableActivityAgentsView(page: Page): Promise<void> {

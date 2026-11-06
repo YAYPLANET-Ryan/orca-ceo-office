@@ -14,6 +14,8 @@ const SEEN_FIRST_RUN_FEATURE_INTERACTION_TIMESTAMP = Date.parse('2026-01-01T00:0
 export function getE2ECompletedOnboardingProfile() {
   return {
     settings: {
+      // English-label assertions must not inherit the developer's OS language.
+      uiLanguage: 'en',
       telemetry: {
         optedIn: true,
         installId: '00000000-0000-4000-8000-000000000000',

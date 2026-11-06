@@ -12,6 +12,8 @@ const expectedPaths = [
   'skills/**',
   'resources/skills/**',
   'config/scripts/verify-skill-update-roundtrip.mjs',
+  'config/scripts/skill-update-history.mjs',
+  'config/scripts/skill-update-history.test.mjs',
   'config/scripts/skill-update-roundtrip-workflow.test.mjs',
   'src/main/skills/skill-freshness-eligibility.ts',
   'src/shared/skill-freshness.ts',

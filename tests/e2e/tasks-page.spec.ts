@@ -7,6 +7,7 @@
 
 import { test, expect } from './helpers/orca-app'
 import { waitForSessionReady, waitForActiveWorktree, getStoreState } from './helpers/store'
+import { GITHUB_TASK_SEARCH_IDLE_MS } from '../../src/renderer/src/components/use-github-task-search-commit'
 
 type RenderedTaskSource = {
   source: string
@@ -404,31 +405,38 @@ test.describe('Tasks page', () => {
     await orcaPage.waitForTimeout(800)
     await resetTaskSearchRequestProbe(orcaPage)
 
-    await input.pressSequentially('rate', { delay: 400 })
+    // Slow runner input delivery must not advance the debounce under test.
+    await orcaPage.clock.install()
+    await orcaPage.clock.pauseAt(await orcaPage.evaluate(() => Date.now() + 1_000))
+    try {
+      await input.pressSequentially('rate')
+      await orcaPage.clock.runFor(GITHUB_TASK_SEARCH_IDLE_MS - 1)
+      expect(await readTaskSearchRequestProbe(orcaPage)).toEqual({
+        countQueries: [],
+        fetchQueries: []
+      })
+      await expect(existingIssue).toBeVisible()
 
-    expect(await readTaskSearchRequestProbe(orcaPage)).toEqual({
-      countQueries: [],
-      fetchQueries: []
-    })
-    await expect(existingIssue).toBeVisible()
+      await orcaPage.clock.runFor(1)
+      await expect
+        .poll(async () => readTaskSearchRequestProbe(orcaPage), { timeout: 2_000 })
+        .toEqual({ countQueries: ['is:issue rate'], fetchQueries: ['is:issue rate'] })
 
-    await expect
-      .poll(async () => readTaskSearchRequestProbe(orcaPage), { timeout: 2_000 })
-      .toEqual({ countQueries: ['is:issue rate'], fetchQueries: ['is:issue rate'] })
-
-    await resetTaskSearchRequestProbe(orcaPage)
-    await input.pressSequentially('x')
-    await input.press('Enter')
-
-    await expect
-      .poll(async () => readTaskSearchRequestProbe(orcaPage), { timeout: 2_000 })
-      .toEqual({ countQueries: ['is:issue ratex'], fetchQueries: ['is:issue ratex'] })
-    await orcaPage.waitForTimeout(800)
-    expect(await readTaskSearchRequestProbe(orcaPage)).toEqual({
-      countQueries: ['is:issue ratex'],
-      fetchQueries: ['is:issue ratex']
-    })
-    await expect(input).toHaveValue('is:issue ratex')
-    await expect(existingIssue).toBeVisible()
+      await resetTaskSearchRequestProbe(orcaPage)
+      await input.pressSequentially('x')
+      await input.press('Enter')
+      await expect
+        .poll(async () => readTaskSearchRequestProbe(orcaPage), { timeout: 2_000 })
+        .toEqual({ countQueries: ['is:issue ratex'], fetchQueries: ['is:issue ratex'] })
+      await orcaPage.clock.runFor(GITHUB_TASK_SEARCH_IDLE_MS)
+      expect(await readTaskSearchRequestProbe(orcaPage)).toEqual({
+        countQueries: ['is:issue ratex'],
+        fetchQueries: ['is:issue ratex']
+      })
+      await expect(input).toHaveValue('is:issue ratex')
+      await expect(existingIssue).toBeVisible()
+    } finally {
+      await orcaPage.clock.resume()
+    }
   })
 })
