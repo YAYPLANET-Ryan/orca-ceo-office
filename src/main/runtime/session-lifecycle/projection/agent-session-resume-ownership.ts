@@ -50,8 +50,9 @@ export abstract class OrcaRuntimeWithAgentSessionResumeOwnership extends OrcaRun
     worktreeId: string,
     tab: RuntimeMobileSessionTerminalTab
   ): boolean {
-    // Only worktree-sleep proves deliberate takedown; live/quit captures still need reconnect replacement (#11542).
-    return this.getPaneSleepingAgentRecord(worktreeId, tab)?.origin === 'worktree-sleep'
+    // Live/quit captures stay reconnectable unless an explicit exit fenced their resume.
+    const record = this.getPaneSleepingAgentRecord(worktreeId, tab)
+    return record?.origin === 'worktree-sleep' || record?.requiresManualResume === true
   }
 
   /** Whether main resumes this record into its pane. */
@@ -71,6 +72,9 @@ export abstract class OrcaRuntimeWithAgentSessionResumeOwnership extends OrcaRun
     tab: RuntimeMobileSessionTerminalTab
   ): Promise<PaneResumeStartup | Record<string, never> | undefined> {
     const stored = this.getPaneSleepingAgentRecord(worktreeId, tab)
+    if (stored?.requiresManualResume === true) {
+      return {}
+    }
     const paneRows =
       this.getAgentProviderSessionRowsForPaneFn?.(makePaneKey(tab.parentTabId, tab.leafId)) ?? []
     const record = stored

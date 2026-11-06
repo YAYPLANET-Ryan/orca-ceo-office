@@ -70,7 +70,7 @@ function makeRuntime(
     getForegroundProcess: async () => null
   })
   runtime.syncWindowGraph(0, { tabs: [], leaves: [] })
-  return { runtime, spawn }
+  return { runtime, spawn, runtimeStore }
 }
 
 function expectPreservedShell(command: string | undefined): void {
@@ -86,6 +86,39 @@ async function restore(runtime: InstanceType<typeof OrcaRuntimeService>): Promis
 }
 
 describe('restoring a pane its host recorded an agent in', () => {
+  it.each(['live', 'quit'] as const)(
+    'keeps an explicitly exited %s conversation parked during automatic activation',
+    async (origin) => {
+      const { runtime, spawn, runtimeStore } = makeRuntime([], 'codex', {
+        session: {
+          sleepingAgentSessionsByPaneKey: {
+            [PANE_KEY]: {
+              paneKey: PANE_KEY,
+              tabId: 'host-tab',
+              worktreeId: TEST_WORKTREE_ID,
+              agent: 'codex',
+              providerSession: { key: 'session_id', id: SESSION_ID },
+              prompt: '',
+              state: 'done',
+              capturedAt: 1,
+              updatedAt: 1,
+              origin,
+              requiresManualResume: true
+            }
+          }
+        }
+      })
+      await restore(runtime)
+      expect(spawn).not.toHaveBeenCalled()
+      expect(
+        runtimeStore.getWorkspaceSession().sleepingAgentSessionsByPaneKey?.[PANE_KEY]
+      ).toMatchObject({
+        providerSession: { key: 'session_id', id: SESSION_ID },
+        requiresManualResume: true
+      })
+    }
+  )
+
   it('resumes an agent typed into a shell, which no launch command names', async () => {
     const { runtime, spawn } = makeRuntime([codexRow()])
     await restore(runtime)
