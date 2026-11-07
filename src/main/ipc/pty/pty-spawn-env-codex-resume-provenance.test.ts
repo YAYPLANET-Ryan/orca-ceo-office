@@ -107,7 +107,7 @@ describe('registerPtyHandlers', () => {
         transcriptPath: string | undefined,
         overrides: { command?: string; env?: Record<string, string> } = {}
       ): Promise<{ agentResumeUnavailable?: true }> {
-        return await handlers.get('pty:spawn')!(null, {
+        const result: unknown = await handlers.get('pty:spawn')!(null, {
           cols: 80,
           rows: 24,
           cwd: '/tmp',
@@ -120,6 +120,16 @@ describe('registerPtyHandlers', () => {
             ...(transcriptPath ? { transcriptPath } : {})
           }
         })
+        if (!result || typeof result !== 'object') {
+          throw new Error('Spawn handler did not return a result object')
+        }
+        if (!('agentResumeUnavailable' in result) || result.agentResumeUnavailable === undefined) {
+          return {}
+        }
+        if (result.agentResumeUnavailable === true) {
+          return { agentResumeUnavailable: true }
+        }
+        throw new Error('Spawn handler returned an invalid resume availability marker')
       }
 
       /** Daemon-shaped provider exposes rewritten options and reattach results. */
