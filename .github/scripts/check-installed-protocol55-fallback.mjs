@@ -307,11 +307,14 @@ try {
       terminalAncestry: processIdentity.terminalAncestry
     }
   }
-  async function identity(page, id) {
+  async function identity(page, id, spawnIncarnation, legacyListedShape = false) {
     const sessions = await page.evaluate(() => window.api.pty.listSessions({ connectionId: null }))
     const row = sessions.find((session) => session.id === id)
-    if (!row?.incarnationId) {
-      throw new Error('PTY incarnation is missing')
+    if (!row || typeof spawnIncarnation !== 'string' || !spawnIncarnation) {
+      throw new Error('PTY spawn-reply incarnation or frontend row is missing')
+    }
+    if (!legacyListedShape && !row.incarnationId) {
+      throw new Error('Current frontend listed incarnation is missing')
     }
     let physical = []
     let duplicateObserved = false
@@ -347,12 +350,24 @@ try {
         { timeout: 20000 }
       )
       .toBe(true)
-    if (physical[0].sessionId !== id || physical[0].incarnationId !== row.incarnationId) {
+    if (
+      physical[0].sessionId !== id ||
+      !physical[0].incarnationId ||
+      physical[0].incarnationId !== spawnIncarnation ||
+      (row.incarnationId && physical[0].incarnationId !== row.incarnationId)
+    ) {
       throw new Error('Frontend and daemon PTY identities do not agree')
     }
+    evidence.identityObservations ??= []
+    evidence.identityObservations.push({
+      legacyListedShape,
+      listedIncarnation: row.incarnationId ?? null,
+      spawnIncarnation,
+      physicalIncarnation: physical[0].incarnationId
+    })
     return {
       ptyId: id,
-      incarnationId: row.incarnationId,
+      incarnationId: physical[0].incarnationId,
       pid: physical[0].pid,
       sessionId: physical[0].sessionId,
       protocolVersion: physical[0].protocolVersion
@@ -436,7 +451,7 @@ try {
       { cwd: workspace, command: `${process.execPath} ${collectorPath}` }
     )
     diagnosticPtyId = created.id
-    const before = await identity(first, created.id)
+    const before = await identity(first, created.id, created.incarnationId, legacyUpgrade)
     const daemonBefore = await daemonIdentity(before.pid)
     const observed = (await backend(first))[0]
     checkpoint('WAIT_INPUT_COLLECTOR', {
@@ -504,7 +519,7 @@ try {
     if (attached.id !== before.ptyId || attached.isReattach !== true) {
       throw new Error('Fallback did not reattach the original PTY')
     }
-    const after = await identity(second, attached.id)
+    const after = await identity(second, attached.id, attached.incarnationId)
     const daemonAfter = await daemonIdentity(after.pid)
     checkpoint('VERIFY_IDENTITIES', { after, daemonAfter })
     if (JSON.stringify(before) !== JSON.stringify(after)) {
