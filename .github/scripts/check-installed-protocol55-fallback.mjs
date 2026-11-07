@@ -118,9 +118,9 @@ try {
     if (expected.size) {
       throw new Error('Essential manifest is incomplete')
     }
-    const metadata = JSON.parse(
-      asar.extractFile(path.join(install, 'resources/app.asar'), 'package.json')
-    )
+    const archive = path.join(install, 'resources/app.asar')
+    asar.uncache(archive)
+    const metadata = JSON.parse(asar.extractFile(archive, 'package.json'))
     if (metadata.version !== manifest.version || metadata.orcaRecoverySource !== manifest.source) {
       throw new Error('Installed fallback source/version does not match its manifest')
     }
