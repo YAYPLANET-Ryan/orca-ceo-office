@@ -1303,7 +1303,7 @@ jobs:
     needs: [code_paths]
     if: needs.code_paths.outputs.package_windows == 'true'
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -1467,9 +1467,19 @@ jobs:
           github-token: ${{ github.token }}
           path: dist/protocol55-fallback
 
+      - name: Download the pinned legacy protocol36 reference
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        uses: actions/download-artifact@v8
+        with:
+          repository: YAYPLANET-Ryan/orca-ceo-office
+          run-id: 42156509379
+          name: session-recovery-windows-7896bd2618f62215ab0852f6618fb9d4ea8d6ede
+          github-token: ${{ github.token }}
+          path: dist/protocol36-reference
+
       - name: Install and repair the CEO artifact on the disposable runner
         if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
-        timeout-minutes: 17
+        timeout-minutes: 25
         shell: pwsh
         run: ./config/scripts/windows-release/Invoke-DisposableInstallerProbe.ps1 -ManifestPath dist/ceo-installer-manifest.json
 
@@ -1484,6 +1494,7 @@ jobs:
             dist/ceo-disposable-installer-proof.json
             dist/ceo-protocol55-fallback-proof.json
             dist/ceo-nsis-process-query-proof.json
+            dist/ceo-protocol36-upgrade-proof.json
           if-no-files-found: error
 
   e2e:

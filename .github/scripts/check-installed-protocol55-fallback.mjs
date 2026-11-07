@@ -5,6 +5,13 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileS
 import { createRequire } from 'node:module'
 import path from 'node:path'
 
+const legacyUpgrade = process.argv[4] === '--legacy36-upgrade'
+const proofFile = legacyUpgrade
+  ? 'dist/ceo-protocol36-upgrade-proof.json'
+  : 'dist/ceo-protocol55-fallback-proof.json'
+const successResult = legacyUpgrade
+  ? 'PASS_SYNTHETIC_LEGACY36_ADOPTION_IN_CANDIDATE55'
+  : 'PASS_SYNTHETIC_PROTOCOL55_PROGRAM_FALLBACK'
 const evidence = {
   result: 'FAIL',
   actualConversationLaptopReboot: 'NOT_TESTED',
@@ -15,8 +22,8 @@ let deadline
 const deadlineAbort = new AbortController()
 function checkpoint(phase, facts = {}) {
   Object.assign(evidence, facts, { phase })
-  writeFileSync('dist/ceo-protocol55-fallback-proof.json', `${JSON.stringify(evidence, null, 2)}\n`)
-  console.log(`[protocol55-fallback] ${phase}`)
+  writeFileSync(proofFile, `${JSON.stringify(evidence, null, 2)}\n`)
+  console.log(`[${legacyUpgrade ? 'protocol36-upgrade' : 'protocol55-fallback'}] ${phase}`)
 }
 try {
   if (
@@ -28,13 +35,21 @@ try {
   }
   const [installArg, probeRootArg] = process.argv.slice(2)
   const temporary = realpathSync(process.env.RUNNER_TEMP)
-  const install = realpathSync(installArg)
+  let install = realpathSync(installArg)
   const probeRoot = realpathSync(probeRootArg)
   for (const target of [install, probeRoot]) {
     const relative = path.relative(temporary, target)
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
       throw new Error('Protocol fallback target is outside runner temporary storage')
     }
+  }
+  if (legacyUpgrade) {
+    const dedicatedInstall = path.join(probeRoot, 'legacy36-installed')
+    if (existsSync(dedicatedInstall)) {
+      throw new Error('Legacy qualification requires a fresh install directory')
+    }
+    mkdirSync(dedicatedInstall)
+    install = realpathSync(dedicatedInstall)
   }
   // NSIS consumes the final /D argument verbatim; this fixture uses the runner's unquoted path.
   if (/\s|"/.test(install)) {
@@ -45,27 +60,51 @@ try {
   const readJson = (file) => JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
   const hash = (file) => createHash('sha256').update(readFileSync(file)).digest('hex')
   const candidate = readJson('dist/ceo-installer-manifest.json')
-  const fallbackDirectory = path.resolve('dist/protocol55-fallback')
-  const fallback = readJson(path.join(fallbackDirectory, 'ceo-installer-manifest.json'))
-  const fallbackInstaller = path.join(fallbackDirectory, 'orca-ceo-setup.exe')
-  const fallbackHash = '84ac34455fd4299f8c8176585e3e848e5accc246bc9986a3b49158f01de7b218'
+  const fallbackDirectory = path.resolve(
+    legacyUpgrade ? 'dist/protocol36-reference' : 'dist/protocol55-fallback'
+  )
+  const fallback = readJson(
+    legacyUpgrade
+      ? '.github/fixtures/protocol36-reference.json'
+      : path.join(fallbackDirectory, 'ceo-installer-manifest.json')
+  )
+  const fallbackInstaller = path.join(
+    fallbackDirectory,
+    legacyUpgrade ? 'orca-windows-setup.exe' : 'orca-ceo-setup.exe'
+  )
+  const fallbackHash = legacyUpgrade
+    ? '7039105aee15d81eb6414b3e3b2d7a7a61f0539254fc902dac81d8fa0d6f60f2'
+    : '84ac34455fd4299f8c8176585e3e848e5accc246bc9986a3b49158f01de7b218'
   if (
-    fallback.source !== 'e0048b332ac8d54c9612822f54323e4a825f5542' ||
-    fallback.version !== '1.4.251-ceo.20261106.36' ||
+    fallback.source !==
+      (legacyUpgrade
+        ? '7896bd2618f62215ab0852f6618fb9d4ea8d6ede'
+        : 'e0048b332ac8d54c9612822f54323e4a825f5542') ||
+    fallback.version !== (legacyUpgrade ? '1.4.191-ceo.20261105.19' : '1.4.251-ceo.20261106.36') ||
     fallback.installer.sha256 !== fallbackHash ||
     hash(fallbackInstaller) !== fallbackHash
   ) {
-    throw new Error('Fallback must be the pinned, previously verified protocol55 installer')
+    throw new Error('Reference must match its pinned installer bytes, source and version')
+  }
+  const physicalProtocol = legacyUpgrade ? 36 : 55
+  const replacementManifest = legacyUpgrade ? candidate : fallback
+  const replacementInstaller = legacyUpgrade
+    ? path.resolve(candidate.installer.path)
+    : fallbackInstaller
+  if (hash(replacementInstaller) !== replacementManifest.installer.sha256) {
+    throw new Error('Replacement installer hash differs from the verified build')
   }
   function verifyInstalled(manifest) {
     const expected = new Set([
       'Orca.exe',
       'resources/app.asar',
       'resources/bin/orca.exe',
-      'resources/bin/orca-agent-hook.exe',
       'resources.pak',
       'icudtl.dat'
     ])
+    if (!legacyUpgrade || manifest !== fallback) {
+      expected.add('resources/bin/orca-agent-hook.exe')
+    }
     for (const file of manifest.files) {
       const relative = file.path.replaceAll('\\', '/').replace(/^dist\/win-unpacked\//, '')
       if (!expected.delete(relative)) {
@@ -86,8 +125,10 @@ try {
       throw new Error('Installed fallback source/version does not match its manifest')
     }
   }
-  verifyInstalled(candidate)
-  const isolated = path.join(probeRoot, 'protocol55')
+  if (!legacyUpgrade) {
+    verifyInstalled(candidate)
+  }
+  const isolated = path.join(probeRoot, legacyUpgrade ? 'protocol36-upgrade' : 'protocol55')
   if (existsSync(isolated)) {
     throw new Error('Fresh synthetic protocol fixture required')
   }
@@ -122,7 +163,12 @@ try {
     candidateVersion: candidate.version,
     fallbackSource: fallback.source,
     fallbackVersion: fallback.version,
-    fallbackInstallerSha256: fallbackHash
+    fallbackInstallerSha256: fallbackHash,
+    scenario: legacyUpgrade ? 'LEGACY36_TO_CANDIDATE55' : 'SAME55_PROGRAM_FALLBACK',
+    physicalProtocolExpected: physicalProtocol,
+    startingVersion: legacyUpgrade ? fallback.version : candidate.version,
+    replacementVersion: replacementManifest.version,
+    exactProductionF7ImageTested: false
   })
   let app = null
   let diagnosticPage = null
@@ -177,6 +223,61 @@ try {
     }
     return result.sessions
   }
+  async function daemonIdentity(terminalPid) {
+    const systemRoot = process.env.SystemRoot
+    if (!systemRoot) {
+      throw new Error('SystemRoot is required for the owned process observation')
+    }
+    const record = readJson(path.join(profile, 'daemon', `daemon-v${physicalProtocol}.pid`))
+    if (
+      !Number.isSafeInteger(record.pid) ||
+      record.pid <= 0 ||
+      !record.launchNonce ||
+      !Number.isSafeInteger(terminalPid) ||
+      terminalPid <= 0
+    ) {
+      throw new Error('Synthetic daemon requires a process identity record')
+    }
+    const observed = await runProcess({
+      program: path.join(systemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+      args: [
+        '-NoProfile',
+        '-Command',
+        `$p=Get-Process -Id ${record.pid} -ErrorAction Stop; $ids=@(); $cursor=${terminalPid}; for($i=0; $i -lt 16 -and $cursor -gt 0; $i++){ if($ids -contains $cursor){throw 'Synthetic ancestor cycle'}; $ids+=([int]$cursor); if($cursor -eq ${record.pid}){break}; $info=Get-CimInstance -ClassName Win32_Process -Filter ('ProcessId='+$cursor) -ErrorAction Stop; if(!$info){throw 'Synthetic ancestor unavailable'}; $cursor=$info.ParentProcessId }; [ordered]@{pid=$p.Id;executablePath=$p.Path;startTicks=$p.StartTime.ToUniversalTime().Ticks.ToString();terminalAncestry=$ids}|ConvertTo-Json -Compress`
+      ],
+      env: Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'psmodulepath')
+      ),
+      timeoutMs: 30000,
+      maxOutputBytes: 16384
+    })
+    if (observed.code !== 0) {
+      throw new Error('Cannot observe the owned synthetic daemon process')
+    }
+    const processIdentity = JSON.parse(observed.stdout)
+    const executable = realpathSync(processIdentity.executablePath)
+    const withinFixture = path.relative(isolated, executable)
+    const withinInstall = path.relative(install, executable)
+    if (
+      processIdentity.pid !== record.pid ||
+      !processIdentity.startTicks ||
+      !processIdentity.terminalAncestry.includes(record.pid) ||
+      withinFixture.startsWith('..') ||
+      path.isAbsolute(withinFixture) ||
+      (!withinInstall.startsWith('..') && !path.isAbsolute(withinInstall))
+    ) {
+      throw new Error('Daemon executable must be inside the fixture and outside the install')
+    }
+    return {
+      pid: record.pid,
+      launchNonce: record.launchNonce,
+      startedAtMs: record.startedAtMs,
+      executablePath: executable,
+      executableSha256: hash(executable),
+      processStartTicks: processIdentity.startTicks,
+      terminalAncestry: processIdentity.terminalAncestry
+    }
+  }
   async function identity(page, id) {
     const sessions = await page.evaluate(() => window.api.pty.listSessions({ connectionId: null }))
     const row = sessions.find((session) => session.id === id)
@@ -187,10 +288,10 @@ try {
     if (
       physical.length !== 1 ||
       !physical[0].isAlive ||
-      physical[0].protocolVersion !== 55 ||
+      physical[0].protocolVersion !== physicalProtocol ||
       !physical[0].pid
     ) {
-      throw new Error('Expected exactly one live synthetic protocol55 session')
+      throw new Error('Expected exactly one live session on the original physical protocol')
     }
     if (physical[0].sessionId !== id || physical[0].incarnationId !== row.incarnationId) {
       throw new Error('Frontend and daemon PTY identities do not agree')
@@ -238,10 +339,24 @@ try {
         deadlineAbort.abort()
         setTimeout(() => process.exit(1), 15000).unref()
       },
-      8 * 60 * 1000
+      (legacyUpgrade ? 11 : 8) * 60 * 1000
     )
     deadline.unref()
-    checkpoint('LAUNCH_CANDIDATE')
+    if (legacyUpgrade) {
+      checkpoint('INSTALL_LEGACY36_REFERENCE')
+      const initial = await runProcess({
+        program: fallbackInstaller,
+        args: ['/S', `/D=${install}`],
+        env,
+        timeoutMs: 180000,
+        signal: deadlineAbort.signal
+      })
+      if (initial.code !== 0) {
+        throw new Error(`Legacy reference installer exited ${initial.code}`)
+      }
+      verifyInstalled(fallback)
+    }
+    checkpoint(legacyUpgrade ? 'LAUNCH_LEGACY36_REFERENCE' : 'LAUNCH_CANDIDATE')
     const first = await launch()
     if ((await backend(first)).length) {
       throw new Error('Synthetic fixture unexpectedly owns prior terminals')
@@ -268,9 +383,12 @@ try {
     )
     diagnosticPtyId = created.id
     const before = await identity(first, created.id)
+    const daemonBefore = await daemonIdentity(before.pid)
     const observed = (await backend(first))[0]
     checkpoint('WAIT_INPUT_COLLECTOR', {
       before,
+      daemonBefore,
+      daemonExecutablePath: daemonBefore.executablePath,
       initialShell: {
         cwd: observed.cwd,
         shellState: observed.shellState,
@@ -300,9 +418,9 @@ try {
     await marker(first, created.id, 'BEFORE')
     checkpoint('QUIT_CANDIDATE')
     await closeGracefully()
-    checkpoint('INSTALL_PINNED_FALLBACK')
+    checkpoint(legacyUpgrade ? 'INSTALL_CANDIDATE_OVER_LEGACY36' : 'INSTALL_PINNED_FALLBACK')
     const installed = await runProcess({
-      program: fallbackInstaller,
+      program: replacementInstaller,
       args: ['/S', `/D=${install}`],
       env,
       timeoutMs: 180000,
@@ -311,8 +429,10 @@ try {
     if (installed.code !== 0) {
       throw new Error(`Pinned fallback NSIS exited ${installed.code}`)
     }
-    verifyInstalled(fallback)
-    checkpoint('LAUNCH_FALLBACK', { fallbackInstallerExitCode: installed.code })
+    verifyInstalled(replacementManifest)
+    checkpoint(legacyUpgrade ? 'LAUNCH_CANDIDATE_AFTER_LEGACY36' : 'LAUNCH_FALLBACK', {
+      replacementInstallerExitCode: installed.code
+    })
     const second = await launch()
     checkpoint('REATTACH_ORIGINAL_TERMINAL')
     const attached = await second.evaluate(
@@ -331,9 +451,13 @@ try {
       throw new Error('Fallback did not reattach the original PTY')
     }
     const after = await identity(second, attached.id)
-    checkpoint('VERIFY_IDENTITIES', { after })
+    const daemonAfter = await daemonIdentity(after.pid)
+    checkpoint('VERIFY_IDENTITIES', { after, daemonAfter })
     if (JSON.stringify(before) !== JSON.stringify(after)) {
       throw new Error('Fallback changed PTY, incarnation, process or protocol identity')
+    }
+    if (JSON.stringify(daemonBefore) !== JSON.stringify(daemonAfter)) {
+      throw new Error('Fallback changed daemon process, executable bytes or launch identity')
     }
     checkpoint('WRITE_AFTER')
     await marker(second, attached.id, 'AFTER')
@@ -344,8 +468,12 @@ try {
     process.kill(workerBefore.pid, 0)
     evidence.before = before
     evidence.after = after
-    evidence.fallbackInstallerExitCode = installed.code
-    evidence.result = 'PASS_SYNTHETIC_PROTOCOL55_PROGRAM_FALLBACK'
+    if (legacyUpgrade) {
+      evidence.upgradeInstallerExitCode = installed.code
+    } else {
+      evidence.fallbackInstallerExitCode = installed.code
+    }
+    evidence.result = successResult
     checkpoint('CLEANUP_SYNTHETIC_TERMINAL')
     const cleanup = await second.evaluate(
       (sessionId) => window.api.pty.management.killOne({ sessionId }),
@@ -395,31 +523,22 @@ try {
       evidence.cleanupError = error.message
       process.exitCode = 1
     } finally {
-      writeFileSync(
-        'dist/ceo-protocol55-fallback-proof.json',
-        `${JSON.stringify(evidence, null, 2)}\n`
-      )
+      writeFileSync(proofFile, `${JSON.stringify(evidence, null, 2)}\n`)
     }
   }
 } catch (error) {
   evidence.result = 'FAIL'
   evidence.error = error.message
-  writeFileSync('dist/ceo-protocol55-fallback-proof.json', `${JSON.stringify(evidence, null, 2)}\n`)
+  writeFileSync(proofFile, `${JSON.stringify(evidence, null, 2)}\n`)
   throw error
 } finally {
   clearTimeout(deadline)
   if (deadlineAbort.signal.aborted) {
     evidence.result = 'FAIL_TIMEOUT'
-    writeFileSync(
-      'dist/ceo-protocol55-fallback-proof.json',
-      `${JSON.stringify(evidence, null, 2)}\n`
-    )
+    writeFileSync(proofFile, `${JSON.stringify(evidence, null, 2)}\n`)
   }
 }
-if (
-  evidence.result === 'PASS_SYNTHETIC_PROTOCOL55_PROGRAM_FALLBACK' &&
-  (process.exitCode ?? 0) === 0
-) {
+if (evidence.result === successResult && (process.exitCode ?? 0) === 0) {
   // Both GUIs exited normally and the proof is durable; only this controller may remain open.
   process.exit(0)
 }

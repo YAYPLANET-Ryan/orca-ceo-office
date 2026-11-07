@@ -6,6 +6,9 @@ if($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or -not $env
 $temporary=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')
 $root=Join-Path $temporary ('orca-installer-probe-'+[guid]::NewGuid().ToString('N'))
 $install=Join-Path $root 'installed'
+if(-not [IO.Path]::GetFullPath($install).StartsWith([IO.Path]::GetFullPath($root)+'\',[StringComparison]::OrdinalIgnoreCase)){
+    throw 'Every probe install must remain inside its owned root'
+}
 if(-not [IO.Path]::GetFullPath($install).StartsWith($temporary+'\',[StringComparison]::OrdinalIgnoreCase)){
     throw 'Probe target escaped the runner temporary directory'
 }
@@ -17,7 +20,7 @@ if((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvarian
 [IO.Directory]::CreateDirectory($root)|Out-Null
 $evidence=[ordered]@{result='FAIL';source=$manifest.source;version=$manifest.version;rounds=@();
     securityClearance='NOT_ESTABLISHED';protocolRollback='NOT_TESTED';actualConversationLaptopReboot='NOT_TESTED';
-    installedWindowResponse='NOT_TESTED';sameMainProcess6768='NOT_TESTED';installedNativePty='NOT_TESTED';phase='PREPARE'}
+    installedWindowResponse='NOT_TESTED';sameMainProcess6768='NOT_TESTED';installedNativePty='NOT_TESTED';protocol36Upgrade='NOT_TESTED';phase='PREPARE'}
 $completed=$false
 function Set-ProbePhase([string]$Name) {
     $evidence.phase=$Name
@@ -25,8 +28,8 @@ function Set-ProbePhase([string]$Name) {
     $evidence|ConvertTo-Json -Depth 8|Set-Content -LiteralPath 'dist/ceo-disposable-installer-proof.json' -Encoding UTF8
 }
 function Stop-ProbeApp {
-    foreach($entry in @(Get-Process -Name Orca -ErrorAction SilentlyContinue)){
-        if($entry.Path -and $entry.Path.StartsWith($install+'\',[StringComparison]::OrdinalIgnoreCase)){
+    foreach($entry in @(Get-Process -Name Orca,orca-terminal-daemon -ErrorAction SilentlyContinue)){
+        if($entry.Path -and $entry.Path.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase)){
             & taskkill.exe /PID $entry.Id /T /F 2>$null|Out-Null
             Wait-Process -Id $entry.Id -Timeout 15 -ErrorAction SilentlyContinue
         }
@@ -121,6 +124,10 @@ try {
     & node .github/scripts/check-installed-protocol55-fallback.mjs $install $root
     if($LASTEXITCODE -ne 0){throw 'Disposable protocol55 program fallback failed'}
     $evidence.protocolRollback='PASS_SYNTHETIC_PROTOCOL55_FALLBACK_ONLY'
+    Set-ProbePhase 'LEGACY36_UPGRADE'
+    & node .github/scripts/check-installed-protocol55-fallback.mjs $install $root --legacy36-upgrade
+    if($LASTEXITCODE -ne 0){throw 'Disposable legacy36 to candidate55 qualification failed'}
+    $evidence.protocol36Upgrade='PASS_SYNTHETIC_LEGACY19_REFERENCE_ONLY'
     $completed=$true
 } catch {
     $evidence.error=$_.Exception.Message
