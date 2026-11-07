@@ -55,7 +55,8 @@ vi.mock('../../codex/history/index/codex-state-db-backfill-recovery', () =>
 
 const UNAVAILABLE_MESSAGE = 'Codex account files are temporarily locked. Retry in a moment.'
 
-const MANAGED_ACCOUNT_SETTINGS = (() =>
+const MANAGED_ACCOUNT_SETTINGS = () =>
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This callback supplies only the managed-account settings read by Codex home selection.
   ({
     codexManagedAccounts: [
       {
@@ -64,7 +65,7 @@ const MANAGED_ACCOUNT_SETTINGS = (() =>
         managedHomeRuntime: 'host'
       }
     ]
-  }) as never) as () => never
+  }) as never
 
 type RuntimeSpawnRequest = { cols: number; rows: number; launchAgent?: 'codex' } & Record<
   string,
@@ -81,7 +82,7 @@ describe('registerPtyHandlers Codex launch refusal on an unreadable managed home
 
   function makeRuntime() {
     return {
-      setPtyController: vi.fn(),
+      setPtyController: vi.fn<(controller: RuntimeSpawnController) => void>(),
       ...noChatsRuntimeMembers(),
       createPreAllocatedTerminalHandle: vi.fn(() => null),
       registerPty: vi.fn(),
@@ -103,7 +104,9 @@ describe('registerPtyHandlers Codex launch refusal on an unreadable managed home
   ): void {
     handlers.clear()
     registerPtyHandlers(
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The existing IPC harness supplies only the BrowserWindow members exercised by these handlers.
       mainWindow as never,
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This runtime double supplies the registration and spawn callbacks exercised by this test.
       runtime as never,
       resolveHome,
       MANAGED_ACCOUNT_SETTINGS,
@@ -281,7 +284,7 @@ describe('registerPtyHandlers Codex launch refusal on an unreadable managed home
       const daemonSpawn = setupDaemonAdapter()
       const runtime = makeRuntime()
       register(() => TEST_CODEX_HOME, runtime)
-      const controller = runtime.setPtyController.mock.calls[0]?.[0] as RuntimeSpawnController
+      const controller = runtime.setPtyController.mock.calls[0]![0]
 
       await controller.spawn({ cols: 80, rows: 24, launchAgent: 'codex' })
 
@@ -297,7 +300,7 @@ describe('registerPtyHandlers Codex launch refusal on an unreadable managed home
         throw new ManagedCodexHomeTemporarilyUnavailableError()
       })
       register(resolveHome, runtime)
-      const controller = runtime.setPtyController.mock.calls[0]?.[0] as RuntimeSpawnController
+      const controller = runtime.setPtyController.mock.calls[0]![0]
 
       await expect(controller.spawn({ cols: 80, rows: 24, launchAgent: 'codex' })).rejects.toThrow(
         UNAVAILABLE_MESSAGE
@@ -325,7 +328,7 @@ describe('registerPtyHandlers Codex launch refusal on an unreadable managed home
         }
       )
       register(resolveHome, runtime)
-      const controller = runtime.setPtyController.mock.calls[0]?.[0] as RuntimeSpawnController
+      const controller = runtime.setPtyController.mock.calls[0]![0]
 
       const spawnPromise = controller.spawn({ cols: 80, rows: 24, launchAgent: 'codex' })
       const rejection = expect(spawnPromise).rejects.toThrow(UNAVAILABLE_MESSAGE)
@@ -348,7 +351,7 @@ describe('registerPtyHandlers Codex launch refusal on an unreadable managed home
         runtime,
         () => Promise.reject(new ManagedCodexHomeTemporarilyUnavailableError())
       )
-      const controller = runtime.setPtyController.mock.calls[0]?.[0] as RuntimeSpawnController
+      const controller = runtime.setPtyController.mock.calls[0]![0]
 
       await expect(
         controller.spawn({
@@ -356,7 +359,7 @@ describe('registerPtyHandlers Codex launch refusal on an unreadable managed home
           rows: 24,
           launchAgent: 'codex',
           resumeProviderSession: RESUME_SESSION
-        } as never)
+        })
       ).rejects.toThrow(UNAVAILABLE_MESSAGE)
 
       expect(daemonSpawn).not.toHaveBeenCalled()
@@ -475,7 +478,7 @@ describe('registerPtyHandlers Codex launch refusal on an unreadable managed home
           TEST_CODEX_HOME
       )
       register(resolveHome, runtime)
-      const controller = runtime.setPtyController.mock.calls[0]?.[0] as RuntimeSpawnController
+      const controller = runtime.setPtyController.mock.calls[0]![0]
 
       await controller.spawn({ cols: 80, rows: 24, launchAgent: 'codex' })
       await controller.spawn({ cols: 80, rows: 24 })

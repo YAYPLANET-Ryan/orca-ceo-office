@@ -20,13 +20,13 @@ import { StructuredAgentSessionHost } from './host/structured-agent-session-host
 import {
   HOST_TEST_LOCATION,
   HOST_TEST_NOW,
+  HOST_TEST_SESSION as SESSION,
   hostTestAttachParams
 } from './host/testing/structured-agent-session-host-test-data'
 import {
   createRestTestRig,
   REST_TEST_CALLER,
   restTestSend,
-  REST_TEST_SESSION as SESSION,
   type RestTestRig
 } from './host/testing/structured-agent-session-rest-test-rig'
 

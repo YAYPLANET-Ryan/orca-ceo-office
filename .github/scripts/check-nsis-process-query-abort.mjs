@@ -16,6 +16,7 @@ import { expect } from '@stablyai/playwright-test'
 if (
   process.env.GITHUB_ACTIONS !== 'true' ||
   process.platform !== 'win32' ||
+  process.arch !== 'x64' ||
   !process.env.RUNNER_TEMP
 ) {
   throw new Error('NSIS process-query fault probe requires the disposable Windows runner')
@@ -146,9 +147,17 @@ for (const [index, directory] of ['install', "install O'Brien"].entries()) {
     for (const [label, folder, expectedAlive] of locations) {
       mkdirSync(folder, { recursive: true })
       const executable = path.join(folder, 'OrcaScopeFixture.exe')
-      copyFileSync(workerTemplate, executable)
-      const child = spawnProcess({ program: executable, args: ['/S'] })
-      const worker = { label, folder, expectedAlive, child, exited: false }
+      const architecture = label === 'target' ? 'ia32' : 'x64'
+      copyFileSync(architecture === 'ia32' ? workerTemplate : process.execPath, executable)
+      const args =
+        architecture === 'ia32'
+          ? ['/S']
+          : [
+              '-e',
+              `require('node:fs').writeFileSync(${JSON.stringify(path.join(folder, 'ready'))}, 'ready'); setInterval(() => {}, 1000)`
+            ]
+      const child = spawnProcess({ program: executable, args })
+      const worker = { label, folder, expectedAlive, architecture, child, exited: false }
       child.once('exit', () => {
         worker.exited = true
       })
@@ -204,6 +213,7 @@ SectionEnd
       targetingCases.push({
         case: directory,
         label: worker.label,
+        architecture: worker.architecture,
         alive: !worker.exited
       })
     }

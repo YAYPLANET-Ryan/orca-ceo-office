@@ -284,15 +284,38 @@ try {
     if (!row?.incarnationId) {
       throw new Error('PTY incarnation is missing')
     }
-    const physical = await backend(page)
-    if (
-      physical.length !== 1 ||
-      !physical[0].isAlive ||
-      physical[0].protocolVersion !== physicalProtocol ||
-      !physical[0].pid
-    ) {
-      throw new Error('Expected exactly one live session on the original physical protocol')
-    }
+    let physical = []
+    let duplicateObserved = false
+    await expect
+      .poll(
+        async () => {
+          physical = await backend(page)
+          checkpoint('OBSERVE_PHYSICAL_SESSION', {
+            physicalInventory: physical.map(
+              ({ sessionId, incarnationId, pid, protocolVersion, isAlive, state }) => ({
+                sessionId,
+                incarnationId,
+                pid,
+                protocolVersion,
+                isAlive,
+                state
+              })
+            )
+          })
+          if (physical.length > 1) {
+            duplicateObserved = true
+          }
+          return (
+            !duplicateObserved &&
+            physical.length === 1 &&
+            physical[0].isAlive &&
+            physical[0].protocolVersion === physicalProtocol &&
+            Boolean(physical[0].pid)
+          )
+        },
+        { timeout: 20000 }
+      )
+      .toBe(true)
     if (physical[0].sessionId !== id || physical[0].incarnationId !== row.incarnationId) {
       throw new Error('Frontend and daemon PTY identities do not agree')
     }

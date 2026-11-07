@@ -91,6 +91,7 @@ describe('registerPtyHandlers', () => {
       function registerWithTrustedHomes(trustedHomes: readonly string[], selectedHome: string) {
         const selectedHomeMock = vi.fn(() => selectedHome)
         registerPtyHandlers(
+          // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The existing IPC harness supplies only the BrowserWindow members exercised by these handlers.
           mainWindow as never,
           undefined,
           selectedHomeMock,
@@ -106,7 +107,7 @@ describe('registerPtyHandlers', () => {
         transcriptPath: string | undefined,
         overrides: { command?: string; env?: Record<string, string> } = {}
       ): Promise<{ agentResumeUnavailable?: true }> {
-        return (await handlers.get('pty:spawn')!(null, {
+        return await handlers.get('pty:spawn')!(null, {
           cols: 80,
           rows: 24,
           cwd: '/tmp',
@@ -118,7 +119,7 @@ describe('registerPtyHandlers', () => {
             id: RESUME_SESSION_ID,
             ...(transcriptPath ? { transcriptPath } : {})
           }
-        })) as { agentResumeUnavailable?: true }
+        })
       }
 
       /** Daemon-shaped provider exposes rewritten options and reattach results. */
@@ -133,6 +134,7 @@ describe('registerPtyHandlers', () => {
             return { id: options.sessionId ?? 'daemon-pty', ...spawnResult }
           }
         )
+        // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This synthetic provider implements only the spawn and ownership operations exercised by this test.
         setLocalPtyProvider({
           spawn: daemonSpawn,
           supportsGitCredentialGuardHost: () => true,
@@ -195,7 +197,7 @@ describe('registerPtyHandlers', () => {
 
           expect(mockProc.proc.write).not.toHaveBeenCalled()
           expect(spawned.agentResumeUnavailable).toBeUndefined()
-          const env = spawnMock.mock.calls.at(-1)![2].env as Record<string, string>
+          const env: Record<string, string> = spawnMock.mock.calls.at(-1)![2].env
           expect(env.CODEX_HOME).toBe(ORIGIN_HOME)
           expect(env[POSIX_SHELL_STARTUP_COMMAND_ENV]).toBe(`codex 'resume' '${RESUME_SESSION_ID}'`)
           expect(selectedHome).not.toHaveBeenCalled()
@@ -227,7 +229,12 @@ describe('registerPtyHandlers', () => {
       it('refuses unverified identity on the runtime controller path', async () => {
         const daemonSpawn = setupResumeDaemonProvider()
         const runtime = {
-          setPtyController: vi.fn(),
+          setPtyController:
+            vi.fn<
+              (controller: {
+                spawn(args: Record<string, unknown>): Promise<{ id: string }>
+              }) => void
+            >(),
           ...noChatsRuntimeMembers(),
           registerPty: vi.fn(),
           noteTerminalSpawnCommand: vi.fn(),
@@ -237,7 +244,9 @@ describe('registerPtyHandlers', () => {
         }
         handlers.clear()
         registerPtyHandlers(
+          // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The existing IPC harness supplies only the BrowserWindow members exercised by these handlers.
           mainWindow as never,
+          // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This runtime double supplies the registration and spawn callbacks exercised by this test.
           runtime as never,
           vi.fn(() => OTHER_HOME),
           undefined,
@@ -245,9 +254,7 @@ describe('registerPtyHandlers', () => {
           undefined,
           { prepareCodexSessionResume: prepareResumeWithTrustedHomes([OTHER_HOME]) }
         )
-        const controller = runtime.setPtyController.mock.calls[0]?.[0] as {
-          spawn(args: Record<string, unknown>): Promise<{ id: string }>
-        }
+        const controller = runtime.setPtyController.mock.calls[0]![0]
 
         await expect(
           controller.spawn({

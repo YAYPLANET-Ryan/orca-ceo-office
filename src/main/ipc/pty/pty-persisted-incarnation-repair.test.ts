@@ -74,6 +74,7 @@ describe('registerPtyHandlers', () => {
       isReattach: options.attachOnly === true,
       snapshot: 'persisted-owner-output'
     }))
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This synthetic provider implements only the spawn and ownership operations exercised by this test.
     setLocalPtyProvider({
       spawn: providerSpawn,
       write: vi.fn(),
@@ -124,11 +125,14 @@ describe('registerPtyHandlers', () => {
     const prepareResume = vi.fn(async () => null)
 
     registerPtyHandlers(
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The existing IPC harness supplies only the BrowserWindow members exercised by these handlers.
       mainWindow as never,
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This runtime double supplies the registration and spawn callbacks exercised by this test.
       runtime as never,
       undefined,
       undefined,
       undefined,
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The real pane binding store supplies the persistence methods exercised by this handler.
       store as never,
       { prepareCodexSessionResume: prepareResume }
     )
@@ -263,6 +267,7 @@ describe('registerPtyHandlers', () => {
           return { id: 'pty-fresh-recovery', incarnationId: 'inc-fresh-recovery' }
         }
       )
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This synthetic provider implements only the spawn and ownership operations exercised by this test.
       setLocalPtyProvider({
         spawn: providerSpawn,
         write: vi.fn(),
@@ -342,11 +347,14 @@ describe('registerPtyHandlers', () => {
       }
 
       registerPtyHandlers(
+        // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The existing IPC harness supplies only the BrowserWindow members exercised by these handlers.
         mainWindow as never,
+        // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This runtime double supplies the registration and spawn callbacks exercised by this test.
         runtime as never,
         undefined,
         undefined,
         undefined,
+        // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The real pane binding store supplies the persistence methods exercised by this handler.
         store as never
       )
       if (folderMissing) {
@@ -433,6 +441,7 @@ describe('registerPtyHandlers', () => {
         return { id: 'pty-fresh-unproven', incarnationId: 'inc-fresh-unproven' }
       }
     )
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This synthetic provider implements only the spawn and ownership operations exercised by this test.
     setLocalPtyProvider({
       spawn: providerSpawn,
       write: vi.fn(),
@@ -502,11 +511,14 @@ describe('registerPtyHandlers', () => {
     }
 
     registerPtyHandlers(
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The existing IPC harness supplies only the BrowserWindow members exercised by these handlers.
       mainWindow as never,
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This runtime double supplies the registration and spawn callbacks exercised by this test.
       runtime as never,
       undefined,
       undefined,
       undefined,
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The real pane binding store supplies the persistence methods exercised by this handler.
       store as never
     )
 
