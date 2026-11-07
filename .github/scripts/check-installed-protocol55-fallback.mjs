@@ -46,12 +46,19 @@ try {
     }
   }
   if (legacyUpgrade) {
-    const dedicatedInstall = path.join(probeRoot, 'legacy36-installed')
+    const dedicatedInstall = path.join(probeRoot, 'l36')
     if (existsSync(dedicatedInstall)) {
       throw new Error('Legacy qualification requires a fresh install directory')
     }
     mkdirSync(dedicatedInstall)
     install = realpathSync(dedicatedInstall)
+    // Pinned7039 archive: longest relative file path179 chars (inner SHA7ccf06da).
+    // Legacy NSIS must not be tested through an accidental MAX_PATH overflow.
+    const maxAbsolutePathChars = install.length + 1 + 179
+    if (maxAbsolutePathChars >= 260) {
+      throw new Error('Pinned legacy reference exceeds the Windows path budget')
+    }
+    evidence.legacyInstallPathBudget = { maxRelativePathChars: 179, maxAbsolutePathChars }
   }
   // NSIS consumes the final /D argument verbatim; this fixture uses the runner's unquoted path.
   if (/\s|"/.test(install)) {

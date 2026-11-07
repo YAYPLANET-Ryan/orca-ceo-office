@@ -42,6 +42,11 @@ function literal(value) {
   return `"${value}"`
 }
 const results = []
+const silentUninstallCases = []
+const uninstallResultFunction = readFileSync(path.join(includes, 'installUtil.nsh'), 'utf8').match(
+  /Function handleUninstallResult\r?\n[\s\S]*?\r?\nFunctionEnd/
+)?.[0]
+assert(uninstallResultFunction, 'The actual electron-builder uninstall result contract is missing')
 async function compileFixture(script) {
   const compiled = await runProcess({
     program: compiler.path,
@@ -50,6 +55,68 @@ async function compileFixture(script) {
     timeoutMs: 60000
   })
   assert.equal(compiled.code, 0, `NSIS fixture did not compile: ${JSON.stringify(compiled)}`)
+}
+for (const code of [0, 23]) {
+  const script = path.join(root, `uninstall-child-${code}.nsi`)
+  writeFileSync(
+    script,
+    `Unicode true
+RequestExecutionLevel user
+SilentInstall silent
+OutFile ${literal(path.join(root, `uninstall-child-${code}.exe`))}
+Section
+  SetErrorLevel ${code}
+  Quit
+SectionEnd
+`
+  )
+  await compileFixture(script)
+}
+for (const macro of ['customUnInstallCheck', 'customUnInstallCheckCurrentUser']) {
+  for (const scenario of ['success', 'uninstall-error', 'launch-error']) {
+    const label = `${macro}-${scenario}`
+    const script = path.join(root, `${label}.nsi`)
+    const executable = path.join(root, `${label}.exe`)
+    const marker = path.join(root, `${label}-continued.txt`)
+    writeFileSync(
+      script,
+      `Unicode true
+RequestExecutionLevel user
+SilentInstall silent
+OutFile ${literal(executable)}
+!include "LogicLib.nsh"
+LangString uninstallFailed 1033 "Owned uninstall failure"
+!include ${literal(realpathSync('config/nsis/orca-uninstall-result-check.nsh'))}
+${uninstallResultFunction}
+Function .onInit
+  StrCpy $R0 0
+  ClearErrors
+  ExecWait '${literal(path.join(root, scenario === 'launch-error' ? 'absent-uninstaller.exe' : `uninstall-child-${scenario === 'uninstall-error' ? 23 : 0}.exe`))} /S' $R0
+  Push "${macro === 'customUnInstallCheck' ? 'SHELL_CONTEXT' : 'HKEY_CURRENT_USER'}"
+  Call handleUninstallResult
+  FileOpen $1 ${literal(marker)} w
+  FileWrite $1 "safe continuation"
+  FileClose $1
+  SetErrorLevel 0
+  Quit
+FunctionEnd
+Section
+SectionEnd
+`
+    )
+    await compileFixture(script)
+    const ran = await runProcess({ program: executable, args: ['/S'], timeoutMs: 10000 })
+    const expected = scenario === 'success' ? 0 : 2
+    assert.equal(ran.timedOut, false, 'Silent uninstall result must never await a dialog')
+    assert.equal(ran.code, expected, label)
+    assert.equal(existsSync(marker), expected === 0, label)
+    silentUninstallCases.push({
+      macro,
+      scenario,
+      exitCode: ran.code,
+      continued: existsSync(marker)
+    })
+  }
 }
 for (const label of [
   'available',
@@ -234,6 +301,8 @@ writeFileSync(
       scope: 'Guard branch and real FIND/KILL against owned synthetic workers only',
       results,
       targetingResult: 'PASS_OWNED_PROCESS_TARGET_MATRIX',
+      silentUninstallResult: 'PASS_SILENT_UNINSTALL_FAILURE_IS_TERMINAL',
+      silentUninstallCases,
       targetingCases
     },
     null,
