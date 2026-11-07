@@ -1,0 +1,45 @@
+{
+  "source": "7896bd2618f62215ab0852f6618fb9d4ea8d6ede",
+  "version": "1.4.191-ceo.20261105.19",
+  "daemonProtocol": 36,
+  "installer": {
+    "sha256": "7039105aee15d81eb6414b3e3b2d7a7a61f0539254fc902dac81d8fa0d6f60f2",
+    "size": 173242238
+  },
+  "artifact": {
+    "run": 42156509379,
+    "id": 13475321684,
+    "name": "session-recovery-windows-7896bd2618f62215ab0852f6618fb9d4ea8d6ede"
+  },
+  "files": [
+    {
+      "path": "dist/win-unpacked/Orca.exe",
+      "size": 225470464,
+      "sha256": "3e620a7127b84b175dc89ce35855c57842a582b17ce5663c501e329e056a4ce9"
+    },
+    {
+      "path": "dist/win-unpacked/resources/app.asar",
+      "size": 135209670,
+      "sha256": "c468e041fbe1ba0fb48a5bbad27b31fb5d1dfb22d14fd56f74f7302a3c4cc24a"
+    },
+    {
+      "path": "dist/win-unpacked/resources/bin/orca.exe",
+      "size": 6144,
+      "sha256": "c7319de40918ae2b78cc8e062270e04d9eaa6abe7e0f0f496d3f58dcd69db1ad"
+    },
+    {
+      "path": "dist/win-unpacked/resources.pak",
+      "size": 7146735,
+      "sha256": "c4a2da02b8c54c3604c2b753fe6953d6f789c5460d0b9a7e41661a4c59628238"
+    },
+    {
+      "path": "dist/win-unpacked/icudtl.dat",
+      "size": 10876560,
+      "sha256": "bd8c145abdf3f8383276ce01dfa4ae48709bef9fef1c0711eb7c3fab4f6eb7c2"
+    }
+  ],
+  "scope": "Protocol36 reference with seven recovery fixes; NOT the exact production f7/.1 baseline",
+  "hostInstallerExecuted": false,
+  "hostCliMaterialized": false,
+  "securityClearance": "NOT_ESTABLISHED"
+}

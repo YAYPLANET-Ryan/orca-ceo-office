@@ -6,6 +6,9 @@ import { UpdaterScheduling } from './updater-scheduling'
 
 export abstract class UpdaterMenuChecks extends UpdaterScheduling {
   protected checkForUpdatesFromMenu(options?: UpdateCheckOptions): void {
+    if (this.blockCeoBuildUpdates(true)) {
+      return
+    }
     if (
       this.pendingQuitAndInstallTimer ||
       this.quitAndInstallInProgress ||

@@ -50,8 +50,9 @@ export abstract class OrcaRuntimeWithAgentSessionResumeOwnership extends OrcaRun
     worktreeId: string,
     tab: RuntimeMobileSessionTerminalTab
   ): boolean {
-    // Only worktree-sleep proves deliberate takedown; live/quit captures still need reconnect replacement (#11542).
-    return this.getPaneSleepingAgentRecord(worktreeId, tab)?.origin === 'worktree-sleep'
+    // Live/quit captures stay reconnectable unless an explicit exit fenced their resume.
+    const record = this.getPaneSleepingAgentRecord(worktreeId, tab)
+    return record?.origin === 'worktree-sleep' || record?.requiresManualResume === true
   }
 
   /** Whether main resumes this record into its pane. */
@@ -64,32 +65,37 @@ export abstract class OrcaRuntimeWithAgentSessionResumeOwnership extends OrcaRun
 
   /**
    * The pane's resume launch: undefined when it owns no record, `{}` (plain shell, record kept)
-   * when a stored record cannot be resumed here or another resume took it. A record read from the
-   * hook store is no promise to keep: its vetoes give undefined, so the tab's agent launches fresh.
+   * when a recorded conversation cannot be resumed here or another resume took it.
    */
   protected async resolvePaneOwnedResumeStartup(
     worktreeId: string,
     tab: RuntimeMobileSessionTerminalTab
   ): Promise<PaneResumeStartup | Record<string, never> | undefined> {
     const stored = this.getPaneSleepingAgentRecord(worktreeId, tab)
+    if (stored?.requiresManualResume === true) {
+      return {}
+    }
+    const paneRows =
+      this.getAgentProviderSessionRowsForPaneFn?.(makePaneKey(tab.parentTabId, tab.leafId)) ?? []
     const record = stored
       ? this.isPaneOwnedResumeRecord(stored)
         ? stored
         : null
       : // Resume the hook store's conversation, never replay the pane's original launch.
         hookRowPaneResumeRecord({
-          rows:
-            this.getAgentProviderSessionRowsForPaneFn?.(makePaneKey(tab.parentTabId, tab.leafId)) ??
-            [],
+          rows: paneRows,
           worktreeId,
           tab: this.getWorkspaceSessionForWorktree(worktreeId)?.tabsByWorktree?.[worktreeId]?.find(
             (candidate) => candidate.id === tab.parentTabId
           )
         })
     if (!record) {
-      return undefined
+      return stored ||
+        paneRows.some((row) => row.providerSession && isPaneLocalHookRow(row, worktreeId))
+        ? {}
+        : undefined
     }
-    const vetoed = stored ? {} : undefined
+    const vetoed = {}
     // Records are unspent here; exclude aliases and already-live panes to prevent duplicate transcript writers.
     const records = this.getWorkspaceSessionForWorktree(worktreeId)?.sleepingAgentSessionsByPaneKey
     const aliases = this.findPaneSleepingAgentRecord(worktreeId, tab)?.aliases ?? []

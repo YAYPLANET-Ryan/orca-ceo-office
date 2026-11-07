@@ -15,7 +15,7 @@ export const GOLDEN_STUB_AGENTS = [
 
 const fixtureDir = path.join(process.cwd(), 'tests', 'e2e', 'fixtures', 'golden-stub-agent')
 
-export function getGoldenStubAgentLaunchEnv(): NodeJS.ProcessEnv {
+export function getGoldenStubAgentLaunchEnv(): Record<string, string> {
   const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') ?? 'PATH'
   return {
     [pathKey]: [fixtureDir, process.env[pathKey] ?? ''].filter(Boolean).join(path.delimiter)

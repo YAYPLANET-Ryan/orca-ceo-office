@@ -1,6 +1,7 @@
 ; electron-builder accepts one nsis.include; keep every customInstall/customUnInstall hook here.
 
 !include "${__FILEDIR__}\orca-process-check.nsh"
+!include "${__FILEDIR__}\orca-uninstall-result-check.nsh"
 !include "${__FILEDIR__}\orca-user-path-cleanup.nsh"
 !include "${__FILEDIR__}\orca-other-install-check.nsh"
 

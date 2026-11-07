@@ -97,12 +97,23 @@ type Addon = {
 }
 
 const addonRequire = createRequire(import.meta.url)
+const { loadedNativeBuildDir } = addonRequire(
+  '../../../config/scripts/native-build/node-addons/native-build-entry.cjs'
+)
+
+function addonBinaryPath(): string {
+  const packageDir = resolve(
+    addonRequire.resolve('@vscode/windows-process-tree/package.json'),
+    '..'
+  )
+  return join(
+    loadedNativeBuildDir(packageDir, '@vscode/windows-process-tree'),
+    'windows_process_tree.node'
+  )
+}
 
 function loadAddon(): Addon {
-  const packageEntry = addonRequire.resolve('@vscode/windows-process-tree')
-  return addonRequire(
-    join(packageEntry, '..', '..', 'build', 'Release', 'windows_process_tree.node')
-  ) as Addon
+  return addonRequire(addonBinaryPath())
 }
 
 // Windows must load our binary: the unpatched prebuilt emits identical text and would pass if skipped.
@@ -132,10 +143,7 @@ describe.runIf(process.platform === 'win32')('windows-process-tree command line 
 
   it('was built from the patched source, not the published prebuild', () => {
     // Import inspection distinguishes patched binaries; successful require and matching output cannot.
-    const packageEntry = addonRequire.resolve('@vscode/windows-process-tree')
-    const binary = readFileSync(
-      join(packageEntry, '..', '..', 'build', 'Release', 'windows_process_tree.node')
-    )
+    const binary = readFileSync(addonBinaryPath())
     expect(binary.includes('ReadProcessMemory')).toBe(false)
   })
 
