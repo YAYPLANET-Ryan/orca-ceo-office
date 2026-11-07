@@ -1,4 +1,5 @@
 import { observeOwnedDaemonProcess } from './observe-owned-daemon-process.mjs'
+import { runObservedDisposableInstaller } from './observe-disposable-installer.mjs'
 import { _electron as electron, expect } from '@stablyai/playwright-test'
 import { runProcess } from '@orca/process-host'
 import { createHash } from 'node:crypto'
@@ -366,8 +367,10 @@ try {
         timeoutMs: 180000,
         signal: deadlineAbort.signal
       })
-      if (initial.code !== 0) {
-        throw new Error(`Legacy reference installer exited ${initial.code}`)
+      if (initial.code !== 0 || initial.timedOut || initial.signal) {
+        throw new Error(
+          `Legacy reference installer exited ${initial.code}, timedOut=${initial.timedOut}`
+        )
       }
       verifyInstalled(fallback)
     }
@@ -440,15 +443,23 @@ try {
     checkpoint('QUIT_CANDIDATE')
     await closeGracefully()
     checkpoint(legacyUpgrade ? 'INSTALL_CANDIDATE_OVER_LEGACY36' : 'INSTALL_PINNED_FALLBACK')
-    const installed = await runProcess({
-      program: replacementInstaller,
-      args: ['/S', `/D=${install}`],
-      env,
-      timeoutMs: 180000,
-      signal: deadlineAbort.signal
-    })
-    if (installed.code !== 0) {
-      throw new Error(`Pinned fallback NSIS exited ${installed.code}`)
+    const installed = await runObservedDisposableInstaller(
+      {
+        program: replacementInstaller,
+        args: ['/S', `/D=${install}`],
+        env,
+        timeoutMs: 180000,
+        signal: deadlineAbort.signal
+      },
+      {
+        install,
+        isolated,
+        phase: legacyUpgrade ? 'LEGACY36_REPLACEMENT' : 'SAME55_FALLBACK',
+        checkpoint
+      }
+    )
+    if (installed.code !== 0 || installed.timedOut || installed.signal) {
+      throw new Error(`Replacement NSIS exited ${installed.code}, timedOut=${installed.timedOut}`)
     }
     verifyInstalled(replacementManifest)
     checkpoint(legacyUpgrade ? 'LAUNCH_CANDIDATE_AFTER_LEGACY36' : 'LAUNCH_FALLBACK', {
