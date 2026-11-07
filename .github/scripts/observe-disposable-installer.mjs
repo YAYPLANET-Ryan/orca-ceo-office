@@ -1,6 +1,31 @@
 import { runProcess } from '@orca/process-host'
 import { readFileSync } from 'node:fs'
 
+export async function inspectDisposableDeleteSharing({ env, install, signal }) {
+  try {
+    const cleanEnv = Object.fromEntries(
+      Object.entries(env).filter(([key]) => key.toLowerCase() !== 'psmodulepath')
+    )
+    const result = await runProcess({
+      program: `${process.env.SystemRoot}/System32/WindowsPowerShell/v1.0/powershell.exe`,
+      args: [
+        '-NoProfile',
+        '-Command',
+        readFileSync(new URL('./inspect-disposable-delete-sharing.ps1', import.meta.url), 'utf8')
+      ],
+      env: { ...cleanEnv, ORCA_PROBE_INSTALL: install },
+      signal,
+      timeoutMs: 15000,
+      maxOutputBytes: 65536
+    })
+    return result.code === 0
+      ? JSON.parse(result.stdout)
+      : { sharingObservationFailed: true, code: result.code }
+  } catch {
+    return { sharingObservationFailed: true }
+  }
+}
+
 // Diagnostics only: the caller retains the exact installer deadline and every PASS oracle.
 export async function runObservedDisposableInstaller(
   spec,
@@ -61,30 +86,7 @@ export async function runObservedDisposableInstaller(
     timers.forEach(clearTimeout)
     await pending
     if (result.code !== 0 || result.timedOut || result.signal) {
-      try {
-        const sharing = await runProcess({
-          program: `${process.env.SystemRoot}/System32/WindowsPowerShell/v1.0/powershell.exe`,
-          args: [
-            '-NoProfile',
-            '-Command',
-            readFileSync(
-              new URL('./inspect-disposable-delete-sharing.ps1', import.meta.url),
-              'utf8'
-            )
-          ],
-          env,
-          signal: spec.signal,
-          timeoutMs: 15000,
-          maxOutputBytes: 65536
-        })
-        observations.push(
-          sharing.code === 0
-            ? JSON.parse(sharing.stdout)
-            : { sharingObservationFailed: true, code: sharing.code }
-        )
-      } catch {
-        observations.push({ sharingObservationFailed: true })
-      }
+      observations.push(await inspectDisposableDeleteSharing({ env, install, signal: spec.signal }))
     }
     checkpoint('INSTALLER_PROCESS_RESULT', {
       activeInstallerPhase: phase,

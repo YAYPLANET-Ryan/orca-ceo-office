@@ -30,6 +30,16 @@ const temporary = realpathSync(process.env.RUNNER_TEMP)
 const root = mkdtempSync(path.join(temporary, 'orca-nsis-query-'))
 const hook = realpathSync('config/nsis/orca-process-check.nsh')
 const manifest = JSON.parse(readFileSync('dist/ceo-installer-manifest.json', 'utf8'))
+const verifierTests = await runProcess({
+  program: process.execPath,
+  args: ['--test', '.github/scripts/verify-installed-artifact.test.mjs'],
+  timeoutMs: 60000
+})
+assert.equal(
+  verifierTests.code,
+  0,
+  `Data-only verifier regressions failed: ${JSON.stringify(verifierTests)}`
+)
 const includes = path.join(builder, 'templates/nsis/include')
 const systemRoot = process.env.SystemRoot
 if (!systemRoot) {
@@ -302,6 +312,7 @@ writeFileSync(
       results,
       targetingResult: 'PASS_OWNED_PROCESS_TARGET_MATRIX',
       silentUninstallResult: 'PASS_SILENT_UNINSTALL_FAILURE_IS_TERMINAL',
+      essentialFileVerifierResult: 'PASS_DATA_ONLY_ASAR_REGRESSIONS',
       silentUninstallCases,
       targetingCases
     },

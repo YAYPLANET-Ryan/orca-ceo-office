@@ -1,10 +1,13 @@
+import { verifyInstalledArtifact } from './verify-installed-artifact.mjs'
 import { observeOwnedDaemonProcess } from './observe-owned-daemon-process.mjs'
-import { runObservedDisposableInstaller } from './observe-disposable-installer.mjs'
+import {
+  runObservedDisposableInstaller,
+  inspectDisposableDeleteSharing
+} from './observe-disposable-installer.mjs'
 import { _electron as electron, expect } from '@stablyai/playwright-test'
 import { runProcess } from '@orca/process-host'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 const legacyUpgrade = process.argv[4] === '--legacy36-upgrade'
@@ -64,8 +67,6 @@ try {
   if (/\s|"/.test(install)) {
     throw new Error('Disposable fallback requires an unambiguous NSIS install path')
   }
-  const require = createRequire(import.meta.url)
-  const asar = require('@electron/asar')
   const readJson = (file) => JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
   const hash = (file) => createHash('sha256').update(readFileSync(file)).digest('hex')
   const candidate = readJson('dist/ceo-installer-manifest.json')
@@ -104,36 +105,15 @@ try {
     throw new Error('Replacement installer hash differs from the verified build')
   }
   function verifyInstalled(manifest) {
-    const expected = new Set([
-      'Orca.exe',
-      'resources/app.asar',
-      'resources/bin/orca.exe',
-      'resources.pak',
-      'icudtl.dat'
-    ])
-    if (!legacyUpgrade || manifest !== fallback) {
-      expected.add('resources/bin/orca-agent-hook.exe')
-    }
-    for (const file of manifest.files) {
-      const relative = file.path.replaceAll('\\', '/').replace(/^dist\/win-unpacked\//, '')
-      if (!expected.delete(relative)) {
-        throw new Error('Unexpected or duplicate essential file')
-      }
-      const target = path.join(install, relative)
-      if (statSync(target).size !== file.size || file.size <= 0 || hash(target) !== file.sha256) {
-        throw new Error('Installed file differs from its pinned manifest')
-      }
-    }
-    if (expected.size) {
-      throw new Error('Essential manifest is incomplete')
-    }
-    const archive = path.join(install, 'resources/app.asar')
-    asar.uncache(archive)
-    const metadata = JSON.parse(asar.extractFile(archive, 'package.json'))
-    if (metadata.version !== manifest.version || metadata.orcaRecoverySource !== manifest.source) {
-      throw new Error('Installed fallback source/version does not match its manifest')
-    }
+    verifyInstalledArtifact({
+      install,
+      manifest,
+      legacyReference: legacyUpgrade && manifest === fallback,
+      onMismatch: (facts) =>
+        checkpoint('INSTALLED_CONTENT_MISMATCH', { installedContentMismatch: facts })
+    })
   }
+
   if (!legacyUpgrade) {
     verifyInstalled(candidate)
   }
@@ -531,6 +511,13 @@ try {
   } catch (error) {
     evidence.result = 'FAIL'
     checkpoint('ERROR', { failedPhase: evidence.phase, error: error.message })
+    if (evidence.installedContentMismatch) {
+      evidence.postFailureDeleteSharing = await inspectDisposableDeleteSharing({
+        env,
+        install,
+        signal: deadlineAbort.signal
+      })
+    }
     console.error(error.message)
     let diagnosticTimeout
     try {
