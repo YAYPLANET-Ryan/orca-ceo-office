@@ -97,7 +97,7 @@ export function publishCommittedPtySpawn(input: PtySpawnCommitInput): PtySpawnOu
         : null
   })
   // Rejected spawns must not leave a published resume identity.
-  seedResumeLaunchIdentityFromSpawn({
+  const resumeCheckpointSaved = seedResumeLaunchIdentityFromSpawn({
     paneKey: input.paneKey,
     launchAgent: args.launchAgent,
     resumeProviderSession: args.resumeProviderSession,
@@ -107,6 +107,10 @@ export function publishCommittedPtySpawn(input: PtySpawnCommitInput): PtySpawnOu
     resumeArgvDropped: input.resumeArgvDropped,
     result
   })
+  if (!resumeCheckpointSaved) {
+    result.resumeCheckpointFailed = true
+    input.response.resumeCheckpointFailed = true
+  }
   // Inventory cannot infer background/reattached PTYs from mounted views.
   deps.sendPtySpawnedToRenderer(result.id)
   deps.options?.onCodexHomePtySpawned?.({

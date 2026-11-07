@@ -1,0 +1,51 @@
+name: Inspect Orca Upstream
+
+# Success means the inspection completed, never that upstream was merged.
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      fail_on_review:
+        description: Fail after reporting when manual upstream review is needed
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - '.github/workflows/sync-upstream.yml'
+      - '.github/workflows/track-community-prs.yaml'
+      - 'config/scripts/inspect-orca-upstream*.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inspect-orca-upstream-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test monitor and ownership contracts
+        run: python3 config/scripts/inspect-orca-upstream-test.py
+      - name: Fetch comparison refs without changing branches
+        run: |
+          git fetch --no-tags --no-write-fetch-head https://github.com/stablyai/orca.git main:refs/remotes/audit/upstream
+      - name: Inspect upstream (no merge or push)
+        env:
+          FAIL_ON_REVIEW: ${{ inputs.fail_on_review && '1' || '0' }}
+        run: python3 config/scripts/inspect-orca-upstream.py --base refs/remotes/origin/main --upstream refs/remotes/audit/upstream --output upstream-inspection.json
+      - name: Preserve inspection report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-inspection
+          path: upstream-inspection.json
+          if-no-files-found: warn
+          retention-days: 30

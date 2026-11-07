@@ -103,7 +103,12 @@ export const sleepingAgentSessionRecordSchema = z
     connectionId: z.string().nullable().optional(),
     launchConfig: sleepingAgentLaunchConfigSchema.optional(),
     origin: z.enum(['worktree-sleep', 'quit', 'live']).optional(),
-    restoreOnTabOpenOnly: z.boolean().optional()
+    restoreOnTabOpenOnly: z.boolean().optional(),
+    requiresManualResume: z.boolean().optional(),
+    resumeTargetPaneKey: z.preprocess(
+      (value) => (typeof value === 'string' && value.length > 0 ? value : undefined),
+      z.string().min(1).optional()
+    )
   })
   .refine(
     (record) => getAgentResumeArgv(record.agent, record.providerSession) !== null,

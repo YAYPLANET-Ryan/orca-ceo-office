@@ -8,6 +8,7 @@ import type {
 import { hasServeUpdateSupervisor } from '../serve-update-handoff'
 import { getLinuxPackageType } from '../linux-package/linux-update-package-type'
 import { UpdaterNudge } from '../nudges/updater-nudge'
+import { getCeoUpdateBlockReason } from '../ceo-update-policy'
 import type { UpdateInstallMode } from './updater-state'
 
 export abstract class UpdaterRemoteStatus extends UpdaterNudge {
@@ -16,6 +17,13 @@ export abstract class UpdaterRemoteStatus extends UpdaterNudge {
   }
 
   protected getRemoteServerUpdateSupport(): RemoteServerUpdateSupport {
+    if (getCeoUpdateBlockReason(app.getVersion())) {
+      return {
+        installMode: this.updateInstallMode,
+        automatic: false,
+        reason: 'manual-service-update-required'
+      }
+    }
     if (!app.isPackaged) {
       return {
         installMode: this.updateInstallMode,

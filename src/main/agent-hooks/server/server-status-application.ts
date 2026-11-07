@@ -17,6 +17,7 @@ import { admitLegacyAgentStatus } from '../../../shared/agent-hook-listener/list
 import type { EnrichedAgentHookEventPayload } from './server-types'
 import { agentTypeToPromptSentAgentKind } from './server-status-identity'
 import { AgentHookServerStatusDisposition } from './server-status-disposition'
+import { retainResumeCheckpoint } from './runtime-resume-checkpoint'
 
 // Evicting remembered evidence makes later replay fall back to its arrival time.
 const MAX_REMEMBERED_EVIDENCE_OBSERVATIONS = 1024
@@ -163,6 +164,7 @@ export abstract class AgentHookServerStatusApplication extends AgentHookServerSt
     } = payload
     return {
       ...event,
+      ...retainResumeCheckpoint(previous, payload),
       receivedAt: now,
       evidenceObservedAt: observedAt ?? this.resolveEvidenceObservedAt(payload, previous, now),
       stateStartedAt,

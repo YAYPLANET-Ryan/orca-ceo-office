@@ -16,7 +16,7 @@ export function seedResumeLaunchIdentityFromSpawn(args: {
   /** The Codex resume fell back to a fresh session, so the pane does not hold this one. */
   resumeArgvDropped: boolean
   result: PtySpawnResult
-}): void {
+}): boolean {
   // Reattach already owns identity; SSH status rows belong to the relay.
   if (
     !args.paneKey ||
@@ -25,9 +25,9 @@ export function seedResumeLaunchIdentityFromSpawn(args: {
     args.connectionId ||
     !args.launchedAt
   ) {
-    return
+    return true
   }
-  seedResumeLaunchIdentity({
+  return seedResumeLaunchIdentity({
     ...args,
     paneKey: args.paneKey,
     launchedAt: args.launchedAt.getTime()
@@ -41,21 +41,28 @@ export function seedResumeLaunchIdentity(args: {
   resumeProviderSession: unknown
   worktreeId: unknown
   launchedAt: number
-}): void {
+}): boolean {
   const agent = args.launchAgent
   const providerSession = normalizeAgentProviderSession(args.resumeProviderSession)
   if (!providerSession || !isResumableTuiAgent(agent)) {
-    return
+    return true
   }
   // Pi-family resumes require transcript paths, not session IDs alone.
   if ((agent === 'pi' || agent === 'prime-agent') && !providerSession.transcriptPath) {
-    return
+    return true
   }
-  agentHookServer.recordLaunchResumeIdentity({
-    paneKey: args.paneKey,
-    ...(typeof args.worktreeId === 'string' ? { worktreeId: args.worktreeId } : {}),
-    agentType: agent,
-    providerSession,
-    launchedAt: args.launchedAt
-  })
+  try {
+    const outcome = agentHookServer.recordLaunchResumeIdentity({
+      paneKey: args.paneKey,
+      ...(typeof args.worktreeId === 'string' ? { worktreeId: args.worktreeId } : {}),
+      agentType: agent,
+      providerSession,
+      launchedAt: args.launchedAt
+    })
+    return outcome !== 'refused' && agentHookServer.flushResumeIdentityCheckpoint()
+  } catch {
+    // The physical terminal already exists; preserve its handle and report the failed checkpoint.
+    console.warn('[agent-hooks] Resume identity checkpoint unavailable')
+    return false
+  }
 }

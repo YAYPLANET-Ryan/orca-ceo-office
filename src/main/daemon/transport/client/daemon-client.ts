@@ -24,17 +24,15 @@ import {
 } from './daemon-client-ndjson-readers'
 import { writeNotifyWithSettlement } from './daemon-client-notify-settlement'
 import { requestDaemonRpc } from './daemon-client-rpc-request'
+import { connectWithHelloRetry } from './daemon-hello-retry'
+import type { DaemonClientOptions } from './daemon-client-options'
+
+export type { DaemonClientOptions } from './daemon-client-options'
 
 const CONNECT_TIMEOUT_MS = 5000
 const CONNECTION_ATTEMPT_WAIT_MS = CONNECT_TIMEOUT_MS * 4
 const REQUEST_TIMEOUT_MS = 30000
 const NOTIFY_SETTLEMENT_TIMEOUT_MS = 5000
-
-export type DaemonClientOptions = {
-  socketPath: string
-  tokenPath: string
-  protocolVersion?: number
-}
 
 export class DaemonClient {
   private socketPath: string
@@ -109,7 +107,12 @@ export class DaemonClient {
     }
 
     const attemptGeneration = this.connectionAttemptGeneration
-    this.connectingPromise = this.doConnect(timeoutMs, attemptGeneration, sharedBudget)
+    this.connectingPromise = connectWithHelloRetry({
+      timeoutMs,
+      sharedBudget,
+      assertCurrent: () => this.assertConnectionAttemptCurrent(attemptGeneration),
+      connect: (remaining, shared) => this.doConnect(remaining, attemptGeneration, shared)
+    })
     try {
       await this.connectingPromise
     } finally {

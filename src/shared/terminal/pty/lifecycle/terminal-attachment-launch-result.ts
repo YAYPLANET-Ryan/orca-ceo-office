@@ -31,6 +31,7 @@ const launchResultSchema = z.object({
     })
     .optional(),
   agentResumeUnavailable: z.literal(true).optional(),
+  resumeCheckpointFailed: z.literal(true).optional(),
   agentResumeRefused: z.enum(['chat-home', 'chat-writing', 'unverifiable']).optional(),
   refusedResume: z
     .object({

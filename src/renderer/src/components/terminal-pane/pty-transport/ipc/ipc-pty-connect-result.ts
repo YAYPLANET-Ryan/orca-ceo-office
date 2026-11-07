@@ -55,6 +55,7 @@ export function projectIpcPtyConnectResult(
     spawnResult.launchConfig ||
     spawnResult.startupCwdFallback ||
     spawnResult.agentResumeUnavailable ||
+    spawnResult.resumeCheckpointFailed ||
     spawnResult.savedResumeDecision ||
     spawnResult.refusedResume ||
     spawnResult.launchToken

@@ -131,7 +131,9 @@ export abstract class OrcaRuntimeWithCreateMobileSessionTerminal extends OrcaRun
     const mutationId = opts.clientMutationId
     const startRun = async (): Promise<RuntimeMobileSessionCreateTerminalResult> => {
       const created = await this.runCreateMobileSessionTerminal(worktreeSelector, runOpts)
-      this.seedMobileResumeIdentity(created, opts)
+      if (!this.seedMobileResumeIdentity(created, opts)) {
+        created.resumeCheckpointFailed = true
+      }
       return created
     }
     let result: RuntimeMobileSessionCreateTerminalResult
@@ -174,17 +176,17 @@ export abstract class OrcaRuntimeWithCreateMobileSessionTerminal extends OrcaRun
   private seedMobileResumeIdentity(
     created: RuntimeMobileSessionCreateTerminalResult,
     opts: { resumeProviderSession?: AgentProviderSessionMetadata; launchAgent?: TuiAgent }
-  ): void {
+  ): boolean {
     if (!opts.resumeProviderSession || !created.tab.terminal) {
-      return
+      return true
     }
     const pty = this.getLivePtyForHandle(created.tab.terminal)?.pty
     const paneKey = this.paneOfPty(pty).paneKey
     // Why: an SSH pane's status rows belong to the relay on that host.
     if (!pty || !paneKey || pty.connectionId) {
-      return
+      return true
     }
-    seedResumeLaunchIdentity({
+    return seedResumeLaunchIdentity({
       paneKey,
       launchAgent: opts.launchAgent,
       resumeProviderSession: opts.resumeProviderSession,

@@ -41,6 +41,9 @@ export type UpdaterSetupOptions = {
 
 export class UpdaterSetup extends UpdaterDownloadInstall {
   checkForUpdates(): void {
+    if (this.blockCeoBuildUpdates()) {
+      return
+    }
     this.checkForUpdatesInBackground()
   }
 
@@ -141,6 +144,9 @@ export class UpdaterSetup extends UpdaterDownloadInstall {
     }
 
     if (!app.isPackaged) {
+      return
+    }
+    if (this.blockCeoBuildUpdates()) {
       return
     }
 

@@ -13,6 +13,7 @@ import type {
 } from '../../protocol/daemon-hello-protocol'
 import { addNodePtyRecoveryHint } from '../../pty-subprocess/node-pty-error-hints'
 import { startResponsiveDeadline } from './daemon-responsive-deadline'
+import { DaemonHelloClosedError } from './daemon-hello-closed-error'
 
 export type DaemonHelloRequest = {
   socket: Socket
@@ -122,8 +123,7 @@ export function sendDaemonHello(request: DaemonHelloRequest): Promise<DaemonHell
       }
     }
     const onError = (error: Error): void => finish(error)
-    const onClose = (): void =>
-      finish(new DaemonProtocolError('Connection closed before hello response'))
+    const onClose = (): void => finish(new DaemonHelloClosedError())
 
     // An accepted socket can still be a hung daemon; bound the hello wait, but not by our own freezes.
     cancelDeadline = startResponsiveDeadline(timeoutMs, () => {

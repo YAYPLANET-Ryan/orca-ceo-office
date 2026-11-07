@@ -51,6 +51,28 @@ describe('updater', () => {
     expect(powerMonitorOnMock).not.toHaveBeenCalled()
   })
 
+  it('requires a reviewed installer for a CEO build without scheduling, downloading or quitting', async () => {
+    appMock.getVersion.mockReturnValue('1.4.250-ceo.20261106.1')
+    const updater = await loadUpdaterModule()
+    updater.setupAutoUpdater(updaterMainWindow(vi.fn()))
+    updater.checkForUpdates()
+    updater.checkForUpdatesFromMenu()
+    updater.downloadUpdate()
+    updater.quitAndInstall()
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(updater.getUpdateStatus()).toMatchObject({ state: 'error', retryable: false })
+    expect(updater.getRemoteServerUpdateSupport().automatic).toBe(false)
+    expect(() => updater.installRemoteServerUpdate('fixture-runtime')).toThrow(
+      'remote_update_manual_required'
+    )
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled()
+    expect(autoUpdaterMock.downloadUpdate).not.toHaveBeenCalled()
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled()
+    expect(appMock.quit).not.toHaveBeenCalled()
+    expect(powerMonitorOnMock).not.toHaveBeenCalled()
+  })
+
   it('waits until the remaining interval before the next background check', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-03T12:00:00Z'))

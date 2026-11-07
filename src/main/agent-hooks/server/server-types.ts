@@ -50,6 +50,10 @@ export type EnrichedAgentHookEventPayload = AgentHookEventPayload & {
   restoredUnconfirmed?: true
   /** User-hidden resume identity retained solely for destructive liveness checks. */
   retainedForLiveness?: true
+  /** Explicit resumes survive PTY cleanup while their original pane remains. */
+  runtimeResumeCheckpoint?: true
+  /** One live launch may lend its identity to the first terminal observation; never persisted. */
+  runtimeResumePendingObservation?: true
   /** OSC 7501 facet stitched at publication, never persisted. */
   programStatus?: ProgramStatusFacet
   /** Facet-only publication; state readers must not infer a transition. */
@@ -67,6 +71,7 @@ export type PersistedAgentHookEventPayload = Omit<
   | 'programStatus'
   | 'programStatusOnly'
   | 'restoredUnconfirmed'
+  | 'runtimeResumePendingObservation'
   // Authority IDs and revision counters belong to the runtime that issued them.
   | 'observation'
   // Terminal handles belong to one runtime.

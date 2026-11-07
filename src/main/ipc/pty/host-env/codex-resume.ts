@@ -6,7 +6,7 @@ import {
 import { SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV } from '../../../../shared/setup-agent-sequencing'
 import { dropAgentResumeArgvFromCommand } from '../../../../shared/agent-launch/startup/agent-resume-argv-drop'
 import type { CodexAccountSelectionTarget } from '../../../codex-accounts/runtime-selection'
-import { dropUnverifiedCodexResumeArgv } from '../../../codex/history/resume/codex-unverified-resume-launch'
+import { UNVERIFIED_CODEX_RESUME_ERROR } from '../../../codex/history/resume/codex-unverified-resume-launch'
 import type { CodexSessionResumePreparation } from '../../../codex/history/resume/codex-session-resume-home'
 import { CODEX_RESUME_AUTH_UNAVAILABLE_MESSAGE, codexHomePathsEqual } from './codex-home'
 import type { PrepareCodexSessionResume } from './types'
@@ -72,7 +72,7 @@ export function resolveCodexResumeLaunch(
 ): Promise<CodexResumeLaunch> {
   return preparation.preparation.then((prepared) => {
     const providerSession = preparation.providerSession
-    if (prepared?.outcome !== 'fresh') {
+    if (prepared?.outcome === 'resume') {
       return {
         codexResumeHome: prepared ?? null,
         command,
@@ -81,21 +81,7 @@ export function resolveCodexResumeLaunch(
         providerSession
       }
     }
-    const dropped = dropUnverifiedCodexResumeArgv({
-      command,
-      providerSession,
-      claimedCodexProvenance: prepared.claimedCodexProvenance
-    })
-    return {
-      codexResumeHome: null,
-      command: dropped.command,
-      // Notify missing provenance too; only positively other-agent metadata can fail silently.
-      notifyResumeUnavailable:
-        dropped.droppedResumeArgv &&
-        (prepared.claimedCodexProvenance || !providerSession.transcriptPath),
-      droppedResumeArgv: dropped.droppedResumeArgv,
-      providerSession
-    }
+    throw new Error(UNVERIFIED_CODEX_RESUME_ERROR)
   })
 }
 

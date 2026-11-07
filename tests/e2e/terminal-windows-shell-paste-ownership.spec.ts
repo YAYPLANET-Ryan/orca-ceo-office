@@ -18,6 +18,7 @@ import {
   installTerminalPtyWriteSpy,
   readTerminalPtyWrites
 } from './helpers/terminal-pty-write-spy'
+import { createTerminalTabFromMenu } from './helpers/terminal-tab-menu'
 
 type WindowsPasteShell = 'cmd.exe' | 'powershell.exe' | 'wsl.exe' | typeof WINDOWS_GIT_BASH_SHELL
 
@@ -155,22 +156,7 @@ async function createWindowsProjectRuntimeTerminalTab(
   page: Page,
   shell: WindowsPasteShell
 ): Promise<string> {
-  const tabId = await page.evaluate(async () => {
-    const store = window.__store
-    if (!store) {
-      throw new Error('Store unavailable')
-    }
-    const state = store.getState()
-    const worktreeId = state.activeWorktreeId
-    if (!worktreeId) {
-      throw new Error('No active worktree')
-    }
-
-    const terminal = store.getState().createTab(worktreeId)
-    store.getState().setActiveTab(terminal.id)
-    store.getState().setActiveTabType('terminal', store.getState().activeWorktreeId)
-    return terminal.id
-  })
+  const tabId = await createTerminalTabFromMenu(page)
 
   const tab = page.locator(`[data-testid="sortable-tab"][data-tab-id="${tabId}"]`)
   await expect(tab).toBeVisible()

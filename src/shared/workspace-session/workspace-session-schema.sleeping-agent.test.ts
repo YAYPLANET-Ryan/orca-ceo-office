@@ -2,6 +2,51 @@ import { describe, it, expect } from 'vitest'
 import { parseWorkspaceSession } from './workspace-session-schema'
 
 describe('parseWorkspaceSession sleeping agents', () => {
+  it.each([
+    { target: 'replacement-tab:1', expectedTarget: 'replacement-tab:1' },
+    { target: undefined, expectedTarget: undefined },
+    { target: '', expectedTarget: undefined }
+  ])('retains legacy recovery through disk round trips ($target)', ({ target, expectedTarget }) => {
+    const record = {
+      paneKey: 'original-tab:1',
+      tabId: 'original-tab',
+      worktreeId: 'wt',
+      agent: 'codex',
+      providerSession: { key: 'session_id', id: 'original-conversation' },
+      prompt: '',
+      state: 'done',
+      capturedAt: 10,
+      updatedAt: 10,
+      origin: 'live',
+      requiresManualResume: true,
+      resumeTargetPaneKey: target
+    }
+    const first = parseWorkspaceSession({
+      activeRepoId: null,
+      activeWorktreeId: null,
+      activeTabId: null,
+      tabsByWorktree: {},
+      terminalLayoutsByTabId: {},
+      sleepingAgentSessionsByPaneKey: { [record.paneKey]: record }
+    })
+    expect(first.ok).toBe(true)
+    if (!first.ok) {
+      throw new Error('Legacy recovery record was rejected')
+    }
+    const second = parseWorkspaceSession(JSON.parse(JSON.stringify(first.value)))
+    expect(second.ok).toBe(true)
+    if (!second.ok) {
+      throw new Error('Recovery record failed its second hydration')
+    }
+    const restored = second.value.sleepingAgentSessionsByPaneKey?.['original-tab:1']
+    expect(restored).toMatchObject({
+      paneKey: 'original-tab:1',
+      providerSession: { key: 'session_id', id: 'original-conversation' },
+      requiresManualResume: true
+    })
+    expect(restored?.resumeTargetPaneKey).toBe(expectedTarget)
+  })
+
   it.each([undefined, 'legacy-orchestration-worker'])(
     'new host ignores an old client resume fence (%s)',
     (automaticResumeBlockedBy) => {

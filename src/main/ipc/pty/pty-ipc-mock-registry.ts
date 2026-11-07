@@ -145,7 +145,8 @@ export const agentHookServerModuleMock = () => ({
     clearPaneState: clearAgentHookPaneStateMock,
     registerPaneKeyAlias: registerPaneKeyAliasMock,
     forgetRefusedPaneResume: forgetRefusedPaneResumeMock,
-    recordLaunchResumeIdentity: () => {},
+    recordLaunchResumeIdentity: () => 'seeded' as const,
+    flushResumeIdentityCheckpoint: () => true,
     readRestoredAgentStatus: async () => null,
     clearPaneKeyAliasesForPty: clearPaneKeyAliasesForPtyMock
   }

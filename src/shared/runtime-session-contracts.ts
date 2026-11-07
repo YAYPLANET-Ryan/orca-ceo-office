@@ -295,6 +295,7 @@ export type RuntimeMobileSessionTabsResult = {
 }
 
 export type RuntimeMobileSessionCreateTerminalResult = {
+  resumeCheckpointFailed?: true
   tab: RuntimeMobileSessionTerminalClientTab
   publicationEpoch: string
   snapshotVersion: number

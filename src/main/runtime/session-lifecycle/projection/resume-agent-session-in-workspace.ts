@@ -1,5 +1,6 @@
 import { OrcaRuntimeWithAgentSessionResumeOwnership } from './agent-session-resume-ownership'
 import { makePaneKey } from '../../../../shared/workspace-layout/stable-pane-id'
+import { RESUME_CHECKPOINT_WARNING } from '../../../../shared/agent-session/lifecycle/resume-checkpoint-warning'
 import {
   agentProviderSessionsEqual,
   normalizeAgentProviderSession,
@@ -26,7 +27,7 @@ export type AgentSessionResumeRefusal =
   | 'windows_only_cli'
 
 export type AgentSessionResumeResult =
-  | { ok: true; handle: string; paneKey: string; ptyId: string }
+  | { ok: true; handle: string; paneKey: string; ptyId: string; warning?: string }
   | { ok: false; reason: Exclude<AgentSessionResumeRefusal, 'windows_only_cli'> }
   /** A WSL host found only a Windows copy of the agent CLI; message says how to fix it. */
   | { ok: false; reason: 'windows_only_cli'; message: string }
@@ -196,6 +197,7 @@ export abstract class OrcaRuntimeWithResumeAgentSessionInWorkspace extends OrcaR
     }
     return {
       ok: true,
+      ...(created.resumeCheckpointFailed ? { warning: RESUME_CHECKPOINT_WARNING } : {}),
       handle: tab.terminal,
       paneKey: makePaneKey(tab.parentTabId, tab.leafId),
       ptyId: tab.ptyId

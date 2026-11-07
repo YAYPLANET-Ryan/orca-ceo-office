@@ -171,6 +171,8 @@ export function sanitizeHydratedEntry(
     providerSession,
     providerSessionOnly: providerSessionOnly ? true : undefined,
     retainedForLiveness: retainedForLiveness ? true : undefined,
+    runtimeResumeCheckpoint:
+      record.runtimeResumeCheckpoint === true && providerSession ? true : undefined,
     payload,
     receivedAt,
     stateStartedAt,

@@ -1,0 +1,185 @@
+Verified Windows release procedure (per-user Orca only)
+
+Scope
+These scripts are an operator deployment procedure. They do not replace the
+embedded updater. Reviewed -RouteExistingStartup registration can back up and
+route matching Startup shortcuts through verified recovery/launch. Keep old
+Task install helpers as historical evidence; do not run them for a new update.
+Never patch installed ASAR/CLI bytes, restore a whole profile, or stop model jobs.
+
+Preparation, while the recovered app remains running
+1. Validate the NSIS artifact against the build's recorded SHA256 and version.
+   Run the isolated packaged smoke and retain the source revision association.
+2. New-ReleasePlan.ps1 requires a complete installed program and candidate tree.
+   It creates a program-only ZIP and pins every size/hash, essential nonempty
+   file, exact version, installer hash, canonical target and readiness settings.
+   Missing baseline files must be investigated; they are never silently omitted.
+3. Review candidate-additions-dry-run.json. If candidate-only files exist, the
+   initial plan remains REVIEW_REQUIRED. Only after approval may a new output
+   directory be prepared with -ApproveCandidateAdditions. No old plan is edited.
+   Unknown additions always block rollback. Modified known additions also block
+   unless -ApprovePartialCandidateAdditions was explicitly reviewed. That option
+   preserves their original bytes outside the install tree before removing only
+   listed candidate paths; it never permits unknown paths or reparse points.
+4. Pin the plan SHA256 and keep this procedure at the reviewed source commit.
+   Invoke-VerifiedRelease.ps1 -PlanPath <plan> -ExpectedPlanSha256 <hash> -Mode Validate
+   verifies artifacts without closing the app, installing or registering tasks.
+5. Register-ReleaseRecovery.ps1 previews by default. Actual -Register is a
+   separate approved deployment step after graceful app close. It registers an
+   on-demand Apply task and an interactive-logon Recover task, with no execution
+   timeout and IgnoreNew. Logon invokes Invoke-GuardedOrcaLaunch.ps1. Direct
+   Startup links require reviewed -RouteExistingStartup; originals are copied
+   and hashed before routing. Direct HKCU Run entries block registration pending
+   bounded review. Registration never starts a task. It requires a pinned bundle
+   outside the worktree and persists registration.json before routing/tasks.
+   It is not an atomic Scheduler/LNK transaction: failure or worker interruption
+   leaves a durable intent and retry is refused until partial state is reviewed.
+   Original LNK bytes remain copied and hashed; never delete intent to retry.
+
+Deployment and worker lifetime
+Coordinate the user's graceful GUI quit and continuity checkpoint first. Keep
+the relocated terminal daemon and model processes alive. Apply refuses any Orca
+image, relevant installer/uninstaller/child process, inaccessible identity, or
+pending reboot rename touching the target. It never kills a process.
+Start the reviewed on-demand scheduled Apply task, rather than a terminal-owned
+helper. Task Scheduler owns that worker; a terminal/GUI parent can disappear.
+No worker survives OS shutdown. Never reboot while INSTALLING or ROLLING_BACK.
+Its journal outside the program directory is the next-run recovery authority.
+
+State and next-run recovery
+The canonical target determines one lock/journal directory under LOCALAPPDATA/
+OrcaRelease. The current-user per-user target is the only supported deployment;
+per-machine/multi-account installs are refused. Lock-open access errors and
+contention both fail closed. Writes flush a temporary journal then atomically
+replace it; the prior journal is retained. Corrupt latest journals require review.
+Installation, rollback, window/server readiness and session continuity are separate
+fields. An interrupted worker does not become a successful install automatically.
+The installer handle is pinned before waiting. If its exit code is unavailable,
+valid bytes are preserved as CONTENT_VERIFIED_EXIT_UNKNOWN with no launch or
+success; incomplete bytes still enter rollback. A known nonzero exit is retained.
+Recover first refuses a surviving installer or pending reboot file operation.
+If a completed candidate verifies, it is preserved with readiness still untested.
+Otherwise the verified rollback ZIP is restored, with intent persisted before
+any copy, then every restored byte/version and exact inventory is checked.
+Rollback failure/interruption remains recoverable on the next invocation.
+ZIP validation/restoration share normalized entry keys, including backslashes.
+PID/parent identity checks ignore prior-boot identities while image/path gates
+remain active. Exit1073807364 records deferred rollback intent and waits for the
+next Recover; this policy does not identify who terminated the installer.
+Core Recover never starts the app. The separate startup gate recovers, verifies
+program state, and then launches. Inspect reports persisted evidence, not a fresh
+health certification. Apply exit0 requires READY; ROLLED_BACK exits2 and retains
+the failed install outcome. Continuity remains NOT_TESTED even when READY.
+A completed journal belonging to another plan must be explicitly reviewed and
+archived under the same lock before a later release; never delete it to retry.
+
+Launch and continuity gate
+Only launch after the selected candidate or restored baseline passes integrity,
+version and pending-rename checks. Record a responding real window and that same
+PID's required-port listener. Port readiness is not authenticated laptop/model
+response. Capture the strict identity/config/tab comparator separately and keep
+its WARN/FAIL until explained; do not weaken it or overwrite old profiles.
+Apply and startup share launch.lock, then acquire update.lock in the same order.
+The gate can launch a verified no-journal/PREPARED baseline, retry readiness for
+a verified exit0 candidate, or launch a verified restored rollback without
+reporting the failed update as successful. Normal launch validates the pinned
+plan/current files without depending on retained installer/rollback artifacts;
+mutating recovery still revalidates rollback ZIP before writing anything.
+For verified candidate bytes with unknown installer exit, launch stays blocked.
+The explicit operator -Mode Rollback path verifies quiescence and rollback,
+restores the baseline, and permits subsequent guarded launch; it never reinstalls.
+Live wiring and actual NSIS/reboot/laptop tests are not performed by source or
+synthetic tests. Embedded updater/manual direct EXE launches remain outside this
+operator route; unattended recovery needs approved live wiring/validation.
+
+Isolated verification
+python -B config/scripts/windows-release/test_release_recovery.py
+All workers and fault injection use dist/release-regression/<unique>/TEST_ONLY.
+Only known test children are terminated; all fixtures are retained for review.
+No production install, scheduler, registry or profile is modified by the suite.
+
+2026-11-06 incident constraint
+The 20261105.1 app window was recovered, but resources/bin/orca.exe subsequently
+disappeared from installed/candidate/snapshot trees during read-only preparation.
+Bitdefender quarantine metadata now confirms installed/snapshot CLI quarantine
+at00:17:12, detection Gen:Variant.MSILHeracles.273114. This is not a vendor malware
+or false-positive determination. No security exclusion, quarantine restoration
+or live reinstall was performed. A reconstructed program-only rollback ZIP combines
+the repaired program with byte-identical CLI data from the pinned prior archive.
+This is not a complete live snapshot and does not authorize a deployment. Keep
+the next deployment BLOCKED until vendor detection and baseline preflight are
+resolved. A local analysis packet contains only the pinned sample, source,
+build script and technical metadata. The November 6 instruction authorizes that
+exact packet after embedded NSIS CLI equality; private contact fields and human
+verification still require direct user interaction. No vendor verdict is implied.
+
+Same-version bootstrap (R0), prepared only; not permission to run it now
+Normal Apply continues to reject an incomplete baseline. New-BootstrapRepairPlan
+measures the one approved initial absence (resources/bin/orca.exe); every other
+program byte and inventory entry must equal the pinned recovered rollback.
+Candidate and rollback must have identical version, inventory, sizes and hashes.
+The builder can prepare DRAFT_BLOCKED_SECURITY_PENDING without changing the app.
+Invoke-BootstrapRepair -Mode Validate must refuse that draft. Apply additionally
+requires a pinned exact-hash vendor resolution document and two scoped clean
+scan reports bracketing at least two hours, with stable engine/definitions and
+recent timestamps. These JSON attestations need real operator-verified evidence;
+synthetic passing fixtures are not vendor clearance. No exception/restore occurs.
+R0 must run as the interactive current user, with the GUI gracefully closed and
+no relevant installer/model process touching the target. It reuses the existing
+transaction/rollback engine and never starts the GUI. Known exit0 plus verified
+payload ends at DEFERRED_MAINTENANCE_FINALIZATION, never READY/continuity PASS.
+Unknown exit stays blocked. Recovery does not reinstall completed transactions.
+Fresh evidence gates a new install; later rollback accepts the same pinned
+historical vendor/scoped scan artifacts without expiring its recovery ability.
+It still refuses mismatched hashes, changed reports, or future/invalid intervals.
+R0 rollback restores the complete security-cleared baseline, including the CLI;
+it does not restore the quarantined/incomplete initial state.
+
+After completed R0, prepare an ordinary plan from the now-complete baseline.
+Transition-VerifiedReleasePlan previews by default; -Apply permits only known
+exit0, verified, deferred R0 state. It validates security, both plans, idle state,
+exact installed files and rollback ZIP. Under launch/update locks it retains a
+hash-verified copy of the old journal and atomically writes new PREPARED state.
+It never deletes a pending journal, rewrites a profile, launches or reinstalls.
+The same transition tool can prepare R0 from an existing verified READY or
+ROLLED_BACK ordinary journal. It requires the exact prior plan/root, unchanged
+non-CLI bytes, identical CLI baseline hash/version, fresh R0 evidence and idle
+state. Pending/unknown/failed recovery states never qualify for archival.
+
+Persistent runtime preparation
+Commit/review the helper source before New-VerifiedReleaseBundle. It requires
+the exact Git revision and clean scoped source. Output must be a new directory
+outside source. Every helper is hashed into bundle-manifest.json. Keep this
+directory and the pinned plan available across logon/reboot. The bundle loader
+validates all bytes before dot-sourcing modules and rejects extra/missing files,
+path aliases and modified content. Registration requires this pinned bundle,
+not mutable worktree scripts. Staging alone does not register or execute tasks.
+Task/LNK actions use process-only ExecutionPolicy Bypass for this hash-verified
+loader; they never change machine/user policy. Organization-enforced Group
+Policy may still refuse execution and requires isolated OS validation.
+Run both test_release_recovery.py and test_release_bootstrap.py. Real NSIS fault
+injection must run in a disposable Windows OS, never merely /D=temp on this host.
+The current branch is an operator procedure, not an embedded-updater integration.
+
+Registration review and partial-state inspection
+Preview reports the exact gate path/arguments and deploymentEligible. A preview
+without a pinned runtime bundle is diagnostic only and is ineligible for apply.
+Apply requires the identical shortcut path set and original hashes from preview;
+changes refuse before backup/routing. Each shortcut's backup and routing progress
+is flushed into registration.json before/after its corresponding file operation.
+The on-demand Apply task is created first; logon Recover is created last. Intended
+task names are recorded before creation, even if a worker dies before recording
+the returned task result. Existing registration intent always blocks blind retry.
+Inspect-ReleaseRegistration reads current-user registration only, reports the
+two exact task names and scoped LNK/backup hashes, and never unregisters, restores
+or enables anything. Task presence alone does not certify action/principal/logon
+readiness. Unknown/changed files and unrecorded outcomes still need operator review.
+Action executable/arguments are compared with recorded intent separately; this
+does not certify the principal, trigger or a real logon. Corrupt JSON is preserved
+and reported without automatic fallback to an older journal or any blind retry.
+Wrapper-based startup via cmd/bat/wscript is not exhaustively detected by direct
+Orca.exe LNK/Run checks; confirm separately before real deployment. Runtime logs
+belong in the hashed state directory, never inside the immutable bundle.
+test_release_registration.py invokes the real entry/journals/locks/LNK code with
+synthetic Scheduler and current-user boundaries. It cannot certify real Windows
+Scheduler, NSIS, AV, logon or reboot behavior; those require the disposable OS.

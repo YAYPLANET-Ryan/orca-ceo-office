@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { AtomicSnapshotWriter } from '../persistence/atomic-snapshot-writer'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentHookServer, _internals } from './server'
 import { buildBody, postHookEvent, PANE } from './server.test-fixtures'
+import { admitLegacyAgentStatus } from '../../shared/agent-hook-listener/listener-state'
+import { AGENT_STATUS_2A_CURRENT_PRODUCER_MODE } from '../../shared/agent-status/transport/agent-status-legacy-adapter'
 
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
@@ -42,6 +45,27 @@ describe('a resume launch seeds the pane identity', () => {
     return server
   }
 
+  it('commits resume identity synchronously and reports a failed disk checkpoint without dropping it', async () => {
+    const server = await startServer()
+    server.recordLaunchResumeIdentity({
+      paneKey: PANE,
+      worktreeId: 'wt-1',
+      agentType: 'codex',
+      providerSession: RESUMED,
+      launchedAt: 1
+    })
+    expect(server.flushResumeIdentityCheckpoint()).toBe(true)
+    const saved = JSON.parse(readFileSync(server.lastStatusPath!, 'utf8'))
+    expect(saved.entries[PANE].providerSession.id).toBe('resumed-session')
+    vi.spyOn(AtomicSnapshotWriter.prototype, 'writeSync').mockImplementation(() => {
+      throw new Error('synthetic disk checkpoint failure')
+    })
+    expect(server.flushResumeIdentityCheckpoint()).toBe(false)
+    expect(server.getStatusSnapshotForPane(PANE)).toEqual([
+      expect.objectContaining({ providerSession: RESUMED })
+    ])
+  })
+
   it('publishes an identity-only row before the agent reports', async () => {
     const server = await startServer()
     server.recordLaunchResumeIdentity({
@@ -72,12 +96,13 @@ describe('a resume launch seeds the pane identity', () => {
       '/hook/codex'
     )
     expect(response.status).toBe(204)
-    server.recordLaunchResumeIdentity({
+    const outcome = server.recordLaunchResumeIdentity({
       paneKey: PANE,
       agentType: 'codex',
       providerSession: RESUMED,
       launchedAt
     })
+    expect(outcome).toBe('refused')
     expect(server.getStatusSnapshotForPane(PANE)[0]?.providerSession?.id).toBe('agent-reported')
   })
 
@@ -127,6 +152,36 @@ describe('a resume launch seeds the pane identity', () => {
       state: 'working',
       providerSession: RESUMED
     })
+    server.reconcileEndedProcessForPaneKeys([PANE], {
+      preserveResumeIdentity: true,
+      endedPresence: { agent: 'opencode2', session: RESUMED.id, ended: true }
+    })
+    expect(
+      server.recordLaunchResumeIdentity({
+        paneKey: PANE,
+        agentType: 'opencode2',
+        providerSession: RESUMED,
+        launchedAt: 1
+      })
+    ).toBe('seeded')
+    server.ingestTerminalStatus({
+      paneKey: PANE,
+      origin: 'process',
+      payload: { state: 'working', prompt: '', agentType: 'opencode2' }
+    })
+    const [resumed] = server.getStatusSnapshotForPane(PANE)
+    expect(resumed).toMatchObject({ state: 'working', providerSession: RESUMED })
+    expect(resumed?.providerSessionOnly).toBeUndefined()
+    server.reconcileEndedProcessForPaneKeys([PANE], {
+      preserveResumeIdentity: true,
+      endedPresence: { agent: 'opencode2', session: RESUMED.id, ended: true }
+    })
+    server.ingestTerminalStatus({
+      paneKey: PANE,
+      origin: 'process',
+      payload: { state: 'working', prompt: '', agentType: 'opencode2' }
+    })
+    expect(server.getStatusSnapshotForPane(PANE)[0]?.providerSession).toBeUndefined()
   })
 
   it('keeps the seeded identity across a host restart', async () => {
@@ -138,6 +193,15 @@ describe('a resume launch seeds the pane identity', () => {
       providerSession: RESUMED,
       launchedAt: Date.now()
     })
+    server.ingestTerminalStatus({
+      paneKey: PANE,
+      origin: 'process',
+      payload: { state: 'working', prompt: '', agentType: 'codex' }
+    })
+    server.reconcileEndedProcessForPaneKeys([PANE], {
+      preserveResumeIdentity: true,
+      endedPresence: { agent: 'codex', session: RESUMED.id, ended: true }
+    })
     server.stop()
     servers.length = 0
     const restarted = await startServer()
@@ -148,6 +212,117 @@ describe('a resume launch seeds the pane identity', () => {
         providerSessionOnly: true
       })
     ])
+    expect(
+      restarted.recordLaunchResumeIdentity({
+        paneKey: PANE,
+        worktreeId: 'wt-1',
+        agentType: 'codex',
+        providerSession: RESUMED,
+        launchedAt: 1
+      })
+    ).toBe('seeded')
+    restarted.ingestTerminalStatus({
+      paneKey: PANE,
+      origin: 'process',
+      payload: { state: 'working', prompt: '', agentType: 'codex' }
+    })
+    expect(restarted.getStatusSnapshotForPane(PANE)[0]?.providerSession).toEqual(RESUMED)
+    restarted.clearPaneState(PANE)
+    restarted.ingestTerminalStatus({
+      paneKey: PANE,
+      origin: 'process',
+      payload: { state: 'working', prompt: '', agentType: 'codex' }
+    })
+    expect(restarted.getStatusSnapshotForPane(PANE)[0]?.providerSession).toBeUndefined()
+  })
+
+  it.each([undefined, 'process'] as const)(
+    'retains a silent resume through cleanup and restart without lending its ID to %s',
+    async (origin) => {
+      const server = await startServer()
+      server.recordLaunchResumeIdentity({
+        paneKey: PANE,
+        worktreeId: 'wt-1',
+        agentType: 'codex',
+        providerSession: RESUMED,
+        launchedAt: 1
+      })
+      server.clearPaneState(PANE, { forgetAgentExit: true })
+      expect(server.flushResumeIdentityCheckpoint()).toBe(true)
+      const saved = JSON.parse(readFileSync(server.lastStatusPath!, 'utf8'))
+      expect(saved.entries[PANE]?.providerSession).toEqual(RESUMED)
+      expect(saved.entries[PANE]?.runtimeResumePendingObservation).toBeUndefined()
+      server.stop()
+      servers.length = 0
+      const restarted = await startServer()
+      expect(restarted.getStatusSnapshotForPane(PANE)[0]?.providerSession).toEqual(RESUMED)
+      restarted.ingestTerminalStatus({
+        paneKey: PANE,
+        origin,
+        payload: { state: 'working', prompt: '', agentType: 'codex' }
+      })
+      expect(restarted.getStatusSnapshotForPane(PANE)[0]?.providerSession).toBeUndefined()
+    }
+  )
+
+  it('checkpoints the same identity when its first hook wins the launch race', async () => {
+    const server = await startServer()
+    const response = await postHookEvent(
+      server,
+      buildBody({ hook_event_name: 'SessionStart', session_id: RESUMED.id }),
+      '/hook/codex'
+    )
+    expect(response.status).toBe(204)
+    expect(
+      server.recordLaunchResumeIdentity({
+        paneKey: PANE,
+        agentType: 'codex',
+        providerSession: RESUMED,
+        launchedAt: 1
+      })
+    ).toBe('deduped')
+    server.clearPaneState(PANE)
+    expect(server.flushResumeIdentityCheckpoint()).toBe(true)
+    const saved = JSON.parse(readFileSync(server.lastStatusPath!, 'utf8'))
+    expect(saved.entries[PANE]?.providerSession).toEqual(RESUMED)
+    expect(saved.entries[PANE]?.runtimeResumePendingObservation).toBeUndefined()
+  })
+
+  it('retains a lost connection checkpoint without revisiting the reinserted map row', async () => {
+    const server = await startServer()
+    server.recordLaunchResumeIdentity({
+      paneKey: PANE,
+      agentType: 'codex',
+      providerSession: RESUMED,
+      launchedAt: 1
+    })
+    const state = server['state']
+    const row = state.lastStatusByPaneKey.get(PANE)
+    if (!row) {
+      throw new Error('Missing synthetic seed')
+    }
+    admitLegacyAgentStatus(
+      state,
+      'main-status-cleanup',
+      { ...row, connectionId: 'synthetic-remote' },
+      AGENT_STATUS_2A_CURRENT_PRODUCER_MODE
+    )
+    server.clearStatusEntriesForConnection('synthetic-remote')
+    server.clearStatusEntriesForConnection('synthetic-remote')
+    expect(server.getStatusSnapshotForPane(PANE)[0]?.providerSession).toEqual(RESUMED)
+  })
+
+  it('does not retain an explicit resume after its tab is closed', async () => {
+    const server = await startServer()
+    server.recordLaunchResumeIdentity({
+      paneKey: PANE,
+      agentType: 'codex',
+      providerSession: RESUMED,
+      launchedAt: 1
+    })
+    server.dropStatusEntriesByTabPrefix('tab-1')
+    server.clearPaneState(PANE)
+    expect(server.getStatusSnapshotForPane(PANE)).toEqual([])
   })
 
   it('ignores a pane key that is not a stable tab:leaf key', async () => {

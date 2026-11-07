@@ -8,7 +8,9 @@ const processCheck = readFileSync(
 )
 
 function readPowerShellProbe(source = processCheck) {
-  const match = source.match(/nsExec::Exec `"\$PowerShellPath"(.*?) -(?:C|Command) "([^"\n]+)"`/)
+  const match = source.match(
+    /nsExec::Exec(?: \/TIMEOUT=\d+)? `"\$PowerShellPath"(.*?) -(?:C|Command) "([^"\n]+)"`/
+  )
   if (!match) {
     throw new Error('The NSIS PowerShell invocation was not found')
   }
@@ -39,7 +41,10 @@ describe.runIf(process.platform === 'win32')(
     const PROBE_TEST_TIMEOUT_MS = PROBE_TIMEOUT_MS + 15_000
 
     const WARM_UP_TIMEOUT_MS = 150_000
-    const ARCHES = ['SysWOW64', 'System32']
+    const ARCHES = [
+      { directory: 'SysWOW64', healthyExitCode: 1, reachesQuery: false },
+      { directory: 'System32', healthyExitCode: 0, reachesQuery: true }
+    ]
 
     function runProbe(arch, prefix = '', timeoutMs = PROBE_TIMEOUT_MS) {
       const { args, command } = readPowerShellProbe()
@@ -66,36 +71,40 @@ describe.runIf(process.platform === 'win32')(
     beforeAll(
       () => {
         for (const arch of ARCHES) {
-          runProbe(arch, '', WARM_UP_TIMEOUT_MS)
+          runProbe(arch.directory, '', WARM_UP_TIMEOUT_MS)
         }
       },
       ARCHES.length * WARM_UP_TIMEOUT_MS + 15_000
     )
 
     it.each(ARCHES)(
-      '%s permits the real inline process query',
+      '$directory enforces the native process-query architecture',
       { timeout: PROBE_TEST_TIMEOUT_MS },
       (arch) => {
-        const result = runProbe(arch)
-        expect(result.code, JSON.stringify(result)).toBe(0)
+        const result = runProbe(arch.directory)
+        expect(result.code, JSON.stringify(result)).toBe(arch.healthyExitCode)
         expect(result.timedOut).toBe(false)
         expect(result.stdout).toContain(policyReceipt)
       }
     )
 
     it.each(ARCHES)(
-      '%s rejects a failed process query',
+      '$directory refuses unavailable process control without continuation',
       { timeout: PROBE_TEST_TIMEOUT_MS },
       (arch) => {
         const result = runProbe(
-          arch,
+          arch.directory,
           'function Get-CimInstance { [CmdletBinding()] param([string]$ClassName); ' +
             `[Console]::Out.WriteLine('${queryFailureReceipt}'); Write-Error 'CIM unavailable' }; `
         )
         expect(result.code, JSON.stringify(result)).toBe(1)
         expect(result.timedOut).toBe(false)
         expect(result.stdout).toContain(policyReceipt)
-        expect(result.stdout).toContain(queryFailureReceipt)
+        if (arch.reachesQuery) {
+          expect(result.stdout).toContain(queryFailureReceipt)
+        } else {
+          expect(result.stdout).not.toContain(queryFailureReceipt)
+        }
       }
     )
   }

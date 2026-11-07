@@ -1,9 +1,25 @@
 import { loadElectronAutoUpdater, type ElectronAutoUpdater } from '../electron-updater-loader'
+import { app } from 'electron'
+import { getCeoUpdateBlockReason } from '../ceo-update-policy'
 import { statusesEqual } from '../releases/updater-fallback'
 import type { UpdateCheckOptions, UpdateStatus } from '../../../shared/update-status-types'
 import { UpdaterState as BaseUpdaterState } from './updater-state'
 
 export abstract class UpdaterStatus extends BaseUpdaterState {
+  protected blockCeoBuildUpdates(userInitiated = false): boolean {
+    const message = getCeoUpdateBlockReason(app.getVersion())
+    if (!message) {
+      return false
+    }
+    this.clearAvailableUpdateContext()
+    if (this.autoUpdater) {
+      this.autoUpdater.autoDownload = false
+      this.autoUpdater.autoInstallOnAppQuit = false
+    }
+    this.sendStatus({ state: 'error', message, retryable: false, userInitiated })
+    return true
+  }
+
   protected getAutoUpdater(): ElectronAutoUpdater {
     if (!this.autoUpdater) {
       this.autoUpdater = loadElectronAutoUpdater()

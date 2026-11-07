@@ -70,13 +70,11 @@ function makeRuntime(
     getForegroundProcess: async () => null
   })
   runtime.syncWindowGraph(0, { tabs: [], leaves: [] })
-  return { runtime, spawn }
+  return { runtime, spawn, runtimeStore }
 }
 
-/** Main's fresh launch: a new conversation, which can't collide with the vetoed one. */
-function expectFreshLaunch(command: string | undefined): void {
-  expect(command ?? '').not.toMatch(RESUMES)
-  expect(command).toContain('codex')
+function expectPreservedShell(command: string | undefined): void {
+  expect(command).toBeUndefined()
 }
 
 async function restore(runtime: InstanceType<typeof OrcaRuntimeService>): Promise<void> {
@@ -88,6 +86,39 @@ async function restore(runtime: InstanceType<typeof OrcaRuntimeService>): Promis
 }
 
 describe('restoring a pane its host recorded an agent in', () => {
+  it.each(['live', 'quit'] as const)(
+    'keeps an explicitly exited %s conversation parked during automatic activation',
+    async (origin) => {
+      const { runtime, spawn, runtimeStore } = makeRuntime([], 'codex', {
+        session: {
+          sleepingAgentSessionsByPaneKey: {
+            [PANE_KEY]: {
+              paneKey: PANE_KEY,
+              tabId: 'host-tab',
+              worktreeId: TEST_WORKTREE_ID,
+              agent: 'codex',
+              providerSession: { key: 'session_id', id: SESSION_ID },
+              prompt: '',
+              state: 'done',
+              capturedAt: 1,
+              updatedAt: 1,
+              origin,
+              requiresManualResume: true
+            }
+          }
+        }
+      })
+      await restore(runtime)
+      expect(spawn).not.toHaveBeenCalled()
+      expect(
+        runtimeStore.getWorkspaceSession().sleepingAgentSessionsByPaneKey?.[PANE_KEY]
+      ).toMatchObject({
+        providerSession: { key: 'session_id', id: SESSION_ID },
+        requiresManualResume: true
+      })
+    }
+  )
+
   it('resumes an agent typed into a shell, which no launch command names', async () => {
     const { runtime, spawn } = makeRuntime([codexRow()])
     await restore(runtime)
@@ -111,7 +142,7 @@ describe('restoring a pane its host recorded an agent in', () => {
     expect(command).toContain('codex')
   })
 
-  it('launches the tab’s agent fresh when the pane’s own rows name two conversations', async () => {
+  it('keeps a shell when the pane’s own rows name two conversations', async () => {
     const { runtime, spawn } = makeRuntime(
       [
         codexRow({ receivedAt: 2 }),
@@ -120,10 +151,10 @@ describe('restoring a pane its host recorded an agent in', () => {
       'codex'
     )
     await restore(runtime)
-    expectFreshLaunch(spawn.mock.calls[0]![0].command)
+    expectPreservedShell(spawn.mock.calls[0]![0].command)
   })
 
-  it('launches the tab’s agent fresh when another pane’s stored record holds the conversation', async () => {
+  it('keeps a shell when another pane’s stored record holds the conversation', async () => {
     const otherPaneKey = 'other-tab:44444444-4444-4444-8444-444444444444'
     const { runtime, spawn } = makeRuntime([codexRow()], 'codex', {
       session: {
@@ -144,15 +175,14 @@ describe('restoring a pane its host recorded an agent in', () => {
       }
     })
     await restore(runtime)
-    expectFreshLaunch(spawn.mock.calls[0]![0].command)
+    expectPreservedShell(spawn.mock.calls[0]![0].command)
   })
 
-  it('falls back to the tab’s agent launch when the newest row is a structured host’s', async () => {
+  it('keeps a shell when the newest conversation belongs to a structured host', async () => {
     const { runtime, spawn } = makeRuntime([codexRow({ structuredHost: 'owned' })], 'codex')
     await restore(runtime)
     const { command } = spawn.mock.calls[0]![0]
-    expect(command ?? '').not.toMatch(RESUMES)
-    expect(command).toContain('codex')
+    expectPreservedShell(command)
   })
 
   it('resumes a pane whose only other row is a relayed SSH row naming another session', async () => {
