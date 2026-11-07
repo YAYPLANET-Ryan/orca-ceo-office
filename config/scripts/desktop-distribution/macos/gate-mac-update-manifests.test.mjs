@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { darwinVersionForMacos, withMinimumSystemVersion } from './gate-mac-update-manifests.mjs'
+import { darwinVersionForMacos } from '../../../../src/shared/macos-darwin-floor.ts'
+import { withMinimumSystemVersion } from './gate-mac-update-manifests.mjs'
 
 describe('darwinVersionForMacos', () => {
   it('maps macOS releases to the Darwin version os.release() reports', () => {

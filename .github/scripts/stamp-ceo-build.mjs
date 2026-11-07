@@ -10,13 +10,13 @@ if (!/^\d+$/.test(run ?? '') || Number(run) > 65535) {
   throw new Error('CEO Windows build revision is invalid')
 }
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
-if (pkg.version !== '1.4.251') {
+if (pkg.version !== '1.4.252') {
   throw new Error('Review the CEO version before updating upstream')
 }
 const date = new Date().toISOString().slice(0, 10).replaceAll('-', '')
-pkg.version = `1.4.251-ceo.${date}.${run}`
+pkg.version = `1.4.252-ceo.${date}.${run}`
 pkg.orcaRecoverySource = source
-pkg.orcaUpstreamSource = 'a162e08b29b2883b02d8a0dfcc99e26c80b2cfe7'
+pkg.orcaUpstreamSource = '2cf48d965b0e789a6e05c494bdd40af27e758aea'
 pkg.orcaBuildChannel = 'ceo-review'
 writeFileSync('package.json', `${JSON.stringify(pkg, null, 2)}\n`)
 console.log(`CEO review package ${pkg.version}, source ${source}`)

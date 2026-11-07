@@ -1,5 +1,5 @@
-import { openTestChats } from './structured-agent-session-open-test-chats.test-support'
-import { StructuredAgentRegistry } from './structured-agent-registry'
+import { openTestChats } from './host/testing/structured-agent-session-open-test-chats.test-support'
+import { StructuredAgentRegistry } from './providers/structured-agent-registry'
 import { acpLaunchSpecFor } from '../../acp/acp-launch-specs'
 import { acpStructuredAgentDefinition } from '../../acp/acp-structured-agent-definitions'
 import { AcpBackgroundTaskTimeline } from '../../acp/acp-background-task-timeline'
@@ -15,20 +15,20 @@ import { openTestAgentSessionRecordStore } from '../../runtime/agent-session/rec
 import {
   closeTestJournalHostDatabases,
   openTestJournalHostDatabase
-} from '../agent-session-journal/journal-host-database-test-support'
-import { StructuredAgentSessionHost } from './structured-agent-session-host'
+} from '../agent-session-journal/store-lifecycle/journal-host-database-test-support'
+import { StructuredAgentSessionHost } from './host/structured-agent-session-host'
 import {
   HOST_TEST_LOCATION,
   HOST_TEST_NOW,
   hostTestAttachParams
-} from './structured-agent-session-host-test-data'
+} from './host/testing/structured-agent-session-host-test-data'
 import {
   createRestTestRig,
   REST_TEST_CALLER,
   restTestSend,
   REST_TEST_SESSION as SESSION,
   type RestTestRig
-} from './structured-agent-session-rest-test-rig'
+} from './host/testing/structured-agent-session-rest-test-rig'
 
 const LAST_CHUNK_AT = HOST_TEST_NOW + 5_500
 const CONNECTION_CLOSED_AT = HOST_TEST_NOW + 60_000
