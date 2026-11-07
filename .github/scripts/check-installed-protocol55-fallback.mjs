@@ -138,6 +138,28 @@ try {
   for (const directory of [home, profile, workspace]) {
     mkdirSync(directory, { recursive: true })
   }
+  const profileSeed = path.join(profile, 'orca-data.json')
+  writeFileSync(
+    profileSeed,
+    JSON.stringify({
+      repos: [],
+      folderWorkspaces: [],
+      settings: {
+        telemetry: {
+          optedIn: false,
+          installId: '00000000-0000-4000-8000-000000000000',
+          existedBeforeTelemetryRelease: false
+        }
+      },
+      onboarding: { flowVersion: 4, closedAt: 1, outcome: 'completed', lastCompletedStep: 5 },
+      workspaceSession: { activeRepoId: null, activeWorktreeId: null, activeTabId: null }
+    }),
+    { flag: 'wx' }
+  )
+  evidence.syntheticProfile = {
+    kind: 'EXISTING_EMPTY_LOCAL_PROFILE',
+    seedSha256: hash(profileSeed)
+  }
   writeFileSync(
     path.join(workspace, 'protocol55-input-collector.mjs'),
     readFileSync(new URL('./protocol55-input-collector.mjs', import.meta.url))
@@ -191,6 +213,13 @@ try {
     )
     checkpoint(`${phase}_WAIT_STARTUP_SERVICES`)
     await page.evaluate(() => window.api.app.awaitFirstWindowStartupServices())
+    const repos = await page.evaluate(() => window.api.repos.list())
+    if (!Array.isArray(repos) || repos.length !== 0) {
+      throw new Error(
+        'Synthetic empty-profile seed was not honored; automatic HOME startup is outside this fixture'
+      )
+    }
+    checkpoint(`${phase}_EMPTY_PROFILE_CONFIRMED`, { syntheticRepoCount: repos.length })
     return page
   }
   async function closeGracefully() {
@@ -304,7 +333,9 @@ try {
           })
           if (physical.length > 1) {
             duplicateObserved = true
+            evidence.firstDuplicateInventory ??= evidence.physicalInventory
           }
+          evidence.duplicateObserved = duplicateObserved
           return (
             !duplicateObserved &&
             physical.length === 1 &&
