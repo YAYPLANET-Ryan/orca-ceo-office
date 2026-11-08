@@ -30,15 +30,21 @@ function splitLayout(): TerminalLayoutSnapshot {
 describe('resolveWorktreeStatus', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it.each([false, true])(
-    'does not revive a working title after done expires (pane title: %s)',
-    (paneTitle) => {
+  it.each([
+    { provider: 'claude', paneTitle: false },
+    { provider: 'claude', paneTitle: true },
+    { provider: 'codex', paneTitle: false },
+    { provider: 'codex', paneTitle: true }
+  ] as const)(
+    'does not revive $provider working after done expires (pane title: $paneTitle)',
+    ({ provider, paneTitle }) => {
       const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
-      const tab = { id: 'tab-1', title: 'claude [working]' }
+      const tab = { id: 'tab-1', title: `${provider} [working]`, launchAgent: provider }
       const paneKey = `tab-1:${LEAF_ID_1}`
       const entry = {
         paneKey,
         state: 'done' as const,
+        agentType: provider,
         prompt: '',
         updatedAt: 1000,
         stateStartedAt: 1000,
