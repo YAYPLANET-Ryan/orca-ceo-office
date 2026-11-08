@@ -6,6 +6,14 @@ import {
 } from './codex-command-classification'
 
 describe('shouldUseRendererBackedCodexTerminal', () => {
+  it('classifies isolated interactive and headless commands independently of daemon mode', () => {
+    expect(shouldUseRendererBackedCodexTerminal('codex --no-daemon')).toBe(true)
+    expect(shouldUseRendererBackedCodexTerminal('codex --no-daemon resume session-1')).toBe(true)
+    expect(shouldUseRendererBackedCodexTerminal('codex --no-daemon exec summarize')).toBe(false)
+    expect(shouldUseRendererBackedCodexTerminal('codex --no-daemon app-server')).toBe(false)
+    expect(shouldUseRendererBackedCodexTerminal('codex --no-daemon --help')).toBe(false)
+  })
+
   it('uses renderer-backed terminal creation for interactive Codex sessions', () => {
     expect(shouldUseRendererBackedCodexTerminal('codex')).toBe(true)
     expect(shouldUseRendererBackedCodexTerminal('codex -m gpt-5 "fix the flaky test"')).toBe(true)

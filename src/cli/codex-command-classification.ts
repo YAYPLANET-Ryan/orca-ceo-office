@@ -58,6 +58,7 @@ const CODEX_GLOBAL_FLAGS_WITH_VALUES = new Set([
   '-a'
 ])
 const CODEX_GLOBAL_BOOLEAN_FLAGS = new Set([
+  '--no-daemon',
   '--oss',
   '--dangerously-bypass-approvals-and-sandbox',
   '--search',
