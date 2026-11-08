@@ -39,12 +39,15 @@ describe('resolveWorktreeStatus', () => {
     'does not revive $provider working after done expires (pane title: $paneTitle)',
     ({ provider, paneTitle }) => {
       const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
-      const tab = { id: 'tab-1', title: `${provider} [working]`, launchAgent: provider }
+      const tab = {
+        id: 'tab-1',
+        title: `${provider} [working]`,
+        launchAgent: paneTitle ? provider : undefined
+      }
       const paneKey = `tab-1:${LEAF_ID_1}`
       const entry = {
         paneKey,
         state: 'done' as const,
-        agentType: provider,
         prompt: '',
         updatedAt: 1000,
         stateStartedAt: 1000,
