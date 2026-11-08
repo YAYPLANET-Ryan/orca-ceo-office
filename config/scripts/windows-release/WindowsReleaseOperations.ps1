@@ -32,9 +32,12 @@ function Assert-ReleasePlan($Plan, [switch]$ForLaunch, [switch]$ForBootstrap) {
     if ($Plan.requiredPort -lt 1 -or $Plan.requiredPort -gt 65535 -or $Plan.readinessTimeoutSeconds -lt 10 -or $Plan.readinessTimeoutSeconds -gt 900) { throw 'Invalid readiness parameters' }
     $supportedRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs/orca')).TrimEnd('\')
     if ((Resolve-ReleaseRoot $Plan.installRoot) -ine $supportedRoot) { throw 'Only this user current Orca installation is supported' }
-    foreach ($manifest in @($Plan.candidate, $Plan.rollback.manifest)) {
-        Assert-ReleaseEssentialManifest $manifest
+    if ($ForBootstrap -and (-not $Plan.PSObject.Properties['bootstrap'] -or $Plan.bootstrap.kind -ne 'R0_SAME_VERSION' -or $Plan.version -ne $Plan.rollback.version)) {
+        throw 'Bootstrap exception requires an explicit same-version R0 plan'
     }
+    $legacyRepair = $ForBootstrap -and (Test-ReleaseLegacyVersion $Plan.version)
+    Assert-ReleaseEssentialManifest $Plan.candidate -RequireAgentHook:(-not $legacyRepair)
+    Assert-ReleaseEssentialManifest $Plan.rollback.manifest -RequireAgentHook:(-not (Test-ReleaseLegacyVersion $Plan.rollback.version))
     $baselinePaths = @{}
     foreach ($entry in $Plan.rollback.manifest.files) { $baselinePaths[$entry.path.Replace('\','/')] = $true }
     $additions = @($Plan.candidate.files | Where-Object { -not $baselinePaths.ContainsKey($_.path.Replace('\','/')) })

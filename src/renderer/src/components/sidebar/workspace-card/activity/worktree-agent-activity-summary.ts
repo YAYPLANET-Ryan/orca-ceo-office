@@ -145,7 +145,7 @@ function getWorktreeAgentActivitySummaries(
       continue
     }
     if (!isExplicitAgentStatusFresh(entry, now, AGENT_STATUS_STALE_AFTER_MS)) {
-      // Retain stale pane identity to suppress generated permission titles after the row loses authority.
+      // Expiry removes authority, but cannot make an unsequenced working title newer evidence.
       addStalePaneId(summary, paneIdentity.tabId, paneIdentity.paneId)
       continue
     }

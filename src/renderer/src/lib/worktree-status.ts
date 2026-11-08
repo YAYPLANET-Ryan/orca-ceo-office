@@ -25,7 +25,7 @@ type WorktreeStatusHeuristicOptions = {
   /** An awake chat tab has no PTY until its first message, but the user sees an open session. */
   hasStructuredChat?: boolean
   agentStatusPaneIdsByTabId?: Record<string, ReadonlySet<string>>
-  /** Stale rows suppress Orca's generated permission labels; native title fallback stays live. */
+  /** Expired rows cannot revive working titles or generated permission labels. */
   stalePaneIdsByTabId?: Record<string, ReadonlySet<string>>
   terminalLayoutsByTabId?: Record<string, TerminalLayoutSnapshot | undefined>
   terminalLayoutRootsByTabId?: Record<string, TerminalPaneLayoutNode | null | undefined>
@@ -98,7 +98,7 @@ function tabHasStatus(
   options: WorktreeStatusHeuristicOptions
 ): boolean {
   const freshPaneIds = options.agentStatusPaneIdsByTabId?.[tab.id]
-  const permissionPaneIds = suppressingPaneIds(tab.id, status, options)
+  const suppressedPaneIds = suppressingPaneIds(tab.id, options)
   const paneTitles = runtimePaneTitlesByTabId[tab.id]
   if (paneTitles && Object.keys(paneTitles).length > 0) {
     const tabLayoutRoot =
@@ -108,8 +108,8 @@ function tabHasStatus(
     let hasCurrentPaneTitle = false
     for (const [runtimePaneId, title] of paneTitleEntries) {
       const agentStatusPaneIds =
-        status === 'permission' && isSyntheticAgentPermissionTitle(title)
-          ? permissionPaneIds
+        status === 'working' || isSyntheticAgentPermissionTitle(title)
+          ? suppressedPaneIds
           : freshPaneIds
       const leafId = resolveRuntimePaneTitleLeafIdFromRoot(tabLayoutRoot, runtimePaneId)
       // A removed pane's last title is no longer evidence for this tab.
@@ -140,8 +140,8 @@ function tabHasStatus(
   }
   // Why: a tab title can't identify its pane; once an agent row owns one, prefer the row over a completed pane's stale "working" title.
   const agentStatusPaneIds =
-    status === 'permission' && isSyntheticAgentPermissionTitle(tab.title)
-      ? permissionPaneIds
+    status === 'working' || isSyntheticAgentPermissionTitle(tab.title)
+      ? suppressedPaneIds
       : freshPaneIds
   if (agentStatusPaneIds && agentStatusPaneIds.size > 0) {
     return false
@@ -154,18 +154,14 @@ function tabHasStatus(
 
 /**
  * Pane ids whose title must not drive `status` for this tab. Fresh rows suppress every heuristic;
- * stale rows suppress synthetic permission labels only. Returns the fresh set itself
+ * stale rows also suppress unsequenced working titles and synthetic permission labels. Returns the fresh set itself
  * when there is nothing to add, so the common path allocates nothing.
  */
 function suppressingPaneIds(
   tabId: string,
-  status: 'permission' | 'working',
   options: WorktreeStatusHeuristicOptions
 ): ReadonlySet<string> | undefined {
   const fresh = options.agentStatusPaneIdsByTabId?.[tabId]
-  if (status !== 'permission') {
-    return fresh
-  }
   const stale = options.stalePaneIdsByTabId?.[tabId]
   if (!stale || stale.size === 0) {
     return fresh

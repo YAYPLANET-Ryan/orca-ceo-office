@@ -20,7 +20,7 @@ foreach ($protected in @($InstallRoot,$CandidateRoot)) {
     if ($OutputDirectory.StartsWith($protected + '\',[StringComparison]::OrdinalIgnoreCase)) { throw 'Snapshot must be outside source trees' }
 }
 if ((Get-ReleaseHash $Installer) -ne $InstallerSha256) { throw 'Installer hash mismatch' }
-$essential = @('Orca.exe','resources/app.asar','resources/bin/orca.exe','resources.pak','icudtl.dat')
+$essential = @('Orca.exe','resources/app.asar','resources/bin/orca.exe','resources.pak','icudtl.dat','resources/bin/orca-agent-hook.exe')
 function New-ProgramManifest([string]$Root) {
     $entries = @(foreach ($file in Get-ChildItem -LiteralPath $Root -File -Recurse -Force) {
         $relative = $file.FullName.Substring($Root.Length + 1).Replace('\','/')
@@ -31,8 +31,9 @@ function New-ProgramManifest([string]$Root) {
 }
 $baseline = New-ProgramManifest $InstallRoot
 $candidate = New-ProgramManifest $CandidateRoot
-Assert-ReleaseEssentialManifest $baseline
-Assert-ReleaseEssentialManifest $candidate
+$baselineVersion = (Get-Item -LiteralPath (Join-Path $InstallRoot 'Orca.exe')).VersionInfo.FileVersion
+Assert-ReleaseEssentialManifest $baseline -RequireAgentHook:(-not (Test-ReleaseLegacyVersion $baselineVersion))
+Assert-ReleaseEssentialManifest $candidate -RequireAgentHook
 Assert-ReleaseFiles $InstallRoot $baseline -Exact
 [IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
 $backup = Join-Path $OutputDirectory 'rollback-program.zip'

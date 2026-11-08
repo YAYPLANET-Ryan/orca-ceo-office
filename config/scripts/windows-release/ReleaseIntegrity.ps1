@@ -43,8 +43,14 @@ function Get-ReleaseFile([string]$Root, [string]$Relative) {
     Resolve-ReleaseRoot $full
 }
 
-function Assert-ReleaseEssentialManifest($Manifest) {
-    foreach ($required in @('Orca.exe','resources/app.asar','resources/bin/orca.exe','resources.pak','icudtl.dat')) {
+function Test-ReleaseLegacyVersion([string]$Version) {
+    $Version -cin @('1.4.191-ceo.20261105.1','1.4.191-ceo.20261105.19')
+}
+
+function Assert-ReleaseEssentialManifest($Manifest, [switch]$RequireAgentHook) {
+    $requiredFiles = @('Orca.exe','resources/app.asar','resources/bin/orca.exe','resources.pak','icudtl.dat')
+    if ($RequireAgentHook) { $requiredFiles += 'resources/bin/orca-agent-hook.exe' }
+    foreach ($required in $requiredFiles) {
         $entry = @($Manifest.files | Where-Object { $_.path.Replace('\','/') -ieq $required })
         if ($entry.Count -ne 1 -or -not $entry[0].requiredNonempty -or $entry[0].size -le 0) { throw 'Essential file missing from manifest' }
     }

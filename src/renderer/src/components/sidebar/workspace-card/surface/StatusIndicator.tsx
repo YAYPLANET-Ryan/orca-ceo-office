@@ -9,6 +9,7 @@ import {
   type StateIndicatorTooltipSide
 } from '@/components/StateIndicatorTooltip'
 import { getWorktreeStatusLabel, type WorktreeStatus } from '@/lib/worktree-status'
+import { useUiLanguageRevision } from '@/i18n/use-ui-language-revision'
 
 export type Status = WorktreeStatus
 
@@ -19,6 +20,7 @@ type StatusIndicatorProps = Omit<React.ComponentProps<'span'>, 'title'> & {
 }
 
 const AGENT_STATUS_TOOLTIP_STATUSES = new Set<Status>([
+  'active',
   'working',
   'monitoring',
   'permission',
@@ -35,15 +37,17 @@ const StatusIndicator = React.memo(function StatusIndicator({
   tooltipSide,
   ...rest
 }: StatusIndicatorProps) {
+  useUiLanguageRevision()
   const tooltipLabel =
     showTooltip && AGENT_STATUS_TOOLTIP_STATUSES.has(status) ? getWorktreeStatusLabel(status) : null
+  const indicatorProps = { role: 'img', 'aria-label': getWorktreeStatusLabel(status), ...rest }
   let indicator: React.JSX.Element
 
   if (status === 'working') {
     indicator = (
       <span
         className={cn('inline-flex h-3 w-3 shrink-0 items-center justify-center', className)}
-        {...rest}
+        {...indicatorProps}
       >
         <AgentWorkingSpinner className="size-2" />
       </span>
@@ -52,7 +56,7 @@ const StatusIndicator = React.memo(function StatusIndicator({
     indicator = (
       <span
         className={cn('inline-flex h-3 w-3 shrink-0 items-center justify-center', className)}
-        {...rest}
+        {...indicatorProps}
       >
         <Activity className="size-3 text-agent-working" aria-hidden="true" />
       </span>
@@ -61,7 +65,7 @@ const StatusIndicator = React.memo(function StatusIndicator({
     indicator = (
       <span
         className={cn('inline-flex h-3 w-3 shrink-0 items-center justify-center', className)}
-        {...rest}
+        {...indicatorProps}
       >
         <span className="block size-1.5 rounded-full bg-red-500" />
       </span>
@@ -71,7 +75,7 @@ const StatusIndicator = React.memo(function StatusIndicator({
     indicator = (
       <span
         className={cn('inline-flex h-3 w-3 shrink-0 items-center justify-center', className)}
-        {...rest}
+        {...indicatorProps}
       >
         <span className="block size-1.5 rounded-full bg-muted-foreground" />
       </span>
@@ -81,7 +85,7 @@ const StatusIndicator = React.memo(function StatusIndicator({
     indicator = (
       <span
         className={cn('inline-flex h-3 w-3 shrink-0 items-center justify-center', className)}
-        {...rest}
+        {...indicatorProps}
       >
         <AgentStateDot state="unconfirmed" size="md" title={null} />
       </span>
@@ -90,26 +94,31 @@ const StatusIndicator = React.memo(function StatusIndicator({
     indicator = (
       <span
         className={cn('inline-flex h-3 w-3 shrink-0 items-center justify-center', className)}
-        {...rest}
+        {...indicatorProps}
       >
         <AgentQuestionIcon className="size-3" />
+      </span>
+    )
+  } else if (status === 'active') {
+    indicator = (
+      <span
+        className={cn('inline-flex h-3 w-3 shrink-0 items-center justify-center', className)}
+        {...indicatorProps}
+      >
+        <span className="block size-2 rounded-full border border-muted-foreground" />
       </span>
     )
   } else {
     indicator = (
       <span
         className={cn('inline-flex h-3 w-3 shrink-0 items-center justify-center', className)}
-        {...rest}
+        {...indicatorProps}
       >
-        <span
-          className={cn(
-            'block size-2 rounded-full',
-            status === 'done' || status === 'active'
-              ? // Quiet active terminals share the completed-session dot.
-                'bg-emerald-500'
-              : 'bg-neutral-500/40'
-          )}
-        />
+        {status === 'done' ? (
+          <AgentStateDot state="done" size="md" title={null} />
+        ) : (
+          <span className="block size-2 rounded-full bg-muted-foreground/40" />
+        )}
       </span>
     )
   }

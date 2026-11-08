@@ -128,7 +128,7 @@ if($ExpectedPlanSha256 -ne ('a'*64) -or $ExpectedBundleSha256 -ne ('b'*64) -or $
     }
     'plan-hash-format' {Assert-ReleasePlanHash ('a'*64);Expect-Refusal {Assert-ReleasePlanHash 'not a hash'};Expect-Refusal {Assert-ReleasePlanHash ('a'*64+' extra')}}
     'launch-plan-missing-installer' {
-        $entries=@(foreach($name in @('Orca.exe','resources/app.asar','resources/bin/orca.exe','resources.pak','icudtl.dat')){[pscustomobject]@{path=$name;size=1;sha256=('a'*64);requiredNonempty=$true}})
+        $entries=@(foreach($name in @('Orca.exe','resources/app.asar','resources/bin/orca.exe','resources.pak','icudtl.dat','resources/bin/orca-agent-hook.exe')){[pscustomobject]@{path=$name;size=1;sha256=('a'*64);requiredNonempty=$true}})
         $manifest=[pscustomobject]@{files=$entries}
         $fixturePlan=[pscustomobject]@{schema=1;version='1';installRoot=(Join-Path $env:LOCALAPPDATA 'Programs/orca');requiredPort=6768;readinessTimeoutSeconds=30;removalApproval='REVIEW_REQUIRED';candidate=$manifest;
             installer=@{path=(Join-Path $Sandbox 'absent-installer.exe');sha256=('a'*64)};

@@ -1340,6 +1340,28 @@ jobs:
       # build resolves React Native and Expo from mobile/node_modules.
       - uses: ./.github/actions/install-mobile-dependencies
 
+      - name: Test Windows release helper recovery contracts
+        id: ceo-release-helpers
+        if: github.repository == 'YAYPLANET-Ryan/orca-ceo-office'
+        shell: pwsh
+        env:
+          ORCA_BACKGROUND_LAUNCH: '1'
+        run: |
+          Push-Location config/scripts/windows-release
+          try {
+            python -m unittest test_release_recovery test_release_bootstrap test_release_registration -v 2>&1 |
+              Tee-Object -FilePath "$env:RUNNER_TEMP/ceo-release-helper-tests.txt"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally { Pop-Location }
+
+      - name: Retain Windows release helper regression results
+        if: always() && github.repository == 'YAYPLANET-Ryan/orca-ceo-office' && steps.ceo-release-helpers.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: orca-ceo-release-helpers-${{ github.event.pull_request.head.sha || github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ceo-release-helper-tests.txt
+          if-no-files-found: warn
+
       # vitest runs here directly rather than through `pnpm test`, so the addon
       # assertions only hold once install-node-dependencies has rebuilt natives.
       - name: Test Windows installer process probe

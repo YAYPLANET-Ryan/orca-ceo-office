@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  selectWorktreeAgentActivitySummary,
+  type AgentActivityInput
+} from '@/components/sidebar/workspace-card/activity/worktree-agent-activity-summary'
 import type { TerminalLayoutSnapshot } from '../../../shared/workspace-layout/terminal-tab-types'
 import { resolveWorktreeStatus } from './worktree-status'
 
@@ -24,6 +28,69 @@ function splitLayout(): TerminalLayoutSnapshot {
 }
 
 describe('resolveWorktreeStatus', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it.each([false, true])(
+    'does not revive a working title after done expires (pane title: %s)',
+    (paneTitle) => {
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
+      const tab = { id: 'tab-1', title: 'claude [working]' }
+      const paneKey = `tab-1:${LEAF_ID_1}`
+      const entry = {
+        paneKey,
+        state: 'done' as const,
+        prompt: '',
+        updatedAt: 1000,
+        stateStartedAt: 1000,
+        stateHistory: [],
+        worktreeId: 'worktree-1'
+      }
+      const state: AgentActivityInput = {
+        tabsByWorktree: { 'worktree-1': [tab] },
+        agentStatusByPaneKey: { [paneKey]: entry },
+        agentStatusEpoch: 0,
+        migrationUnsupportedByPtyId: {},
+        retainedAgentsByPaneKey: {}
+      }
+      const status = () =>
+        resolveWorktreeStatus({
+          ...selectWorktreeAgentActivitySummary(state, 'worktree-1'),
+          tabs: [tab],
+          browserTabs: [],
+          ptyIdsByTabId: livePtyMap(tab.id),
+          runtimePaneTitlesByTabId: paneTitle ? { [tab.id]: { 1: tab.title } } : {},
+          terminalLayoutsByTabId: { [tab.id]: splitLayout() }
+        })
+      expect(status()).toBe('done')
+      clock.mockReturnValue(1000 + 30 * 60 * 1000 + 1)
+      state.agentStatusEpoch++
+      expect(status()).toBe('active')
+      state.agentStatusByPaneKey = {
+        [paneKey]: { ...entry, state: 'working', updatedAt: Date.now(), stateStartedAt: Date.now() }
+      }
+      expect(status()).toBe('working')
+    }
+  )
+
+  it('requires a fresh event to claim work when an earlier working row expires', () => {
+    const options = {
+      tabs: [{ id: 'tab-1', title: 'claude [working]' }],
+      browserTabs: [],
+      ptyIdsByTabId: livePtyMap('tab-1'),
+      stalePaneIdsByTabId: { 'tab-1': new Set([LEAF_ID_1]) },
+      hasPermission: false,
+      hasLiveWorking: false,
+      hasLiveDone: false,
+      hasRetainedDone: false
+    }
+    expect(resolveWorktreeStatus(options)).toBe('active')
+    expect(resolveWorktreeStatus({ ...options, hasLiveWorking: true })).toBe('working')
+    expect(
+      resolveWorktreeStatus({ ...options, tabs: [{ id: 'tab-1', title: 'claude [permission]' }] })
+    ).toBe('permission')
+    expect(resolveWorktreeStatus({ ...options, stalePaneIdsByTabId: {} })).toBe('working')
+  })
+
   it('lets a hook-covered done pane suppress its stale working title', () => {
     const status = resolveWorktreeStatus({
       tabs: [{ id: 'tab-1', title: 'claude [working]' }],
@@ -50,29 +117,31 @@ describe('resolveWorktreeStatus', () => {
     expect(status).toBe('done')
   })
 
-  it('keeps sibling pane working when hook done covers only another pane', () => {
-    const status = resolveWorktreeStatus({
-      tabs: [{ id: 'tab-1', title: 'claude [working]' }],
-      browserTabs: [],
-      ptyIdsByTabId: livePtyMap('tab-1'),
-      runtimePaneTitlesByTabId: {
-        'tab-1': {
-          1: 'bash',
-          2: 'codex [working]'
-        }
-      },
-      agentStatusPaneIdsByTabId: {
-        'tab-1': new Set([LEAF_ID_1])
-      },
-      terminalLayoutsByTabId: {
-        'tab-1': splitLayout()
-      },
-      hasPermission: false,
-      hasLiveWorking: false,
-      hasLiveDone: true,
-      hasRetainedDone: false
-    })
+  it.each([false, true])(
+    'keeps a sibling working when another pane has an expired status: %s',
+    (stale) => {
+      const status = resolveWorktreeStatus({
+        tabs: [{ id: 'tab-1', title: 'claude [working]' }],
+        browserTabs: [],
+        ptyIdsByTabId: livePtyMap('tab-1'),
+        runtimePaneTitlesByTabId: {
+          'tab-1': {
+            1: 'bash',
+            2: 'codex [working]'
+          }
+        },
+        agentStatusPaneIdsByTabId: stale ? {} : { 'tab-1': new Set([LEAF_ID_1]) },
+        stalePaneIdsByTabId: stale ? { 'tab-1': new Set([LEAF_ID_1]) } : {},
+        terminalLayoutsByTabId: {
+          'tab-1': splitLayout()
+        },
+        hasPermission: false,
+        hasLiveWorking: false,
+        hasLiveDone: !stale,
+        hasRetainedDone: false
+      })
 
-    expect(status).toBe('working')
-  })
+      expect(status).toBe('working')
+    }
+  )
 })

@@ -11,6 +11,61 @@ HERE = Path(__file__).resolve().parent
 PS = str(Path(os.environ['SystemRoot'])/'System32/WindowsPowerShell/v1.0/powershell.exe')
 
 class BootstrapTests(unittest.TestCase):
+    def test_candidate_hook_contract_and_pinned_legacy_rollback(self):
+        names = ['Orca.exe', 'resources/app.asar', 'resources/bin/orca.exe',
+                 'resources.pak', 'icudtl.dat', 'resources/bin/orca-agent-hook.exe']
+        entries = [dict(path=name, size=7, sha256=hashlib.sha256(b'fixture').hexdigest(),
+                        requiredNonempty=True) for name in names]
+        manifest = self.root/'candidate.json'
+        manifest.write_text(json.dumps(dict(files=entries)))
+        body = f""". '{HERE}/WindowsReleaseOperations.ps1'
+$env:LOCALAPPDATA='{self.root}/local'
+$m=Get-Content '{manifest}' -Raw|ConvertFrom-Json
+$legacy=[pscustomobject]@{{files=@($m.files|Where-Object {{$_.path -ne 'resources/bin/orca-agent-hook.exe'}})}}
+$plan=[pscustomobject]@{{schema=1;version='1.4.253-ceo.20261107.59';installRoot=(Join-Path $env:LOCALAPPDATA 'Programs/orca');requiredPort=6768;readinessTimeoutSeconds=30;
+    candidate=$m;removalApproval='APPROVED_LISTED_CANDIDATE_ADDITIONS';
+    rollback=[pscustomobject]@{{version='1.4.191-ceo.20261105.1';archive='{self.root}/rollback.zip';sha256=('a'*64);manifest=$legacy}}}}
+Assert-ReleasePlan $plan -ForLaunch
+"""
+        self.ps(body)
+        for kind in ['missing', 'zero', 'optional']:
+            altered = [dict(entry) for entry in entries]
+            if kind == 'missing':
+                altered.pop()
+            elif kind == 'zero':
+                altered[-1]['size'] = 0
+            else:
+                altered[-1]['requiredNonempty'] = False
+            manifest.write_text(json.dumps(dict(files=altered)))
+            self.ps(body, False)
+        manifest.write_text(json.dumps(dict(files=entries)))
+        self.ps(body+"\n$plan.rollback.version='1.4.251-ceo.20261106.45'\nAssert-ReleasePlan $plan -ForLaunch", False)
+        self.ps(body+"\n$plan.candidate=$legacy\nAssert-ReleasePlan $plan -ForLaunch", False)
+        repair = body+"""
+$plan.version=$plan.rollback.version
+$plan.candidate=$legacy
+$plan|Add-Member bootstrap ([pscustomobject]@{kind='R0_SAME_VERSION'})
+Assert-ReleasePlan $plan -ForLaunch -ForBootstrap
+"""
+        self.ps(repair)
+        self.ps(repair+"\n$plan.version='1.4.253-ceo.20261107.59'\nAssert-ReleasePlan $plan -ForLaunch -ForBootstrap", False)
+
+    def test_candidate_hook_bytes_are_verified_without_launch(self):
+        root = self.root/'program'
+        hook = root/'resources/bin/orca-agent-hook.exe'
+        hook.parent.mkdir(parents=True)
+        hook.write_bytes(b'fixture')
+        manifest = self.root/'hook.json'
+        manifest.write_text(json.dumps(dict(files=[dict(path='resources/bin/orca-agent-hook.exe',
+            size=7, sha256=hashlib.sha256(b'fixture').hexdigest(), requiredNonempty=True)])))
+        body = f". '{HERE}/WindowsReleaseOperations.ps1'\n$m=Get-Content '{manifest}' -Raw|ConvertFrom-Json\nAssert-ReleaseFiles '{root}' $m"
+        self.ps(body)
+        for content in [b'', b'short', b'changed']:
+            hook.write_bytes(content)
+            self.ps(body, False)
+        hook.unlink()
+        self.ps(body, False)
+
     def setUp(self):
         self.root = HERE.parents[2]/'dist/release-regression'/uuid.uuid4().hex
         self.root.mkdir(parents=True)
