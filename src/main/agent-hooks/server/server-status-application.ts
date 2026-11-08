@@ -125,7 +125,8 @@ export abstract class AgentHookServerStatusApplication extends AgentHookServerSt
   protected attachStatusTiming(
     payload: AgentHookEventPayload,
     now = Date.now(),
-    observedAt?: number
+    observedAt?: number,
+    origin?: AgentStatusObservationOrigin
   ): EnrichedAgentHookEventPayload {
     const previous = this.state.lastStatusByPaneKey.get(payload.paneKey) as
       | EnrichedAgentHookEventPayload
@@ -164,7 +165,7 @@ export abstract class AgentHookServerStatusApplication extends AgentHookServerSt
     } = payload
     return {
       ...event,
-      ...retainResumeCheckpoint(previous, payload),
+      ...retainResumeCheckpoint(previous, payload, origin),
       receivedAt: now,
       evidenceObservedAt: observedAt ?? this.resolveEvidenceObservedAt(payload, previous, now),
       stateStartedAt,

@@ -213,7 +213,8 @@ export abstract class AgentHookServerState {
   protected abstract attachStatusTiming(
     payload: AgentHookEventPayload,
     now?: number,
-    observedAt?: number
+    observedAt?: number,
+    origin?: AgentStatusObservationOrigin
   ): EnrichedAgentHookEventPayload
   protected abstract hashPromptForTelemetryDedupe(prompt: string): string
   protected abstract maybeTrackAgentPromptSent(

@@ -172,7 +172,7 @@ export abstract class AgentHookServerStatusUpdate extends AgentHookServerStatusA
       onAccepted?.()
       const enriched = deriveCliWriterTopology(
         {
-          ...this.attachStatusTiming(terminalOwnedPayload, now),
+          ...this.attachStatusTiming(terminalOwnedPayload, now, undefined, origin),
           observation: this.stampObservation(terminalOwnedPayload, origin, now)
         },
         rowBefore,
@@ -278,7 +278,7 @@ export abstract class AgentHookServerStatusUpdate extends AgentHookServerStatusA
         : { ...unpairedPayload, claudeRunningNonAgentTask: runningNonAgentTask }
     const enriched = deriveCliWriterTopology(
       {
-        ...this.attachStatusTiming(pairedPayload, now, observedAt),
+        ...this.attachStatusTiming(pairedPayload, now, observedAt, origin),
         observation: this.stampObservation(pairedPayload, origin, observedAt ?? now)
       },
       rowBefore,

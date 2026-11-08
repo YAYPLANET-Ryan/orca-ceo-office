@@ -45,6 +45,42 @@ describe('a resume launch seeds the pane identity', () => {
     return server
   }
 
+  it.each(['codex', 'claude'] as const)(
+    'retains a %s hook replacement conversation through pane teardown and restart',
+    async (agentType) => {
+      const server = await startServer()
+      server.recordLaunchResumeIdentity({
+        paneKey: PANE,
+        agentType,
+        providerSession: RESUMED,
+        launchedAt: 1
+      })
+      const response = await postHookEvent(
+        server,
+        buildBody({
+          hook_event_name: 'SessionStart',
+          session_id: 'replacement-conversation',
+          source: 'clear'
+        }),
+        `/hook/${agentType}`
+      )
+      expect(response.status).toBe(204)
+      expect(server.getStatusSnapshotForPane(PANE)[0]?.providerSession?.id).toBe(
+        'replacement-conversation'
+      )
+      server.clearPaneState(PANE)
+      expect(server.flushResumeIdentityCheckpoint()).toBe(true)
+      const saved = JSON.parse(readFileSync(server.lastStatusPath!, 'utf8'))
+      expect(saved.entries[PANE]?.providerSession?.id).toBe('replacement-conversation')
+      server.stop()
+      servers.length = 0
+      const restarted = await startServer()
+      expect(restarted.getStatusSnapshotForPane(PANE)[0]?.providerSession?.id).toBe(
+        'replacement-conversation'
+      )
+    }
+  )
+
   it('commits resume identity synchronously and reports a failed disk checkpoint without dropping it', async () => {
     const server = await startServer()
     server.recordLaunchResumeIdentity({

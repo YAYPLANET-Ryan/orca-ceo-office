@@ -1,19 +1,24 @@
 import type { AgentHookEventPayload } from '../../../shared/agent-hook-listener/listener-event'
 import { agentProviderSessionsEqual } from '../../../shared/agent-session/lifecycle/agent-session-resume'
 import type { EnrichedAgentHookEventPayload } from './server-types'
+import type { AgentStatusObservationOrigin } from '../../../shared/agent-status/contracts/agent-status-observation'
 
 export function retainResumeCheckpoint(
   previous: EnrichedAgentHookEventPayload | undefined,
-  incoming: AgentHookEventPayload
+  incoming: AgentHookEventPayload,
+  origin?: AgentStatusObservationOrigin
 ): { runtimeResumeCheckpoint?: true } {
   return previous?.runtimeResumeCheckpoint &&
     previous.payload.agentType === incoming.payload.agentType &&
     incoming.payload.agentType &&
-    agentProviderSessionsEqual(
+    (agentProviderSessionsEqual(
       incoming.payload.agentType,
       previous.providerSession,
       incoming.providerSession
-    )
+    ) ||
+      (origin === 'hook' &&
+        previous.connectionId === incoming.connectionId &&
+        incoming.providerSession))
     ? { runtimeResumeCheckpoint: true }
     : {}
 }
