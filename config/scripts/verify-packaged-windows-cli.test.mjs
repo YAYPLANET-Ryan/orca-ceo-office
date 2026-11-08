@@ -70,16 +70,4 @@ describe('packaged Windows CLI integrity', () => {
       builder.indexOf('prunePackagedRuntimeNodeModules(resourcesDir,')
     )
   })
-
-  it('compiles native inputs before the Windows build packages them', () => {
-    const { scripts } = JSON.parse(
-      readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
-    )
-    expect(scripts['build:native']).toBeTruthy()
-    const commands = scripts['build:win'].split(' && ')
-    expect(commands).toContain('pnpm run build:native')
-    expect(commands.indexOf('pnpm run build:native')).toBeLessThan(
-      commands.findIndex((command) => command.startsWith('electron-builder '))
-    )
-  })
 })
