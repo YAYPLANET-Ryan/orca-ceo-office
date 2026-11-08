@@ -85,6 +85,25 @@ function row(server: AgentHookServer, paneKey = PANE) {
 }
 
 describe('Claude session continued into a daemon job', () => {
+  it('retains a validated transcript continuation after a resumed pane is torn down', async () => {
+    const server = await createServer()
+    const { oldPath } = forkOldIntoJob()
+    server.recordLaunchResumeIdentity({
+      paneKey: PANE,
+      worktreeId: 'wt-1',
+      agentType: 'claude',
+      providerSession: { key: 'session_id', id: OLD, transcriptPath: oldPath },
+      launchedAt: 1
+    })
+    await prompt(server, PANE, OLD, oldPath)
+    await server.checkAgentPresence(PANE)
+    expect(row(server)?.providerSession?.id).toBe(FORK)
+    server.clearPaneState(PANE)
+    expect(server.flushResumeIdentityCheckpoint()).toBe(true)
+    const persisted = JSON.parse(readFileSync(server.lastStatusPath!, 'utf8'))
+    expect(persisted.entries[PANE]?.providerSession?.id).toBe(FORK)
+  })
+
   it("rebinds the pane to the fork named by its own transcript, keeping the row's state", async () => {
     const server = await createServer()
     const { oldPath, forkPath } = forkOldIntoJob()

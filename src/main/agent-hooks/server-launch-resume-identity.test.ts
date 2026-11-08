@@ -7,6 +7,8 @@ import { AgentHookServer, _internals } from './server'
 import { buildBody, postHookEvent, PANE } from './server.test-fixtures'
 import { admitLegacyAgentStatus } from '../../shared/agent-hook-listener/listener-state'
 import { AGENT_STATUS_2A_CURRENT_PRODUCER_MODE } from '../../shared/agent-status/transport/agent-status-legacy-adapter'
+import { wslHookRelayConnectionId } from '../../shared/wsl-hook-relay-contract'
+import { composeWorktreeId } from '../../shared/worktree/id'
 
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
@@ -80,6 +82,65 @@ describe('a resume launch seeds the pane identity', () => {
       )
     }
   )
+
+  it('retains a replacement hook from the launch workspace WSL relay', async () => {
+    const server = await startServer()
+    const worktreeId = composeWorktreeId('repo-wsl', '\\\\wsl.localhost\\Ubuntu\\work\\repo')
+    server.recordLaunchResumeIdentity({
+      paneKey: PANE,
+      worktreeId,
+      agentType: 'claude',
+      providerSession: RESUMED,
+      launchedAt: 1
+    })
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId,
+        source: 'claude',
+        hookEventName: 'SessionStart',
+        providerSession: { key: 'session_id', id: 'wsl-replacement' },
+        payload: { state: 'working', prompt: '', agentType: 'claude' }
+      },
+      wslHookRelayConnectionId('Ubuntu')
+    )
+    expect(server.getStatusSnapshotForPane(PANE)[0]?.providerSession?.id).toBe('wsl-replacement')
+    server.clearPaneState(PANE)
+    expect(server.flushResumeIdentityCheckpoint()).toBe(true)
+    const saved = JSON.parse(readFileSync(server.lastStatusPath!, 'utf8'))
+    expect(saved.entries[PANE]?.providerSession?.id).toBe('wsl-replacement')
+  })
+
+  it('does not lend an ended resume checkpoint to a newly started conversation', async () => {
+    const server = await startServer()
+    server.recordLaunchResumeIdentity({
+      paneKey: PANE,
+      agentType: 'codex',
+      providerSession: RESUMED,
+      launchedAt: 1
+    })
+    await postHookEvent(
+      server,
+      buildBody({ hook_event_name: 'SessionStart', session_id: RESUMED.id }),
+      '/hook/codex'
+    )
+    server.reconcileEndedProcessForPaneKeys([PANE], {
+      preserveResumeIdentity: true,
+      endedPresence: { agent: 'codex', session: RESUMED.id, ended: true }
+    })
+    const response = await postHookEvent(
+      server,
+      buildBody({ hook_event_name: 'SessionStart', session_id: 'fresh-conversation' }),
+      '/hook/codex'
+    )
+    expect(response.status).toBe(204)
+    expect(server.getStatusSnapshotForPane(PANE)[0]?.providerSession?.id).toBe('fresh-conversation')
+    server.clearPaneState(PANE)
+    expect(server.flushResumeIdentityCheckpoint()).toBe(true)
+    const saved = JSON.parse(readFileSync(server.lastStatusPath!, 'utf8'))
+    expect(saved.entries[PANE]).toBeUndefined()
+  })
 
   it('commits resume identity synchronously and reports a failed disk checkpoint without dropping it', async () => {
     const server = await startServer()
