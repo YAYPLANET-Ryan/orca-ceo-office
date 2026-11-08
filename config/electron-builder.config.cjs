@@ -7,6 +7,9 @@ const {
 } = require('./scripts/desktop-distribution/macos/macos-folder-usage-descriptions.cjs')
 const electronBuilderNativeRebuild = require('./scripts/desktop-distribution/runtime-verification/electron-builder-native-rebuild.cjs')
 const {
+  verifyPackagedWindowsCli
+} = require('./scripts/desktop-distribution/runtime-verification/verify-packaged-windows-cli.cjs')
+const {
   assertPackagedDaemonEntryExists,
   verifyPackagedDaemonEntryBoots,
   verifyPackagedMacTerminalHostBoots
@@ -417,6 +420,7 @@ module.exports = {
     if (!existsSync(resourcesDir)) {
       throw new Error(`Missing packaged resources directory: ${resourcesDir}`)
     }
+    verifyPackagedWindowsCli(resourcesDir, context.electronPlatformName)
     // FpmTarget replaces this with deb/rpm while building those artifacts from the shared app tree.
     if (context.electronPlatformName === 'linux') {
       writeFileSync(join(resourcesDir, 'package-type'), 'AppImage')

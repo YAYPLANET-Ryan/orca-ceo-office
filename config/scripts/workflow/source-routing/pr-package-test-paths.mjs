@@ -158,6 +158,7 @@ export const WINDOWS_BOUNDARY_TESTS = [
   'config/scripts/native-build/windows/windows-pe-machine.test.mjs',
   'config/scripts/native-build/windows/build-windows-cli-launcher.test.mjs',
   'config/scripts/desktop-distribution/runtime-verification/verify-packaged-windows-agent-hook.test.mjs',
+  'config/scripts/desktop-distribution/runtime-verification/verify-packaged-windows-cli.test.mjs',
   'config/scripts/test-fixtures/script-copy-closure/script-module-dependencies.test.mjs',
   'src/main/windows/windows-registry-addon.test.ts',
   'src/main/daemon/executable-host/windows/testing/daemon-host-process-package.test.ts',

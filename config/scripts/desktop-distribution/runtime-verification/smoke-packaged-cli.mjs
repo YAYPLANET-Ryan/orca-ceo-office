@@ -53,6 +53,7 @@ try {
   const list = JSON.parse((await run(['skills', 'list', '--json'])).stdout)
   assert(list.topics.some((topic) => topic.name === 'orca-cli'))
   assert.match((await run(['skills', 'get', 'orca-cli'])).stdout, /name: orca-cli/)
+  assert.match((await run(['skills', 'get', 'orchestration'])).stdout, /name: orchestration/)
   assert.match(
     (await run(['skills', 'get', 'orca-computer-use'])).stdout,
     /name: orca-computer-use/
@@ -77,7 +78,7 @@ try {
   )
   assert.equal(install.executed, false)
   assert.equal(update.executed, false)
-  console.log(`[packaged-cli-smoke] help and skills commands passed via ${cliPath}`)
+  console.log(`[packaged-cli-smoke] help, skills and orchestration guide passed via ${cliPath}`)
 } catch (error) {
   smokeFailure = error
 }
