@@ -78,10 +78,11 @@ export function ContextIntegrityBanner(): React.JSX.Element | null {
     }
   }, [key, target, worktreeId])
 
-  if (!worktreeId || (target && (!state || state.key !== key))) {
+  if (!worktreeId) {
     return null
   }
-  const summary = target ? state?.summary : null
-  const unavailable = !target || Boolean(state?.unavailable)
+  const current = target && state?.key === key ? state : null
+  const summary = current?.summary
+  const unavailable = !current || current.unavailable
   return <ContextIntegrityNotice summary={summary ?? null} unavailable={unavailable} />
 }

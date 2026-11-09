@@ -65,6 +65,17 @@ it('shows the owning remote host refusal without invoking a local fallback', asy
   expect(screen.getByRole('status').getAttribute('data-durability')).toBe('pending')
 })
 
+it('shows unknown ownership while the first host request or a switched host remains pending', async () => {
+  fixture.call.mockImplementation(() => new Promise(() => {}))
+  const view = await mount()
+  expect(screen.getByRole('status').getAttribute('data-state')).toBe('unavailable')
+  fixture.target = { kind: 'environment', environmentId: 'pending-other-server' }
+  await act(async () => {
+    view.rerender(<ContextIntegrityBanner />)
+  })
+  expect(screen.getByRole('status').getAttribute('data-state')).toBe('unavailable')
+})
+
 it('keeps the warning on request loss or invalid responses rather than claiming a clean host', async () => {
   fixture.target = { kind: 'local' }
   fixture.call.mockResolvedValue({ ...clean, unverifiedCount: 1 })
