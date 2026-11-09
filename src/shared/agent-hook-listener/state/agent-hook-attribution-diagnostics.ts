@@ -1,4 +1,4 @@
-type AttributionReason = 'unknown_tab_id' | 'empty_pane_key'
+type AttributionReason = 'unknown_tab_id' | 'empty_pane_key' | 'context_integrity_unverified'
 type PaneOwner = { paneKey: string; connectionId?: string | null; worktreeId?: string }
 
 const COOLDOWN_MS = 5 * 60_000

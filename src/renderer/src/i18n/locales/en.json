@@ -1,4 +1,13 @@
 {
+  "agent": {
+    "contextIntegrity": {
+      "saveUnavailable": "Conversation diagnostic details could not be saved. Review the original conversation before resuming.",
+      "title": "Conversation ownership needs review",
+      "refused": "Some agent events could not be matched to a workspace. Automatic association was blocked. Review the original conversation before resuming.",
+      "unavailable": "Conversation ownership verification is unavailable on this host. Review the original conversation before resuming.",
+      "notSaved": "Diagnostic details are not confirmed saved or current."
+    }
+  },
   "agentLaunch": {
     "terminalPreparationFailed": "Couldn't open a terminal for {{value0}}. Check the workspace connection and agent settings, then try again.",
     "terminalPromptFailed": "Orca opened a terminal for {{value0}}, but could not pass it your prompt. Send the prompt in that terminal.",

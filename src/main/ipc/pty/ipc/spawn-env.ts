@@ -53,7 +53,7 @@ export async function assemblePtyIpcSpawnEnv(ctx: PtyIpcSpawnState): Promise<voi
       ? makePaneKey(args.tabId, args.leafId)
       : null
   ctx.stablePaneKey = verifiedPaneKey ?? ctx.migrationUnsupportedPaneKey ?? ctx.metadataPaneKey
-  ctx.baseEnv = baseEnvWithAuth ? { ...baseEnvWithAuth } : undefined
+  ctx.baseEnv = { ...baseEnvWithAuth }
   const shouldRefreshAgentTeamsEnv =
     !ctx.preAdoptedStablePane &&
     ctx.deps.runtime !== undefined &&
@@ -100,6 +100,7 @@ export async function assemblePtyIpcSpawnEnv(ctx: PtyIpcSpawnState): Promise<voi
     : undefined
   ctx.agentTeamsEnvToDelete = shouldRefreshAgentTeamsEnv ? ['TERM_PROGRAM'] : undefined
   stampPtySpawnPaneEnv(ctx.baseEnv, {
+    hasLaunchConfig: Boolean(args.launchConfig),
     // Renderer keys select bookkeeping, while environment identity must name this spawn's actual pane.
     pane: ctx.stablePaneKey
       ? {

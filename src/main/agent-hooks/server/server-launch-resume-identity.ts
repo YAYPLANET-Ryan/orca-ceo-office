@@ -9,6 +9,14 @@ import { AgentHookServerIngestNormalization } from './server-ingest-normalizatio
 export abstract class AgentHookServerLaunchResumeIdentity extends AgentHookServerIngestNormalization {
   /** Seed resume identity before the first hook; Codex SessionStart waits for the first turn (#10923). */
   recordLaunchResumeIdentity(event: LaunchResumeIdentityEvent): 'seeded' | 'deduped' | 'refused' {
+    if (event.agentType === 'claude' || event.agentType === 'codex') {
+      this.refuseUnverifiedContext('launch_context_attestation_unavailable', {
+        paneKey: event.paneKey,
+        worktreeId: event.worktreeId,
+        providerSessionId: event.providerSession.id
+      })
+      return 'refused'
+    }
     const paneKey = this.resolvePaneKeyAlias(event.paneKey.trim())
     const parsedPaneKey = parsePaneKey(paneKey)
     if (!parsedPaneKey || paneKey.length > MAX_PANE_KEY_LEN) {

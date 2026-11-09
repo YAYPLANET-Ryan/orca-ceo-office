@@ -16,6 +16,7 @@ import type { ListSessionsResult } from '../../protocol/daemon-rpc-contract'
 import type { SessionInfo } from '../../protocol/daemon-session-info'
 import { PtyProcessListAdmission } from '../../../providers/pty-process-list-admission'
 import type { PtyProcessInfo } from '../../../providers/pty-provider-contract'
+import { readHookLaunchContext } from '../../../agent-hooks/hook-launch-context'
 
 export abstract class DaemonPtySessionInventory extends DaemonPtyProcessInspection {
   async listProcesses(opts?: {
@@ -49,6 +50,7 @@ export abstract class DaemonPtySessionInventory extends DaemonPtyProcessInspecti
             }
             aliveSessionIds.set(session.sessionId, session.incarnationId)
             const { worktreeId } = parsePtySessionId(session.sessionId)
+            const hookContext = readHookLaunchContext(session.hookContext)
             processes.push(
               admission.admit({
                 id: session.sessionId,
@@ -64,6 +66,15 @@ export abstract class DaemonPtySessionInventory extends DaemonPtyProcessInspecti
                 ...(worktreeId ? { worktreeId } : {}),
                 ...(session.terminalHandle ? { terminalHandle: session.terminalHandle } : {}),
                 ...(session.paneKey ? { paneKey: session.paneKey } : {}),
+                ...(hookContext
+                  ? {
+                      ownerClientInstanceId: hookContext.ownerClientInstanceId,
+                      launchTokenHash: hookContext.launchTokenHash,
+                      contextCwd: hookContext.cwd,
+                      rootProcessCreationKey: hookContext.rootProcessCreationKey,
+                      paneBound: Boolean(session.paneKey)
+                    }
+                  : {}),
                 ...(session.wslDistro !== undefined ? { wslDistro: session.wslDistro } : {}),
                 ...(session.wslGuestRoot ? { wslGuestRoot: session.wslGuestRoot } : {}),
                 ...(session.state === 'exiting' ? { exiting: true as const } : {}),

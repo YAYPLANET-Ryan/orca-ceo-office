@@ -10,7 +10,7 @@ type InventoryOptions = {
 /** A pane's row in the owning provider's authenticated inventory, re-checked after the read. */
 export type LocalPtyInventoryReader = (
   paneKey: string,
-  options?: { bySpawnPaneKey?: boolean }
+  options?: { bySpawnPaneKey?: boolean; fresh?: boolean }
 ) => Promise<PtyProcessInfo | null>
 
 /** Reuse the daemon's authenticated inventory; never resolve an SSH pane from the client. */
@@ -39,11 +39,18 @@ export function createLocalPtyInventoryReader(options: InventoryOptions): LocalP
     return pending
   }
   const find = (rows: PtyProcessInfo[], paneKey: string, id: string | undefined | null) => {
+    const routed = rows.filter((entry) => entry.routed !== false)
     // Before a restored pane reattaches, the provider's own spawn record still names its PTY.
-    const spawned = id ? [] : rows.filter((entry) => entry.paneKey === paneKey)
-    return (id ? rows.find((entry) => entry.id === id) : spawned.length === 1 && spawned[0]) || null
+    const spawned = id ? [] : routed.filter((entry) => entry.paneKey === paneKey)
+    return (
+      (id ? routed.find((entry) => entry.id === id) : spawned.length === 1 && spawned[0]) || null
+    )
   }
   return async (paneKey, lookup) => {
+    if (lookup?.fresh) {
+      await pending
+      capturedAt = -Infinity
+    }
     const id = options.getPtyId(paneKey)
     if (!id && !lookup?.bySpawnPaneKey) {
       return null
@@ -100,7 +107,11 @@ export function createLocalHookPaneRootResolver(
       return null
     }
     return row.rootProcessId && row.incarnationId
-      ? { pid: row.rootProcessId, incarnation: row.incarnationId }
+      ? {
+          pid: row.rootProcessId,
+          incarnation: row.incarnationId,
+          creationTimeKey: row.rootProcessCreationKey
+        }
       : 'legacy'
   }
 }

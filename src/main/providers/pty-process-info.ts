@@ -6,6 +6,10 @@ import type { WslGuestRoot } from '../../shared/wsl-guest-root-marker'
 export type PtyProcessInfo = {
   id: string
   incarnationId?: PtyIncarnationId
+  /** Host-issued launch capability hash for this exact PTY; absent is unverified. */
+  launchTokenHash?: string
+  contextCwd?: string
+  rootProcessCreationKey?: string
   /** Local diagnostic provenance supplied by a multi-daemon router. */
   inventorySourceId?: string
   /** Whether this diagnostic candidate is the established route for its id. */

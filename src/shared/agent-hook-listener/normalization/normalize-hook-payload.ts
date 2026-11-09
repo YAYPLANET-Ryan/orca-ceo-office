@@ -9,7 +9,11 @@ import {
   isClaudeCompactCompletionConsumed,
   markClaudeCompactCompletionConsumed
 } from '../providers/claude-compact-completion'
-import { isProcessExitSessionEnd, parseHookEnvelope } from '../hook-envelope'
+import {
+  isProcessExitSessionEnd,
+  parseHookEnvelope,
+  type ParsedHookEnvelope
+} from '../hook-envelope'
 import { readFirstString } from '../interactive-tool'
 import type { AgentHookEventPayload } from '../listener-event'
 import { normalizeClaudePromptId, normalizeGrokPromptId } from '../listener-limits'
@@ -37,6 +41,7 @@ export function normalizeHookPayload(
   body: unknown,
   expectedEnv: string,
   options: {
+    admittedContext?: { envelope: ParsedHookEnvelope; processRootVerified: true }
     deferCompactOwnershipToClient?: boolean
     previousOpenCodeMainAgent?: AgentMainAgentStatus
     bindingStatusByPaneKey?: ReadonlyMap<string, AgentHookEventPayload>
@@ -48,7 +53,8 @@ export function normalizeHookPayload(
     ) => boolean | 'preserve-poster'
   } = {}
 ): AgentHookEventPayload | null {
-  const envelope = parseHookEnvelope(state, source, body, expectedEnv)
+  const envelope =
+    options.admittedContext?.envelope ?? parseHookEnvelope(state, source, body, expectedEnv)
   if (!envelope) {
     return null
   }
@@ -139,11 +145,13 @@ export function normalizeHookPayload(
       ? options.bindingStatusByPaneKey.get(paneKey)
       : previousStatus
   // A relay's provider view lags its committed rows; process evidence reads the committed one.
-  const processAdmission = readHookProcessAdmission(
-    state,
-    options.bindingStatusByPaneKey ?? state.lastStatusByPaneKey,
-    { paneKey, worktreeId, process: agentProcess }
-  )
+  const processAdmission = options.admittedContext
+    ? { refused: false, verdict: 'root' as const }
+    : readHookProcessAdmission(state, options.bindingStatusByPaneKey ?? state.lastStatusByPaneKey, {
+        paneKey,
+        worktreeId,
+        process: agentProcess
+      })
   if (
     processAdmission.refused ||
     isInheritedHookStatus(

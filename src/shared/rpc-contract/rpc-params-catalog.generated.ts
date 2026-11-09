@@ -1000,6 +1000,7 @@ export const RPC_PARAMS_BY_METHOD = {
   'connector.watch': ConnectorWatch,
   'desktopBrowserBridge.attach': DesktopBrowserBridgeAttachParams,
   'desktopBrowserBridge.result': DesktopBrowserBridgeResultParams,
+  'diagnostics.contextIntegrity': null,
   'diagnostics.memory': null,
   'emulator.attach': AttachParamsOfEmulatorParams,
   'emulator.availability': EmulatorAvailabilityParams,

@@ -31,6 +31,8 @@ import {
   ptyDisposables,
   ptyExitDisposables,
   ptyIncarnations,
+  ptyHookContexts,
+  ptySpawnPaneKeys,
   ptyInitialCwd,
   ptyLoadGeneration,
   ptyPhysicalExits,
@@ -50,6 +52,8 @@ import { destroyPtyProcess, createPtyPhysicalExit } from './local-pty-terminatio
 import { writeStartupCommandWhenShellReady } from './local-pty-shell-ready-startup-command'
 import type { PtySpawnOptions } from '../pty-provider-contract'
 import type { PtySpawnResult } from '../pty-spawn-result'
+import { captureHookLaunchContext } from '../../agent-hooks/hook-launch-context'
+import { readWindowsProcessCreationKey } from '../../windows/windows-hook-peer'
 
 export function activateLocalPtySession(args: {
   id: string
@@ -67,6 +71,17 @@ export function activateLocalPtySession(args: {
   ptyReportsChildExitStatus.set(id, args.reportsChildExitStatus)
   ptyProcesses.set(id, proc)
   ptyInitialCwd.set(id, plan.cwd)
+  const hookContext = captureHookLaunchContext(
+    env,
+    plan.cwd,
+    readWindowsProcessCreationKey(proc.pid)
+  )
+  if (hookContext) {
+    ptyHookContexts.set(id, hookContext)
+  }
+  if (env.ORCA_PANE_KEY) {
+    ptySpawnPaneKeys.set(id, env.ORCA_PANE_KEY)
+  }
   if (spawnedWslDistro !== undefined) {
     ptyWslDistroById.set(id, spawnedWslDistro)
   }

@@ -33,13 +33,11 @@ import {
 import { AgentHookServerIngestStructuredChildren } from './server-ingest-structured-children'
 
 export abstract class AgentHookServerIngestRemote extends AgentHookServerIngestStructuredChildren {
-  /** Call as each relay link starts, before its first envelope. */
-  beginRemoteRelaySession(connectionId: string): void {
-    this.relaySessions.begin(connectionId)
-  }
-
   /** Relay payloads cross the SSH trust boundary and require canonical validation here. */
   ingestRemote(envelope: RemoteAgentStatusEnvelope, connectionId: string | null): void {
+    if (!this.admitRemoteContext(envelope)) {
+      return
+    }
     if (
       !canAdmitLegacyAgentStatus(
         'main-status-update',

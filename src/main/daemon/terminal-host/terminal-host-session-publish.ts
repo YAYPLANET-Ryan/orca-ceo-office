@@ -153,7 +153,7 @@ export async function spawnAndPublishSession(
     session.dispose()
     throw error
   }
-  recordSessionSpawnPaneKey(session, opts.env?.ORCA_PANE_KEY)
+  recordSessionSpawnPaneKey(session, opts.env?.ORCA_PANE_KEY, opts.env, opts.cwd)
 
   try {
     trackSessionInput(session, subprocess, deps.reportReadinessEvent)

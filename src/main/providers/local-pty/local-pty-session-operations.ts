@@ -13,6 +13,8 @@ import {
   exitListeners,
   ptyIncarnations,
   ptyInitialCwd,
+  ptyHookContexts,
+  ptySpawnPaneKeys,
   ptyProcesses,
   getPtyShellName,
   ptyTerminalHandle,
@@ -129,7 +131,17 @@ export async function listLocalPtyProcesses(): Promise<PtyProcessInfo[]> {
     id,
     ...(ptyIncarnations.get(id) ? { incarnationId: ptyIncarnations.get(id) } : {}),
     ...(proc.pid > 0 ? { rootProcessId: proc.pid } : {}),
+    rootProcessCreationKey: ptyHookContexts.get(id)?.rootProcessCreationKey,
     cwd: ptyInitialCwd.get(id) ?? '',
+    ...(ptyHookContexts.get(id)
+      ? {
+          ownerClientInstanceId: ptyHookContexts.get(id)?.ownerClientInstanceId,
+          launchTokenHash: ptyHookContexts.get(id)?.launchTokenHash,
+          contextCwd: ptyHookContexts.get(id)?.cwd,
+          paneBound: Boolean(ptySpawnPaneKeys.get(id))
+        }
+      : {}),
+    ...(ptySpawnPaneKeys.get(id) ? { paneKey: ptySpawnPaneKeys.get(id) } : {}),
     title: proc.process || getPtyShellName(id) || 'shell',
     ...(ptyWorktreeId.get(id) ? { worktreeId: ptyWorktreeId.get(id) } : {}),
     ...(ptyTerminalHandle.get(id) ? { terminalHandle: ptyTerminalHandle.get(id) } : {}),

@@ -31,6 +31,9 @@ const CREATION_TIME_PATCH_MARKERS = [
   ['src/process.cc', 'GetProcessTimes(hProcess, &creationTime'],
   ['src/process_worker.cc', 'object.Set("creationTimeMs"'],
   ['src/addon.cc', 'exports.Set("getProcessCreationTime"'],
+  ['src/addon.cc', 'exports.Set("getLoopbackTcpPeer"'],
+  ['src/hook_peer.cc', 'GetExtendedTcpTable'],
+  ['src/hook_peer.cc', 'GetProcessTimes'],
   ['lib/index.js', '["CreationTime"] = 4'],
   ['lib/index.js', 'exports.getProcessCreationTime'],
   ['lib/index.ts', 'CreationTime = 4'],
@@ -134,6 +137,9 @@ export function windowsProcessTreeAddonDefect(addonPath, arch) {
   }
   if (!windowsProcessTreeAddonHasBreakawayLauncher(addonPath)) {
     return `it does not export ${RELAY_LAUNCHER_EXPORT}, so it predates the relay launcher patch`
+  }
+  if (!readFileSync(addonPath).includes('getLoopbackTcpPeer')) {
+    return 'it predates OS-bound loopback hook caller identity support'
   }
   return null
 }

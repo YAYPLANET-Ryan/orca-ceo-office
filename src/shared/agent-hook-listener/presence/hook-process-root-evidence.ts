@@ -19,7 +19,17 @@ import type { TmuxHookPane } from '../../tmux-client-attachment'
 export type HookProcessVerdict = 'root' | 'nested' | 'competing' | 'unknown' | 'unattached'
 
 /** A verdict and, for a root, the pane binding it was read against. */
-export type HookRootEvidence = { verdict: HookProcessVerdict; binding?: string }
+export type HookRootEvidence = {
+  verdict: HookProcessVerdict
+  binding?: string
+  process?: AgentProcessIdentity
+}
+
+export type HookTransportPeer = {
+  pid: number
+  creationTimeKey: string
+  isCurrent: () => boolean
+}
 
 /** One bounded evidence read per pane and process; every hook of that process shares the first
  *  attempt's answer deadline, retries included. */
@@ -40,7 +50,7 @@ export type HookRootAttempt = {
 }
 
 /** The root process of the PTY a pane runs in, named by that PTY's owning provider. */
-export type HookPaneRoot = { pid: number; incarnation: string }
+export type HookPaneRoot = { pid: number; incarnation: string; creationTimeKey?: string }
 
 export type HookRootEvidenceRequest = {
   paneKey: string
@@ -48,6 +58,7 @@ export type HookRootEvidenceRequest = {
   /** The hook's own agent; generic runtime argv need not name it. */
   agent: string
   process: AgentProcessIdentity
+  peer?: HookTransportPeer
   tmux?: TmuxHookPane
   /** Ends queued reads once the attempt outlives its work budget. */
   signal?: AbortSignal

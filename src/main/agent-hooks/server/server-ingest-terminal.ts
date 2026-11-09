@@ -61,6 +61,14 @@ export abstract class AgentHookServerIngestTerminal extends AgentHookServerLaunc
   }): void {
     const physicalPaneKey = event.paneKey.trim()
     let paneKey = this.resolvePaneKeyAlias(physicalPaneKey)
+    if (
+      event.payload.agentType === 'claude' ||
+      event.payload.agentType === 'codex' ||
+      this.isContextProtectedPane(paneKey)
+    ) {
+      this.refuseUnverifiedContext('terminal_context_attestation_unavailable')
+      return
+    }
     const parsedPaneKey = parsePaneKey(paneKey)
     const legacyPaneKey = parseLegacyNumericPaneKey(paneKey)
     if (paneKey.length === 0) {

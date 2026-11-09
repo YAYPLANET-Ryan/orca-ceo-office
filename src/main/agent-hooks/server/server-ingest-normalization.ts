@@ -1,5 +1,5 @@
+import { parsePaneKey } from '../../../shared/workspace-layout/stable-pane-id'
 import { retainOpenCodeWriterTopology } from './cli-writer-observation'
-import { AgentHookAttributionDiagnostics } from '../../../shared/agent-hook-listener/state/agent-hook-attribution-diagnostics'
 import {
   buildSpoolHookBody,
   type SpoolRecord
@@ -8,7 +8,6 @@ import {
   checkHookOwnerPresence,
   restateHookRoot
 } from '../../../shared/agent-hook-listener/presence/agent-hook-owner-presence'
-import type { HookRootEvidenceReader } from '../../../shared/agent-hook-listener/presence/hook-process-root-evidence'
 import { normalizeHookPayload } from '../../../shared/agent-hook-listener/normalization/normalize-hook-payload'
 import {
   isAgentHookSource,
@@ -19,22 +18,12 @@ import {
   isOpenCodeSharedServerPost
 } from '../../../shared/agent-hook-listener/opencode-session-registry'
 import type { EnrichedAgentHookEventPayload, NormalizedLocalHook } from './server-types'
-import { AgentHookServerTmuxStatus } from './server-tmux-status'
+import type { AgentHookServerTmuxStatus } from './server-tmux-status'
 import { getClaudeObservedConfigDirs } from '../../claude-accounts/claude-profile-installed-router'
+import type { AdmittedHookContext } from './hook-context-snapshot'
+import { AgentHookServerContextAdmission } from './server-context-admission'
 
-export abstract class AgentHookServerIngestNormalization extends AgentHookServerTmuxStatus {
-  protected readonly attributionDiagnostics = new AgentHookAttributionDiagnostics()
-  /** Unset in tests and embedders without a process table: every acquisition reads as unknown. */
-  protected readHookRootEvidence: HookRootEvidenceReader | undefined
-
-  setHookRootEvidenceReader(reader: HookRootEvidenceReader): void {
-    this.readHookRootEvidence = reader
-  }
-
-  /** Panes whose owner an undecided hook challenged: until that hook is admitted or refused, the
-   *  owner's exit neither answers for the pane nor is forgotten. */
-  protected readonly undecidedOwnerChallenges = new Map<string, number>()
-
+export abstract class AgentHookServerIngestNormalization extends AgentHookServerContextAdmission {
   /** HTTP and spool hooks share one ownership preflight before provider folds; a drain passes
    *  the one answer deadline all its records share. */
   protected checkHookOwner(
@@ -120,10 +109,12 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
   protected normalizeLocalHookPayload(
     source: AgentHookSource,
     body: unknown,
-    isReplay = false
+    isReplay = false,
+    admittedContext?: AdmittedHookContext
   ): NormalizedLocalHook {
     if (source !== 'claude' || typeof body !== 'object' || body === null) {
       const event = normalizeHookPayload(this.state, source, body, this.env, {
+        admittedContext,
         admitOpenCodeTui: (identity) => {
           const disposition = this.getAgentStatusDisposition(identity.paneKey, {
             ...identity,
@@ -153,11 +144,13 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
     const rawPaneKey = (body as Record<string, unknown>).paneKey
     const paneKey = typeof rawPaneKey === 'string' ? rawPaneKey.trim() : ''
     if (!paneKey) {
-      return { event: normalizeHookPayload(this.state, source, body, this.env) }
+      return {
+        event: normalizeHookPayload(this.state, source, body, this.env, { admittedContext })
+      }
     }
     const previousRunningTask = this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey)
     const previousActiveCron = this.state.claudeActiveSessionCronPaneKeys.has(paneKey)
-    const event = normalizeHookPayload(this.state, source, body, this.env)
+    const event = normalizeHookPayload(this.state, source, body, this.env, { admittedContext })
     const transcriptPath = event?.providerSession?.transcriptPath
     if (transcriptPath) {
       // A wrapper's CLAUDE_CONFIG_DIR is only visible here; History scans it too (#23505).
@@ -183,7 +176,7 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
     }
     const token = this.token
     const statusHookGeneration = this.statusHookGeneration
-    const apply = () => {
+    const apply = (context?: AdmittedHookContext) => {
       if (
         !this.statusHooksEnabled ||
         this.token !== token ||
@@ -191,19 +184,35 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
       ) {
         throw new Error('Status hook spool replay interrupted')
       }
-      this.applySpoolHook(record, body)
+      this.applySpoolHook(record, body, context)
     }
     const body = this.normalizeHookBodyPaneKeyAlias(buildSpoolHookBody(record))
-    const pending = this.checkHookOwner(record.source, body, answerBy)
-    return pending ? pending.then(apply) : apply()
+    if (!this.requiresContextAdmission(record.source, body)) {
+      const pending = this.checkHookOwner(record.source, body, answerBy)
+      return pending ? pending.then(() => apply()) : apply()
+    }
+    return this.admitLocalHookContext(record.source, body).then((context) => {
+      if (context) {
+        try {
+          apply(context === true ? undefined : context)
+        } finally {
+          if (context !== true) {
+            context.release()
+          }
+        }
+      }
+    })
   }
 
-  private applySpoolHook(record: SpoolRecord, body: unknown): void {
+  private applySpoolHook(record: SpoolRecord, body: unknown, context?: AdmittedHookContext): void {
     if (!isAgentHookSource(record.source)) {
       return
     }
-    const normalized = this.normalizeLocalHookPayload(record.source, body, true)
+    const normalized = this.normalizeLocalHookPayload(record.source, body, true, context)
     if (!normalized.event) {
+      return
+    }
+    if (context && !this.canCommitHookContext(context, normalized.event)) {
       return
     }
     const exit = this.agentExitedAtByPaneKey.get(this.resolvePaneKeyAlias(normalized.event.paneKey))
@@ -231,5 +240,63 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
     if (event.payload.state !== 'done') {
       this.withdrawReplayObservation(this.resolvePaneKeyAlias(event.paneKey))
     }
+  }
+
+  protected applyAdmittedHttpHook(
+    source: AgentHookSource,
+    aliasedBody: unknown,
+    admitted: true | AdmittedHookContext
+  ): NormalizedLocalHook['event'] {
+    let toolCallOwner: NormalizedLocalHook['event'] = null
+    const normalized = this.normalizeLocalHookPayload(
+      source,
+      aliasedBody,
+      false,
+      admitted === true ? undefined : admitted
+    )
+    if (admitted !== true && !this.canCommitHookContext(admitted, normalized.event)) {
+      return null
+    }
+    const statusDisposition = normalized.event
+      ? this.getAgentStatusDisposition(normalized.event.paneKey, {
+          source,
+          hookEventName: normalized.event.hookEventName,
+          isReplay: normalized.event.isReplay,
+          hasExplicitPrompt: normalized.event.hasExplicitPrompt,
+          launchToken: normalized.event.launchToken
+        })
+      : 'suppress'
+    if (normalized.event && statusDisposition !== 'suppress') {
+      const restartedAuthority =
+        statusDisposition === 'restart' && source === 'omp'
+          ? this.restoreRetiredStatusRestart(normalized.event.paneKey)
+          : undefined
+      const event =
+        statusDisposition === 'restart'
+          ? {
+              ...normalized.event,
+              launchToken: undefined,
+              ...(restartedAuthority
+                ? {
+                    ...restartedAuthority,
+                    tabId: parsePaneKey(restartedAuthority.paneKey)?.tabId
+                  }
+                : {})
+            }
+          : normalized.event
+      if (statusDisposition === 'restart') {
+        // A new session must not inherit the retired one's observation order.
+        this.observations.rebind(event.paneKey)
+      }
+      this.recordCurrentAuthorityObservation(event)
+      toolCallOwner = event
+      const enriched = this.applyObservedLocalHook(event, normalized.onAccepted)
+      if (enriched && admitted === true) {
+        this.checkAgentPresenceAfterHook(event, enriched)
+        this.scheduleAssistantMessageRetry(source, aliasedBody, enriched)
+        this.scheduleTranscriptPoll(source, aliasedBody, enriched)
+      }
+    }
+    return toolCallOwner
   }
 }

@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import {
   buildJcodeRuntimeDirEnv,
   JCODE_RUNTIME_DIR_ENV_KEY
@@ -34,6 +35,7 @@ type PtySpawnPaneEnvArgs = {
   /** Null when the spawn's own tab+leaf ids don't name a valid pane. */
   pane: PtySpawnPane | null
   jcodeRuntimeDir: string | undefined
+  hasLaunchConfig?: boolean
 }
 
 export function stampPtySpawnPaneEnv(
@@ -54,6 +56,9 @@ export function stampPtySpawnPaneEnv(
     return
   }
   env.ORCA_PANE_KEY = pane.paneKey
+  if (!args.hasLaunchConfig || !env.ORCA_AGENT_LAUNCH_TOKEN) {
+    env.ORCA_AGENT_LAUNCH_TOKEN = randomUUID()
+  }
   if (pane.tabId !== undefined) {
     env.ORCA_TAB_ID = pane.tabId
   } else {

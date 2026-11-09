@@ -5,6 +5,7 @@ import type { PtyStartupIngress } from '../../../shared/terminal/pty/ingress/pty
 import type { IPtyProvider } from '../pty-provider-contract'
 import type { PtyDataEvent } from '../pty-provider-events'
 import { getSpawnedShellName, normalizeLocalCallerSessionId } from './local-pty-launch-context'
+import type { HookLaunchContext } from '../../agent-hooks/hook-launch-context'
 
 export type PtyShutdownOperation = {
   promise: Promise<void>
@@ -46,6 +47,8 @@ export const ptyLastRecognizedForeground = new Map<
 export const ptyTerminalHandle = new Map<string, string>()
 export const ptyWorktreeId = new Map<string, string>()
 export const ptyInitialCwd = new Map<string, string>()
+export const ptyHookContexts = new Map<string, HookLaunchContext>()
+export const ptySpawnPaneKeys = new Map<string, string>()
 // Why: reattach carries current settings, not the live process's launch context; keep the first creator's WSL/native identity.
 export const ptyWslDistroById = new Map<string, string | null>()
 /** A WSL PTY's guest root shell, from its launch output; dies with this PTY. */
@@ -118,6 +121,8 @@ export function clearPtyState(id: string): void {
   ptyTerminalHandle.delete(id)
   ptyWorktreeId.delete(id)
   ptyInitialCwd.delete(id)
+  ptyHookContexts.delete(id)
+  ptySpawnPaneKeys.delete(id)
   ptyWslDistroById.delete(id)
   ptyWslGuestRootById.delete(id)
   ptyLoadGeneration.delete(id)

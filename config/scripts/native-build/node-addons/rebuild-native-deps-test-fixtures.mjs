@@ -442,7 +442,7 @@ export function writeFakeWindowsProcessTree(projectDir) {
   mkdirSync(processTreeDir, { recursive: true })
   writeFileSync(
     join(processTreeDir, 'index.js'),
-    `module.exports = { supportedProcessDataFlags: ${CREATION_TIME_FLAG}, getProcessCreationTime: () => undefined }\n`
+    `module.exports = { supportedProcessDataFlags: ${CREATION_TIME_FLAG}, getProcessCreationTime: () => undefined, getProcessCreationTimeKey: () => undefined, getLoopbackTcpPeer: () => undefined }\n`
   )
 }
 
@@ -485,7 +485,13 @@ export function writeFakeWindowsProcessTreeWithNodeAddonApi(
   )
   writeFileSync(
     join(processTreeDir, 'src', 'addon.cc'),
-    creationTimePatchApplied ? 'exports.Set("getProcessCreationTime", getter);\n' : '\n'
+    creationTimePatchApplied
+      ? 'exports.Set("getProcessCreationTime", getter);\nexports.Set("getLoopbackTcpPeer", peer);\n'
+      : '\n'
+  )
+  writeFileSync(
+    join(processTreeDir, 'src', 'hook_peer.cc'),
+    creationTimePatchApplied ? 'GetExtendedTcpTable();\nGetProcessTimes();\n' : '\n'
   )
   mkdirSync(join(processTreeDir, 'lib'), { recursive: true })
   writeFileSync(

@@ -1,5 +1,8 @@
-import { tokenizeStartupCommand, type AgentStartupShell } from './tui-agent-startup-shell'
-import type { TuiAgent } from './tui-agent'
+import {
+  tokenizeStartupCommand,
+  type AgentStartupShell
+} from './agent-launch/startup/tui-agent-startup-shell'
+import type { TuiAgent } from './agent-launch/catalog/tui-agent'
 
 export function planManagedCodexSessionIsolation(args: {
   cliHelp: string

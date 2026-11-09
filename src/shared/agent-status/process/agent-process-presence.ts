@@ -59,12 +59,12 @@ export function readAgentProcessIdentity(value: unknown): AgentProcessIdentity |
   return { pid, platform, startTime }
 }
 
-// Only installed Claude and Antigravity commands capture the agent process before the managed shell.
+// Main may replace this claim with a process observed through its authenticated hook transport.
 export function readHookAgentProcess(
   source: string,
   value: unknown
 ): AgentProcessIdentity | undefined {
-  return source === 'claude' || source === 'antigravity'
+  return source === 'claude' || source === 'codex' || source === 'antigravity'
     ? readAgentProcessIdentity(value)
     : undefined
 }

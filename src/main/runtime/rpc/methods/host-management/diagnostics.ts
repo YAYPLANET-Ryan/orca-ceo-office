@@ -1,6 +1,13 @@
 import { defineMethod } from '../../core'
+import { agentHookServer } from '../../../../agent-hooks/server'
 
 export const DIAGNOSTICS_METHODS = [
+  defineMethod({
+    name: 'diagnostics.contextIntegrity',
+    permission: 'workspace',
+    params: null,
+    handler: () => agentHookServer.getContextIntegritySummary()
+  }),
   defineMethod({
     name: 'diagnostics.memory',
     permission: 'workspace',

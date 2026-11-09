@@ -2,14 +2,13 @@ import {
   AgentHookStartup,
   listenForAgentHooks
 } from '../../../shared/agent-hook-listener/transport/agent-hook-startup'
-import { parsePaneKey } from '../../../shared/workspace-layout/stable-pane-id'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
+import type { Socket } from 'node:net'
+import { captureWindowsHookTransportPeer } from '../windows-hook-root-evidence'
+import type { HookTransportPeer } from '../../../shared/agent-hook-listener/presence/hook-process-root-evidence'
 
-import {
-  CLAUDE_STATUSLINE_PATHNAME,
-  parseClaudeStatusLineBody
-} from '../../../shared/claude-statusline-rate-limits'
+import { CLAUDE_STATUSLINE_PATHNAME } from '../../../shared/claude-statusline-rate-limits'
 import { mergeAgentHookRequestHeaders } from '../../../shared/agent-hook-listener/hook-envelope'
 import { readRequestBody } from '../../../shared/agent-hook-listener/request-body'
 import { resolveHookSource } from '../../../shared/agent-hook-listener/source-routing'
@@ -22,7 +21,7 @@ import { OPENCODE_STARTUP_PROMPT_CLAIM_PATH } from '../../../shared/agent-launch
 import { CLAUDE_AGENT_VIEW_PATH } from '../../../shared/claude-agent-view'
 import { respondAfterAgentToolPluginHooks } from '../agent-tool-plugin-hooks'
 
-import type { HookServerStartOptions } from './server-types'
+import type { HookServerStartOptions, NormalizedLocalHook } from './server-types'
 
 export abstract class AgentHookServerLifecycle extends AgentHookServerStatusHookLifecycle {
   private readonly startup = new AgentHookStartup()
@@ -59,6 +58,7 @@ export abstract class AgentHookServerLifecycle extends AgentHookServerStatusHook
     if (!isCurrent()) {
       return
     }
+    const peers = new WeakMap<Socket, HookTransportPeer>()
     const handleRequest = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       if (req.method !== 'POST') {
         res.writeHead(404)
@@ -103,23 +103,15 @@ export abstract class AgentHookServerLifecycle extends AgentHookServerStatusHook
           res.end()
           return
         }
-        if (pathname === CLAUDE_AGENT_VIEW_PATH) {
-          res.writeHead(200, { 'content-type': 'application/json' })
-          res.end(JSON.stringify(this.claudeAgentViews.receive(body)))
+        if (pathname === CLAUDE_AGENT_VIEW_PATH || pathname === CLAUDE_STATUSLINE_PATHNAME) {
+          this.refuseUnverifiedContext('auxiliary_context_attestation_unavailable')
+          res.writeHead(204)
+          res.end()
           return
         }
         await this.initializeStatusHookOwner()
         if (!isStatusCurrent()) {
           res.writeHead(404)
-          res.end()
-          return
-        }
-        if (pathname === CLAUDE_STATUSLINE_PATHNAME) {
-          const statusLineEvent = parseClaudeStatusLineBody(body)
-          if (statusLineEvent) {
-            this.onClaudeStatusLine?.(statusLineEvent)
-          }
-          res.writeHead(204)
           res.end()
           return
         }
@@ -132,57 +124,34 @@ export abstract class AgentHookServerLifecycle extends AgentHookServerStatusHook
         const hookBody = mergeAgentHookRequestHeaders(body, req.headers)
         trackEmptyPaneKeyHook(hookBody, this.attributionDiagnostics)
         const aliasedBody = this.normalizeHookBodyPaneKeyAlias(hookBody)
-        if (await this.ingestTmuxHook(source, aliasedBody)) {
+        const guardedContext = this.requiresContextAdmission(source, aliasedBody)
+        if (!guardedContext && (await this.ingestTmuxHook(source, aliasedBody))) {
           res.writeHead(204)
           res.end()
           return
         }
-        await this.checkHookOwner(source, aliasedBody)
-        if (!isStatusCurrent()) {
-          res.writeHead(204)
-          res.end()
-          return
+        if (!guardedContext) {
+          await this.checkHookOwner(source, aliasedBody)
         }
-        const normalized = this.normalizeLocalHookPayload(source, aliasedBody)
-        const statusDisposition = normalized.event
-          ? this.getAgentStatusDisposition(normalized.event.paneKey, {
-              source,
-              hookEventName: normalized.event.hookEventName,
-              isReplay: normalized.event.isReplay,
-              hasExplicitPrompt: normalized.event.hasExplicitPrompt,
-              launchToken: normalized.event.launchToken
-            })
-          : 'suppress'
-        let toolCallOwner: typeof normalized.event = null
-        if (normalized.event && statusDisposition !== 'suppress') {
-          const restartedAuthority =
-            statusDisposition === 'restart' && source === 'omp'
-              ? this.restoreRetiredStatusRestart(normalized.event.paneKey)
-              : undefined
-          const event =
-            statusDisposition === 'restart'
-              ? {
-                  ...normalized.event,
-                  launchToken: undefined,
-                  ...(restartedAuthority
-                    ? {
-                        ...restartedAuthority,
-                        tabId: parsePaneKey(restartedAuthority.paneKey)?.tabId
-                      }
-                    : {})
-                }
-              : normalized.event
-          if (statusDisposition === 'restart') {
-            // A new session must not inherit the retired one's observation order.
-            this.observations.rebind(event.paneKey)
+        const admitted = await this.admitLocalHookContext(
+          source,
+          aliasedBody,
+          peers.get(req.socket)
+        )
+        if (!admitted || !isStatusCurrent()) {
+          if (admitted && admitted !== true) {
+            admitted.release()
           }
-          this.recordCurrentAuthorityObservation(event)
-          toolCallOwner = event
-          const enriched = this.applyObservedLocalHook(event, normalized.onAccepted)
-          if (enriched) {
-            this.checkAgentPresenceAfterHook(event, enriched)
-            this.scheduleAssistantMessageRetry(source, aliasedBody, enriched)
-            this.scheduleTranscriptPoll(source, aliasedBody, enriched)
+          res.writeHead(204)
+          res.end()
+          return
+        }
+        let toolCallOwner: NormalizedLocalHook['event'] = null
+        try {
+          toolCallOwner = this.applyAdmittedHttpHook(source, aliasedBody, admitted)
+        } finally {
+          if (admitted !== true) {
+            admitted.release()
           }
         }
         // Plugins see only calls status accepted, so a fenced or reused pane's old agent is skipped.
@@ -210,6 +179,12 @@ export abstract class AgentHookServerLifecycle extends AgentHookServerStatusHook
     // Node ignores handler promises; handleRequest catches request errors internally.
     this.server = createServer((req, res) => {
       void handleRequest(req, res)
+    })
+    this.server.on('connection', (socket) => {
+      const peer = captureWindowsHookTransportPeer(socket)
+      if (peer) {
+        peers.set(socket, peer)
+      }
     })
     const server = this.server
     try {
@@ -246,6 +221,7 @@ export abstract class AgentHookServerLifecycle extends AgentHookServerStatusHook
 
   /** Quit retains status until chat teardown reads resumable child and background work. */
   stop(options?: { keepStatus?: boolean }): void {
+    this.resetContextAdmission()
     this.startup.stop()
     this.claudeAgentViews.clear()
     // Terminal status may still have a pending write while hook ingress is disabled.
@@ -278,6 +254,7 @@ export abstract class AgentHookServerLifecycle extends AgentHookServerStatusHook
     this.lastStatusFilePath = null
     this.closeStatusSnapshotWriter()
     this.runtimeObservedStatusPaneKeys.clear()
+    this.contextQuarantine.close()
     this.paneKeyByTerminalHandle.clear()
     this.hydratedAuthorityCommitments = Object.freeze([])
     this.hydratedLaunchTokenHashByPaneKey.clear()

@@ -10,18 +10,20 @@ index 11a5e71..1b2e74b 100644
        ],
        "conditions": [
          ['OS=="win"', {
-@@ -12,15 +11,15 @@
+@@ -12,15 +11,16 @@
              "src/cpu_worker.cc",
              "src/process.cc",
              "src/process_worker.cc",
 -            "src/process_commandline.cc"
 +            "src/process_commandline.cc",
-+            "src/process_launch.cc"
++            "src/process_launch.cc",
++            "src/hook_peer.cc"
            ],
 -          "include_dirs": [],
 +          "include_dirs": ["deps/node-addon-api"],
 +          "defines": ["NAPI_CPP_EXCEPTIONS", "_HAS_EXCEPTIONS=1"],
-           "libraries": [ 'psapi.lib' ],
+-          "libraries": [ 'psapi.lib' ],
++          "libraries": [ 'psapi.lib', 'iphlpapi.lib', 'ws2_32.lib' ],
 -          "msvs_configuration_attributes": {
 -            "SpectreMitigation": "Spectre"
 -          },
@@ -35,7 +37,7 @@ diff --git a/lib/index.js b/lib/index.js
 index 9747a7402600cd252859144d32580ed45c8c93f7..69cf7fe6d14e52b199ac9ab869567be5d9bb708c 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -6,12 +6,17 @@
+@@ -6,12 +6,19 @@
  Object.defineProperty(exports, "__esModule", { value: true });
  exports.getAllProcesses = exports.getProcessTree = exports.getProcessCpuUsage = exports.getProcessList = exports.filterProcessList = exports.buildProcessTree = exports.ProcessDataFlag = void 0;
  const util_1 = require("util");
@@ -44,6 +46,8 @@ index 9747a7402600cd252859144d32580ed45c8c93f7..69cf7fe6d14e52b199ac9ab869567be5
 +const orcaNativeBuild = `${__dirname}/../build/orca-napi-win32-${process.arch}/windows_process_tree.node`;
 +const native = process.platform === 'win32' ? require(require('fs').existsSync(orcaNativeBuild) ? orcaNativeBuild : '../build/Release/windows_process_tree.node') : undefined;
 +exports.getProcessCreationTime = native === undefined ? undefined : native.getProcessCreationTime;
++exports.getProcessCreationTimeKey = native === undefined ? undefined : native.getProcessCreationTimeKey;
++exports.getLoopbackTcpPeer = native === undefined ? undefined : native.getLoopbackTcpPeer;
 +exports.supportedProcessDataFlags = native === undefined ? undefined : native.supportedProcessDataFlags;
  var ProcessDataFlag;
  (function (ProcessDataFlag) {
@@ -54,7 +58,7 @@ index 9747a7402600cd252859144d32580ed45c8c93f7..69cf7fe6d14e52b199ac9ab869567be5
  })(ProcessDataFlag = exports.ProcessDataFlag || (exports.ProcessDataFlag = {}));
  // requestInProgress is used for any function that uses CreateToolhelp32Snapshot, as multiple calls
  // to this cannot be done at the same time.
-@@ -66,11 +71,12 @@ function buildProcessTree(rootPid, processList, maxDepth = MAX_FILTER_DEPTH) {
+@@ -66,11 +73,12 @@ function buildProcessTree(rootPid, processList, maxDepth = MAX_FILTER_DEPTH) {
      // • the properties are inlined/splatted
      // • the 'ppid' field is omitted
      // • the depth of the tree is limited by `maxDepth`
@@ -72,7 +76,7 @@ diff --git a/lib/index.ts b/lib/index.ts
 index 7b53aad05c3682a5c7d814d81a39c3f391ae97e3..364b384e7d55f3682515431839352b5b4a9ffa93 100644
 --- a/lib/index.ts
 +++ b/lib/index.ts
-@@ -5,13 +5,19 @@
+@@ -5,13 +5,21 @@
  
  import { promisify } from 'util';
  
@@ -81,6 +85,8 @@ index 7b53aad05c3682a5c7d814d81a39c3f391ae97e3..364b384e7d55f3682515431839352b5b
 +const orcaNativeBuild = `${__dirname}/../build/orca-napi-win32-${process.arch}/windows_process_tree.node`;
 +const native = process.platform === 'win32' ? require(require('fs').existsSync(orcaNativeBuild) ? orcaNativeBuild : '../build/Release/windows_process_tree.node') : undefined;
 +export const getProcessCreationTime: ((pid: number) => number | undefined) | undefined = native?.getProcessCreationTime;
++export const getProcessCreationTimeKey: ((pid: number) => string | undefined) | undefined = native?.getProcessCreationTimeKey;
++export const getLoopbackTcpPeer: ((serverPort: number, clientPort: number) => { pid: number; creationTimeKey: string } | undefined) | undefined = native?.getLoopbackTcpPeer;
 +/** The flag bits this compiled addon reports; undefined off win32. */
 +export const supportedProcessDataFlags: number | undefined = native?.supportedProcessDataFlags;
  import { IProcessInfo, IProcessTreeNode, IProcessCpuInfo } from '@vscode/windows-process-tree';
@@ -94,7 +100,7 @@ index 7b53aad05c3682a5c7d814d81a39c3f391ae97e3..364b384e7d55f3682515431839352b5b
  }
  
  type RequestCallback = (processList: IProcessInfo[]) => void;
-@@ -81,11 +87,12 @@ export function buildProcessTree(rootPid: number, processList: Iterable<IProcess
+@@ -81,11 +89,12 @@ export function buildProcessTree(rootPid: number, processList: Iterable<IProcess
    // • the properties are inlined/splatted
    // • the 'ppid' field is omitted
    // • the depth of the tree is limited by `maxDepth`
@@ -112,15 +118,16 @@ diff --git a/src/addon.cc b/src/addon.cc
 index 5253960..f146490 100644
 --- a/src/addon.cc
 +++ b/src/addon.cc
-@@ -6,6 +6,7 @@
+@@ -6,6 +6,8 @@
  #include <napi.h>
  #include "cpu_worker.h"
  #include "process_worker.h"
 +#include "process_launch.h"
++#include "hook_peer.h"
  
  void GetProcessList(const Napi::CallbackInfo& args) {
    Napi::Env env(args.Env());
-@@ -50,9 +51,33 @@
+@@ -50,9 +52,35 @@
    worker->Queue();
  }
  
@@ -144,6 +151,8 @@ index 5253960..f146490 100644
 +
  Napi::Object Init(Napi::Env env, Napi::Object exports) {
 +  exports.Set("getProcessCreationTime", Napi::Function::New(env, ReadProcessCreationTime));
++  exports.Set("getProcessCreationTimeKey", Napi::Function::New(env, ReadProcessCreationTimeKey));
++  exports.Set("getLoopbackTcpPeer", Napi::Function::New(env, ReadLoopbackTcpPeer));
    exports.Set("getProcessList", Napi::Function::New(env, GetProcessList));
    exports.Set("getProcessCpuUsage", Napi::Function::New(env, GetProcessCpuUsage));
 +  exports.Set("spawnOutsideJob", Napi::Function::New(env, SpawnOutsideJob));
@@ -608,7 +617,7 @@ diff --git a/typings/windows-process-tree.d.ts b/typings/windows-process-tree.d.
 index 70e242b..b1d0a53 100644
 --- a/typings/windows-process-tree.d.ts
 +++ b/typings/windows-process-tree.d.ts
-@@ -7,9 +7,18 @@
+@@ -7,9 +7,20 @@
    export enum ProcessDataFlag {
      None = 0,
      Memory = 1,
@@ -624,6 +633,8 @@ index 70e242b..b1d0a53 100644
 +   */
 +  export const supportedProcessDataFlags: number | undefined;
 +  export const getProcessCreationTime: ((pid: number) => number | undefined) | undefined;
++  export const getProcessCreationTimeKey: ((pid: number) => string | undefined) | undefined;
++  export const getLoopbackTcpPeer: ((serverPort: number, clientPort: number) => { pid: number; creationTimeKey: string } | undefined) | undefined;
 +
    export interface IProcessInfo {
      pid: number;
@@ -646,3 +657,105 @@ index 70e242b..b1d0a53 100644
      children: IProcessTreeNode[];
    }
  
+
+diff --git a/src/hook_peer.h b/src/hook_peer.h
+new file mode 100644
+--- /dev/null
++++ b/src/hook_peer.h
+@@ -0,0 +1,6 @@
++#ifndef ORCA_HOOK_PEER_H
++#define ORCA_HOOK_PEER_H
++#include <napi.h>
++Napi::Value ReadProcessCreationTimeKey(const Napi::CallbackInfo& args);
++Napi::Value ReadLoopbackTcpPeer(const Napi::CallbackInfo& args);
++#endif
+
+diff --git a/src/hook_peer.cc b/src/hook_peer.cc
+new file mode 100644
+--- /dev/null
++++ b/src/hook_peer.cc
+@@ -0,0 +1,84 @@
++#include <winsock2.h>
++#include <windows.h>
++#include <iphlpapi.h>
++#include <napi.h>
++#include <string>
++#include <vector>
++#include "hook_peer.h"
++
++static std::string ProcessBirthKey(DWORD pid) {
++  HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
++  if (process == nullptr) return {};
++  if (WaitForSingleObject(process, 0) != WAIT_TIMEOUT) {
++    CloseHandle(process);
++    return {};
++  }
++  FILETIME birth{}, exited{}, kernel{}, user{};
++  const BOOL ok = GetProcessTimes(process, &birth, &exited, &kernel, &user);
++  CloseHandle(process);
++  if (!ok) return {};
++  ULARGE_INTEGER ticks{};
++  ticks.LowPart = birth.dwLowDateTime;
++  ticks.HighPart = birth.dwHighDateTime;
++  return ticks.QuadPart == 0 ? std::string{} : std::to_string(ticks.QuadPart);
++}
++
++static DWORD UnsignedArgument(const Napi::Value& value, DWORD maximum) {
++  if (!value.IsNumber()) return 0;
++  const double number = value.As<Napi::Number>().DoubleValue();
++  return number >= 1 && number <= maximum && number == static_cast<DWORD>(number)
++    ? static_cast<DWORD>(number) : 0;
++}
++
++Napi::Value ReadProcessCreationTimeKey(const Napi::CallbackInfo& args) {
++  const Napi::Env env = args.Env();
++  try {
++  if (args.Length() != 1) return env.Undefined();
++  const DWORD pid = UnsignedArgument(args[0], MAXDWORD);
++  if (pid == 0) return env.Undefined();
++  const std::string key = ProcessBirthKey(pid);
++  return key.empty() ? env.Undefined() : Napi::String::New(env, key);
++  } catch (...) { return env.Undefined(); }
++}
++
++Napi::Value ReadLoopbackTcpPeer(const Napi::CallbackInfo& args) {
++  const Napi::Env env = args.Env();
++  try {
++  if (args.Length() != 2) return env.Undefined();
++  const DWORD server = UnsignedArgument(args[0], 65535);
++  const DWORD client = UnsignedArgument(args[1], 65535);
++  if (server == 0 || client == 0) return env.Undefined();
++  ULONG bytes = 0;
++  DWORD status = GetExtendedTcpTable(nullptr, &bytes, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
++  if (status != ERROR_INSUFFICIENT_BUFFER || bytes < sizeof(DWORD) || bytes > 4 * 1024 * 1024)
++    return env.Undefined();
++  std::vector<DWORD> storage;
++  for (unsigned attempt = 0; attempt < 3; ++attempt) {
++    if (bytes < sizeof(DWORD) || bytes > 4 * 1024 * 1024) return env.Undefined();
++    storage.resize((bytes + sizeof(DWORD) - 1) / sizeof(DWORD));
++    status = GetExtendedTcpTable(storage.data(), &bytes, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
++    if (status != ERROR_INSUFFICIENT_BUFFER) break;
++  }
++  if (status != NO_ERROR) return env.Undefined();
++  const auto table = reinterpret_cast<const MIB_TCPTABLE_OWNER_PID*>(storage.data());
++  if (bytes < sizeof(DWORD) || table->dwNumEntries > (bytes - sizeof(DWORD)) / sizeof(MIB_TCPROW_OWNER_PID))
++    return env.Undefined();
++  const DWORD loopback = htonl(INADDR_LOOPBACK);
++  DWORD peer = 0;
++  for (DWORD index = 0; index < table->dwNumEntries; ++index) {
++    const auto& row = table->table[index];
++    if (row.dwState != MIB_TCP_STATE_ESTAB || row.dwLocalAddr != loopback || row.dwRemoteAddr != loopback ||
++        ntohs(static_cast<u_short>(row.dwLocalPort)) != client ||
++        ntohs(static_cast<u_short>(row.dwRemotePort)) != server) continue;
++    if (peer != 0) return env.Undefined();
++    peer = row.dwOwningPid;
++  }
++  if (peer == 0) return env.Undefined();
++  const std::string key = ProcessBirthKey(peer);
++  if (key.empty()) return env.Undefined();
++  Napi::Object result = Napi::Object::New(env);
++  result.Set("pid", Napi::Number::New(env, peer));
++  result.Set("creationTimeKey", Napi::String::New(env, key));
++  return result;
++  } catch (...) { return env.Undefined(); }
++}

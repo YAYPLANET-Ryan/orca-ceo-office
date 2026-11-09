@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { planManagedCodexSessionIsolation } from './managed-codex-session-isolation'
-import { applyAgentPermissionMode } from './tui-agent-permissions'
-import { buildAgentResumeStartupPlan, buildAgentStartupPlan } from './tui-agent-startup'
-import { resolveTuiAgentLaunchArgs } from './tui-agent-launch-defaults'
+import { applyAgentPermissionMode } from './agent-launch/permissions/tui-agent-permissions'
+import { buildAgentStartupPlan } from './agent-launch/startup/tui-agent-startup'
+import { buildAgentResumeStartupPlan } from './agent-launch/startup/tui-agent-resume-startup'
+import { resolveTuiAgentLaunchArgs } from './agent-launch/choices/tui-agent-launch-defaults'
 
 const cliHelp = 'Options:\n      --no-daemon\n          Run without the shared background server'
 
@@ -19,13 +20,13 @@ describe('managed mixed-agent session isolation', () => {
         ...common,
         agent: 'codex',
         prompt: 'test task',
-        agentArgs: resolveTuiAgentLaunchArgs('codex', next)
+        agentArgs: resolveTuiAgentLaunchArgs('codex', { agentDefaultArgs: next })
       })
       expect(codex?.launchCommand).toContain('--no-daemon')
       const resume = buildAgentResumeStartupPlan({
         ...common,
         agent: 'codex',
-        agentArgs: resolveTuiAgentLaunchArgs('codex', next),
+        agentArgs: resolveTuiAgentLaunchArgs('codex', { agentDefaultArgs: next }),
         providerSession: { key: 'session_id', id: 'original-codex-session' }
       })
       expect(resume?.launchCommand).toContain('--no-daemon')
@@ -33,7 +34,7 @@ describe('managed mixed-agent session isolation', () => {
       const claude = buildAgentResumeStartupPlan({
         ...common,
         agent: 'claude',
-        agentArgs: resolveTuiAgentLaunchArgs('claude', next),
+        agentArgs: resolveTuiAgentLaunchArgs('claude', { agentDefaultArgs: next }),
         providerSession: { key: 'session_id', id: 'original-claude-session' }
       })
       expect(claude?.launchCommand).toContain('original-claude-session')

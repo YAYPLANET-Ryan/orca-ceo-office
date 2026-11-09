@@ -8,6 +8,7 @@ export const AGENT_HOOK_RUNTIME_ENV_KEYS = [
   'ORCA_AGENT_HOOK_VERSION',
   'ORCA_AGENT_HOOK_TRANSPORT',
   'ORCA_AGENT_HOOK_ENDPOINT',
+  'ORCA_AGENT_HOOK_OWNER',
   // Remove the reverted inherited path still present in older PTYs (#2778).
   'ORCA_CLAUDE_AGENT_STATUS_SETTINGS'
 ] as const

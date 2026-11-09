@@ -1,6 +1,7 @@
 import type { AgentSessionOwnerBinding } from '../../../shared/agent-session/agent-session-host-authority'
 import type { SessionState, ShellReadyState } from './daemon-rpc-contract'
 import type { WslGuestRoot } from '../../../shared/wsl-guest-root-marker'
+import type { HookLaunchContext } from '../../agent-hooks/hook-launch-context'
 
 export type SessionInfo = {
   foregroundProcess?: string
@@ -12,6 +13,7 @@ export type SessionInfo = {
   terminalHandle?: string
   /** ORCA_PANE_KEY the PTY was spawned with; absent from daemons that predate it. */
   paneKey?: string
+  hookContext?: HookLaunchContext
   wslDistro?: string | null
   /** Seen once in a WSL session's launch output; volatile metadata of this incarnation. */
   wslGuestRoot?: WslGuestRoot

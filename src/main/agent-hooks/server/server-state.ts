@@ -56,8 +56,10 @@ import type {
 } from './server-types'
 import { RevisionedMap } from './revisioned-map'
 import { forgetAgentExit, type AgentExitEvidence } from './agent-exit-evidence'
+import { HookContextQuarantine } from '../hook-context-quarantine'
 
 export abstract class AgentHookServerState {
+  protected readonly contextQuarantine = new HookContextQuarantine()
   protected canWriteLegacyStatusRow(entry: AgentHookEventPayload): boolean {
     return canAdmitLegacyAgentStatusEntry(
       this.state,

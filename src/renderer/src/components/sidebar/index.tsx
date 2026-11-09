@@ -23,6 +23,7 @@ import { lazyWithRetry } from '@/lib/lazy-with-retry'
 import { LocalGitToolchainScanBanner } from './LocalGitToolchainScanBanner'
 import { SeveredTerminalDaemonBanner } from './SeveredTerminalDaemonBanner'
 import { StalledTerminalDaemonBanner } from './StalledTerminalDaemonBanner'
+import { ContextIntegrityBanner } from './ContextIntegrityBanner'
 import { StartupWorktreeRefreshStatus } from './StartupWorktreeRefreshStatus'
 
 // Keep the Agents activity pipeline out of the workspace view’s initial bundle.
@@ -188,6 +189,7 @@ function Sidebar({
               />
               <SeveredTerminalDaemonBanner />
               <StalledTerminalDaemonBanner />
+              <ContextIntegrityBanner />
               {sidebarBody === 'agents' ? (
                 <React.Suspense fallback={<div className="min-h-0 flex-1" />}>
                   <ActivityThreadCollapseContext.Provider value={agentsCollapseState}>

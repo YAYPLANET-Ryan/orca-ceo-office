@@ -7,6 +7,14 @@ export type AgentProcessObservation =
   | { verdict: 'live'; startTime: string; zombie: boolean; stopped?: boolean }
   | { verdict: 'unverifiable' | 'exited' }
 
+let windowsReader: ((pid: number) => Promise<AgentProcessObservation>) | undefined
+
+export function setWindowsAgentProcessObservationReader(
+  reader: (pid: number) => Promise<AgentProcessObservation>
+): void {
+  windowsReader = reader
+}
+
 function isMissing(error: unknown): boolean {
   return (
     error instanceof Error && 'code' in error && (error.code === 'ESRCH' || error.code === 'ENOENT')
@@ -15,6 +23,9 @@ function isMissing(error: unknown): boolean {
 
 export async function readAgentProcess(pid: number): Promise<AgentProcessObservation> {
   try {
+    if (process.platform === 'win32' && windowsReader) {
+      return await windowsReader(pid)
+    }
     if (process.platform === 'linux') {
       const stat = await readFile(`/proc/${pid}/stat`, 'utf8').catch((error) => {
         if (isMissing(error)) {
@@ -77,7 +88,7 @@ export async function readAgentProcess(pid: number): Promise<AgentProcessObserva
   } catch {
     return { verdict: 'unverifiable' }
   }
-  // Windows hooks capture no comparable process identity yet.
+  // A host without a registered native Windows reader cannot prove process liveness.
   return { verdict: 'unverifiable' }
 }
 

@@ -2,14 +2,31 @@ import type { ClaimedAgentPtyOwnerRegistry } from '../../../shared/claimed-agent
 import type { Session } from '../sessions/session'
 import type { SessionInfo } from '../protocol/daemon-session-info'
 import type { WslGuestRoot } from '../../../shared/wsl-guest-root-marker'
+import { readWindowsProcessCreationKey } from '../../windows/windows-hook-peer'
+import {
+  captureHookLaunchContext,
+  type HookLaunchContext
+} from '../../agent-hooks/hook-launch-context'
 
 // Why a side table: only the listing reads it, and Session is at its max-lines cap.
 const spawnPaneKeys = new WeakMap<Session, string>()
+const hookContexts = new WeakMap<Session, HookLaunchContext>()
 
 /** Records the ORCA_PANE_KEY a session was spawned with; reattaching never rewrites it. */
-export function recordSessionSpawnPaneKey(session: Session, paneKey: string | undefined): void {
+export function recordSessionSpawnPaneKey(
+  session: Session,
+  paneKey: string | undefined,
+  env?: Readonly<Record<string, string>>,
+  cwd?: string
+): void {
   if (paneKey) {
     spawnPaneKeys.set(session, paneKey)
+  }
+  if (!hookContexts.has(session) && cwd) {
+    const context = captureHookLaunchContext(env, cwd, readWindowsProcessCreationKey(session.pid))
+    if (context) {
+      hookContexts.set(session, context)
+    }
   }
 }
 
@@ -31,6 +48,7 @@ export function listLiveTerminalHostSessions(
     }
     const size = session.getAppliedSize()
     const paneKey = spawnPaneKeys.get(session)
+    const hookContext = hookContexts.get(session)
     const wslGuestRoot = wslGuestRoots.get(session)
     const foregroundProcess = session.getForegroundProcess({ cachedOnly: true })
     result.push({
@@ -43,6 +61,7 @@ export function listLiveTerminalHostSessions(
       isAlive: true,
       ...(session.terminalHandle ? { terminalHandle: session.terminalHandle } : {}),
       ...(paneKey ? { paneKey } : {}),
+      ...(hookContext ? { hookContext: { ...hookContext } } : {}),
       wslDistro: session.wslDistro,
       ...(wslGuestRoot ? { wslGuestRoot } : {}),
       pid: session.pid,

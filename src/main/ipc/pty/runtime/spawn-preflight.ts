@@ -134,12 +134,13 @@ export async function prepareRuntimePtySpawn(
   if (args.preAllocatedHandle) {
     ctx.env = { ...ctx.env, ORCA_TERMINAL_HANDLE: args.preAllocatedHandle }
   }
-  if (ctx.env) {
+  {
     // Clone caller environment before injection; another split may reuse it.
     ctx.env = { ...ctx.env }
     const pane = ptySpawnPaneFromIds(args)
     const jcodeEnv = pane ? await ensureJcodeRuntimeDir(pane.paneKey) : undefined
     stampPtySpawnPaneEnv(ctx.env, {
+      hasLaunchConfig: Boolean(args.launchConfig),
       pane,
       jcodeRuntimeDir: jcodeEnv?.[JCODE_RUNTIME_DIR_ENV_KEY]
     })

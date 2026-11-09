@@ -8,43 +8,14 @@ import { WindowsProcessTableTimeoutError } from './windows-process-table-timeout
 
 /** Shared Windows snapshots: serialized native identity/command-line views, with CIM fallback only when no usable binding exists. Both views request creation times through limited query handles; Memory stays off. See docs/reference/windows-process-enumeration.md. */
 
-/** PID/parent/name identity, with native creation time when available. */
-export type WindowsProcessIdentityRow = {
-  pid: number
-  ppid: number
-  name: string
-  /** Process creation time in Unix milliseconds, when the native snapshot provides it. */
-  creationTimeMs?: number
-}
-
-/** Adds the kernel-supplied command line. Only ask for this if you read it. */
-export type WindowsProcessRow = WindowsProcessIdentityRow & {
-  /** Full command line. Empty when the process denied a query handle. */
-  command: string
-}
-
-type NativeProcessInfo = {
-  pid: number
-  ppid: number
-  name: string
-  commandLine?: string
-  creationTimeMs?: number
-}
-
-/** node-addon-api's default OnError hands the callback an Error (e.g. bad_alloc) instead of rows. */
-type NativeProcessSnapshot = NativeProcessInfo[] | Error | undefined
-
-type WindowsProcessTreeModule = {
-  ProcessDataFlag: {
-    None: number
-    CommandLine: number
-    CreationTime?: number
-  }
-  /** Compiled addon capabilities; patched JS enums may sit above an older prebuilt binary. */
-  supportedProcessDataFlags?: number
-  getProcessCreationTime?: (pid: number) => number | undefined
-  getAllProcesses: (callback: (processes: NativeProcessSnapshot) => void, flags?: number) => void
-}
+import type {
+  WindowsProcessIdentityRow,
+  WindowsProcessRow,
+  NativeProcessInfo,
+  NativeProcessSnapshot,
+  WindowsProcessTreeModule
+} from './windows-process-table-types'
+export type { WindowsProcessIdentityRow, WindowsProcessRow } from './windows-process-table-types'
 
 const requireFromMain = createRequire(__filename)
 
@@ -59,6 +30,11 @@ let requireNative: NativeRequire = requireFromMain
 /** Bare relay addon has no queue; nativeReadGate must serialize it to prevent concurrent native snapshots. The npm wrapper adds its own coalescing queue. */
 type WindowsProcessTreeAddon = {
   getProcessCreationTime?: (pid: number) => number | undefined
+  getProcessCreationTimeKey?: (pid: number) => string | undefined
+  getLoopbackTcpPeer?: (
+    serverPort: number,
+    clientPort: number
+  ) => { pid: number; creationTimeKey: string } | undefined
   getProcessList: (callback: (processes: NativeProcessSnapshot) => void, flags: number) => void
   supportedProcessDataFlags?: number
 }
@@ -99,6 +75,8 @@ function adaptAddon(addon: WindowsProcessTreeAddon): WindowsProcessTreeModule {
     ProcessDataFlag: PROCESS_DATA_FLAG,
     supportedProcessDataFlags: addon.supportedProcessDataFlags,
     getProcessCreationTime: addon.getProcessCreationTime,
+    getProcessCreationTimeKey: addon.getProcessCreationTimeKey,
+    getLoopbackTcpPeer: addon.getLoopbackTcpPeer,
     getAllProcesses: (callback, flags) => addon.getProcessList(callback, flags ?? 0)
   }
 }
@@ -340,6 +318,20 @@ export function readWindowsProcessCreationTime(pid: number): number | null {
   try {
     const value = moduleLoader()?.getProcessCreationTime?.(pid)
     return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null
+  } catch {
+    return null
+  }
+}
+
+export function getWindowsProcessMetadataQueries(): Pick<
+  WindowsProcessTreeModule,
+  'getProcessCreationTimeKey' | 'getLoopbackTcpPeer'
+> | null {
+  if (process.platform !== 'win32') {
+    return null
+  }
+  try {
+    return moduleLoader() ?? null
   } catch {
     return null
   }

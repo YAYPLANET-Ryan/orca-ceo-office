@@ -8,6 +8,7 @@ import {
   ORCA_HOOK_RAW_JSON_TRANSPORT
 } from '../../../shared/agent-hook-listener/configuration/agent-hook-types'
 import { AgentHookServerIngestRemote } from './server-ingest-remote'
+import { HOOK_OWNER_ENV, hookOwnerId } from '../hook-launch-context'
 
 export abstract class AgentHookServerRuntimeEnv extends AgentHookServerIngestRemote {
   buildPtyEnv(): Record<string, string> {
@@ -22,11 +23,20 @@ export abstract class AgentHookServerRuntimeEnv extends AgentHookServerIngestRem
       ORCA_AGENT_HOOK_OPENCODE_TUI: '1',
       ORCA_AGENT_HOOK_TRANSPORT: ORCA_HOOK_RAW_JSON_TRANSPORT
     }
+    const owner = this.contextOwnerId
+    if (owner) {
+      env[HOOK_OWNER_ENV] = owner
+    }
     // Hooks read the endpoint on invocation; dev instances must not steal each other's hooks.
     if (this.endpointFileWritten && this.endpointFilePathCache) {
       env.ORCA_AGENT_HOOK_ENDPOINT = this.endpointFilePathCache
     }
     return env
+  }
+
+  get contextOwnerId(): string | undefined {
+    const namespace = this.endpointFilePathCache ?? this.token
+    return namespace ? hookOwnerId(namespace) : undefined
   }
 
   get endpointFilePath(): string | null {
@@ -60,5 +70,6 @@ export abstract class AgentHookServerRuntimeEnv extends AgentHookServerIngestRem
       : join(userDataPath, 'agent-hooks')
     this.endpointFilePathCache = join(this.endpointDir, getEndpointFileName())
     this.lastStatusFilePath = join(this.endpointDir, 'last-status.json')
+    this.contextQuarantine.open(join(this.endpointDir, 'context-quarantine-v1.json'))
   }
 }
