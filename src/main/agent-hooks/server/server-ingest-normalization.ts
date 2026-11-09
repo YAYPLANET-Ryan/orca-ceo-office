@@ -254,6 +254,9 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
       false,
       admitted === true ? undefined : admitted
     )
+    if (source === 'muse' && !normalized.event) {
+      this.rearmIgnoredMuseHook(aliasedBody)
+    }
     if (admitted !== true && !this.canCommitHookContext(admitted, normalized.event)) {
       return null
     }

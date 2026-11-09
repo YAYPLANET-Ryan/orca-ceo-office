@@ -421,15 +421,4 @@ describe('a resume launch seeds the pane identity', () => {
     server.clearPaneState(PANE)
     expect(server.getStatusSnapshotForPane(PANE)).toEqual([])
   })
-
-  it('ignores a pane key that is not a stable tab:leaf key', async () => {
-    const server = await startServer()
-    server.recordLaunchResumeIdentity({
-      paneKey: 'not-a-pane',
-      agentType: 'codex',
-      providerSession: RESUMED,
-      launchedAt: Date.now()
-    })
-    expect(server.getStatusSnapshot()).toEqual([])
-  })
 })

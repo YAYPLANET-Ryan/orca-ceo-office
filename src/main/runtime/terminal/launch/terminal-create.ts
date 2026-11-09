@@ -5,7 +5,6 @@ import {
   terminalLaunchPublicFacts
 } from './terminal-launch-result'
 import { revealCreatedTerminal } from './terminal-create-reveal'
-import { resumeCheckpointWarning } from '../../../../shared/agent-session/lifecycle/resume-checkpoint-warning'
 import type { PaneSpawnOperation } from '../../../ipc/pty/pane/pane-spawn-operation'
 import { OrcaRuntimeWithTerminalCreateDeduplication } from './terminal-create-deduplication'
 import { type PaneStartArgsOf, spawnInAdmittedPane } from './runtime-pane-admission'
@@ -21,20 +20,20 @@ import {
   materializedStablePaneReply
 } from '../identity/runtime-terminal-pane-identity'
 import { randomUUID } from 'node:crypto'
-import type { RuntimePtyController } from '../../runtime-pty-controller-contract'
+import type { RuntimePtyController } from '../lifecycle/runtime-pty-controller-contract'
 import { SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV } from '../../../../shared/setup-agent-sequencing'
 import { mergeTerminalEnvDeletionKeys } from './runtime-agent-launch-resolution'
 import { terminalSpawnOptions } from './terminal-spawn-options'
 import { createDesktopTerminal } from './orca-runtime-create-terminal-desktop'
 import { terminalCreateTeamAllocation } from './terminal-create-team-allocation'
-import { createIdempotentCallback } from '../../orca-runtime-report-pty-spawn-commit'
+import { createIdempotentCallback } from './pty-spawn-commit-callback'
 import {
   recordPtySurface,
   spawnSurfaceClaimSequence
 } from '../surface/pty-recorded-surface-topology'
 import { agentLaunchTokenFor, withAgentLaunchToken } from '../../../agent-launch/agent-launch-token'
 import { seedPtyLaunchTitle } from './pty-launch-title'
-import { migratedPaneRestoreHint } from '../../migrated-pane-restore-cwd'
+import { migratedPaneRestoreHint } from '../recovery/migrated-pane-restore-cwd'
 import { paneSize, resolvePtyFirstSize } from '../../../ipc/pty/pty-first-size'
 import * as dependenciesOwner1 from '../../../../shared/workspace-layout/stable-pane-id'
 
@@ -142,6 +141,7 @@ export abstract class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTermi
               ? launchOpts.command
               : (agentTeamsPlan?.command ?? launchOpts.command),
             launchAgent: launchOpts.launchAgent,
+            ...(launchOpts.trustWorktreeId ? { trustWorktreeId: launchOpts.trustWorktreeId } : {}),
             launchConfig: effectiveLaunchConfig,
             ...(launchToken ? { launchToken } : {}),
             commandDelivery: 'provider',
@@ -287,7 +287,7 @@ export abstract class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTermi
         })
         const { surface, warning } = reveal instanceof Promise ? await reveal : reveal
         return {
-          ...terminalLaunchPublicFacts(result, launch.adoptedStablePane, pty),
+          ...terminalLaunchPublicFacts(result, launch.adoptedStablePane, pty, warning),
           handle,
           savedStartupCwd,
           tabId,
@@ -297,8 +297,7 @@ export abstract class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTermi
           title: pty?.title ?? launch.effectiveTitle ?? null,
           ...this.getPtyExecutionHostMetadata(result.id),
           surface,
-          ...(result.startupCwdFallback ? { startupCwdFallback: result.startupCwdFallback } : {}),
-          ...resumeCheckpointWarning(warning, result.resumeCheckpointFailed)
+          ...(result.startupCwdFallback ? { startupCwdFallback: result.startupCwdFallback } : {})
         }
       } finally {
         teamAllocation.release()

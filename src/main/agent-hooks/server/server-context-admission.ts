@@ -198,7 +198,12 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerCon
             signal
           })
         ))
-      if (proof?.verdict !== 'root' || proof.binding !== snapshot.incarnationId) {
+      // A transport helper is not the provider; only the host reader can replace a missing claim.
+      if (
+        proof?.verdict !== 'root' ||
+        proof.binding !== snapshot.incarnationId ||
+        (!process && !proof.process)
+      ) {
         return refuse('process_generation_unconfirmed')
       }
       const provider = extractAgentProviderSession(source, envelope.hookPayloadRecord)

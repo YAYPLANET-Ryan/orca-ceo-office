@@ -20,10 +20,10 @@ vi.mock('@/store', () => ({
   useAppStore: (select: (state: { activeWorktreeId: string | null }) => unknown) =>
     select({ activeWorktreeId: fixture.worktreeId })
 }))
-vi.mock('@/runtime/use-worktree-runtime-target', () => ({
+vi.mock('@/runtime/rpc/targets/use-worktree-runtime-target', () => ({
   useWorktreeRuntimeTarget: () => fixture.target
 }))
-vi.mock('@/runtime/runtime-rpc-client', () => ({ callRuntimeRpc: fixture.call }))
+vi.mock('@/runtime/rpc/calls/runtime-rpc-call', () => ({ callRuntimeRpc: fixture.call }))
 vi.mock('@/i18n/i18n', () => ({ translate: (_key: string, fallback: string) => fallback }))
 const clean = {
   version: 1,

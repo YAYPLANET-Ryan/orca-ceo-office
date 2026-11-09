@@ -120,7 +120,7 @@ ORCA worktree set --worktree active --pr null --gitlab-mr null --json
 ORCA worktree rm --worktree id:<repoId>::<worktreePath> --force --json
 ```
 
-`repo add` defaults to Git. Use `--kind folder` for an ordinary directory or a parent of separate Git repositories; folder workspaces have no Git worktrees or source control. With `--environment`, pass an absolute path on that server.
+`repo add` defaults to Git. Use `--kind folder` for an ordinary directory or a parent of separate Git repositories; worktrees attached to a folder workspace appear in its Source Control panel, one section each. With `--environment`, pass an absolute path on that server.
 
 Ports: `ORCA ports --json` lists the listening ports Orca tied to the current workspace (`--worktree <selector>` for another one, `--all` for every listener on that workspace's host). Each row has `port`, `pid`, `processName`, `connectHost`, `protocol`, and `kind` (`workspace`, `container`, or `external`). Only `workspace` rows have `owner` (with `owner.confidence`: `cwd` or `command`) and, when the dev server printed one in an Orca terminal, `advertisedUrl`. Use this to find a dev server's port instead of running `lsof` yourself. If `unavailableReason` is set, the scan could not run on that host. Native folder workspaces need `--all`, because Orca does not tie ports to them. SSH workspaces opened directly from this app report `unavailableReason` for now; a workspace on a managed Orca server is scanned on that server.
 
@@ -130,10 +130,14 @@ Per-worktree visibility rules still apply.
 
 Selectors:
 
-- `id:<repoId>::<worktreePath>`, `name:<displayName>`, `path:<absolutePath>`, `branch:<branchName>`, `issue:<number>`
+- `id:<repoId>::<worktreePath>`, `name:<displayName>`, `path:<absolutePath>`, `branch:<branchName>`, `issue:<number>`, `identity:<identityKey>`
+- `folder:<folderId>` names a folder workspace, for commands that take one (`worktree activate` doesn't yet). On a folder workspace, `worktree set` changes `--display-name`, `--comment`, `--workspace-status` and `--unread`/`--read` (links go through `reference add`), and `worktree rm` makes Orca forget it while the folder stays on disk. `path:` and `name:` also match folder workspaces, so `--worktree path:<folderPath>` reaches the folder; `branch:`, `issue:` and `identity:` match worktrees only. `ORCA worktree ps --json` lists folder workspaces; `worktree list` does not.
+- Older Orca versions match `path:` and `name:` against worktrees only, and may pick a worktree at the folder's path. If a folder is meant, pass `folder:<folderId>`.
+- When several workspaces match, the error usually lists each choice's kind, host, path and exact selector; pass one of those. If it lists none, find the row with `ORCA worktree ps --json` (if `truncated`, repeat with `--limit <totalCount>`) and pass `identity:<identity.key>`, `folder:<folderId>`, or `id:<worktreeId>` when no other row has that id. A folder id that two folder workspaces share can't be selected; the error says how to repair it.
+- For a workspace in another environment, add `--environment <id>` to the command, as with any other selector.
 - The full id is the exact `<repo-id>::<path>` value returned by `ORCA worktree create --json` or `ORCA worktree list --json`; a bare repo id is not a worktree id.
 - `active` / `current` for the enclosing Orca-managed worktree from the shell cwd; when targeting a paired server with `--environment` or `--pairing-code`, use an explicit selector from that server instead.
-- For `worktree create --parent-worktree`, folder/worktree parent context keys are also valid: `folder:<folderId>`, `worktree:<repoId>::<worktreePath>`, `id:folder:<folderId>`, `id:worktree:<repoId>::<worktreePath>`. `worktree set --parent-worktree` also takes the folder keys, `folder:<folderId>` or `id:folder:<folderId>`.
+- For `worktree create --parent-worktree`, folder/worktree parent context keys are also valid: `folder:<folderId>`, `worktree:<repoId>::<worktreePath>`, `id:folder:<folderId>`, `id:worktree:<repoId>::<worktreePath>`. `worktree set --parent-worktree` also takes the folder keys, `folder:<folderId>` or `id:folder:<folderId>`. On both, `path:` and `name:` record a folder workspace parent when they match one.
 
 Lineage rules:
 

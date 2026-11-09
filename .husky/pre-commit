@@ -1,2 +1,4 @@
 #!/usr/bin/env sh
-pnpm exec lint-staged
+# Run the installed, lockfile-pinned CLI without an implicit package-manager relink.
+# Bound large-merge fan-out; keep lint-staged's platform-safe argument sizing.
+node node_modules/lint-staged/bin/lint-staged.js --concurrent=2

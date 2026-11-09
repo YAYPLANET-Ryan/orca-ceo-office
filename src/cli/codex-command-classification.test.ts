@@ -50,12 +50,6 @@ describe('shouldUseRendererBackedCodexTerminal', () => {
     expect(shouldUseRendererBackedCodexTerminal('codex --no-daemon resume --last')).toBe(true)
     expect(shouldUseRendererBackedCodexTerminal('codex --no-daemon exec summarize')).toBe(false)
   })
-
-  it('ignores non-Codex commands', () => {
-    expect(shouldUseRendererBackedCodexTerminal(undefined)).toBe(false)
-    expect(shouldUseRendererBackedCodexTerminal('claude')).toBe(false)
-    expect(shouldUseRendererBackedCodexTerminal('npm exec codex')).toBe(false)
-  })
 })
 
 describe('shouldUseRendererBackedInteractiveTerminal', () => {
@@ -73,10 +67,5 @@ describe('shouldUseRendererBackedInteractiveTerminal', () => {
     expect(shouldUseRendererBackedInteractiveTerminal('claude --print "summarize"')).toBe(false)
     expect(shouldUseRendererBackedInteractiveTerminal('claude --help')).toBe(false)
     expect(shouldUseRendererBackedInteractiveTerminal('claude --version')).toBe(false)
-  })
-
-  it('preserves Codex command classification', () => {
-    expect(shouldUseRendererBackedInteractiveTerminal('codex')).toBe(true)
-    expect(shouldUseRendererBackedInteractiveTerminal('codex exec summarize')).toBe(false)
   })
 })

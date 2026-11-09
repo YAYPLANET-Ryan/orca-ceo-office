@@ -20,6 +20,14 @@ vi.mock(
 )
 
 class ContextTestServer extends AgentHookServer {
+  admitTransportPeer(incoming: unknown) {
+    return this.admitLocalHookContext('claude', incoming, {
+      pid: 2002,
+      creationTimeKey: '133444736000000000',
+      isCurrent: () => true
+    })
+  }
+
   replay(record: SpoolRecord) {
     return this.ingestSpoolRecord(record)
   }
@@ -127,6 +135,29 @@ async function historicalServer(resumeInPane = false) {
 }
 
 describe('hook context integrity before attributed state', () => {
+  it('requires an observed provider process when transport evidence replaces a missing body process', async () => {
+    const server = await serverWithContext()
+    const incoming = body()
+    delete incoming.agentProcess
+    expect(await server.admitTransportPeer(incoming)).toBe(false)
+    expect(server.getContextIntegrityRejections()).toHaveProperty('process_generation_unconfirmed', 1)
+    server.setHookRootEvidenceReader(async () => ({
+      verdict: 'root',
+      binding: 'generation-b',
+      process: { pid: 3003, platform: 'win32', startTime: 'win32:1700000000000' }
+    }))
+    const admitted = await server.admitTransportPeer(incoming)
+    if (!admitted || admitted === true) {
+      throw new Error('Expected context backed by the observed provider process')
+    }
+    expect(admitted.envelope.record.agentProcess).toEqual({
+      pid: 3003,
+      platform: 'win32',
+      startTime: 'win32:1700000000000'
+    })
+    admitted.release()
+  })
+
   it.each([false, true])(
     'preserves only the admitted replacement through teardown (wrong CWD: %s)',
     async (wrongCwd) => {

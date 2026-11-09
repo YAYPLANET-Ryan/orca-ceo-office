@@ -1,3 +1,4 @@
+import { ptyForegroundGroupReader } from '../../pty/process-retirement/pty-master-foreground-observation'
 import { createGitBashConsoleCapacityDetector } from '../../../shared/git-bash-console-capacity'
 import { withInitialOutputDiagnostic } from '../../../shared/terminal/pty/lifecycle/terminal-start-failure'
 
@@ -138,6 +139,7 @@ export function activateLocalPtySession(args: {
   const startupIngress = new PtyStartupIngress({
     ...(spawn.startupIngress ? { intent: spawn.startupIngress } : {}),
     ownerBackend,
+    readForegroundGroup: ptyForegroundGroupReader(proc),
     write: (data) => proc.write(data),
     onEmission: emitIngressData
   })

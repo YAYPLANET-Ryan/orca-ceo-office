@@ -1,8 +1,8 @@
 import { ContextIntegrityNotice } from './ContextIntegrityNotice'
 import { useEffect, useState } from 'react'
 import { useAppStore } from '@/store'
-import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
-import { useWorktreeRuntimeTarget } from '@/runtime/use-worktree-runtime-target'
+import { callRuntimeRpc } from '@/runtime/rpc/calls/runtime-rpc-call'
+import { useWorktreeRuntimeTarget } from '@/runtime/rpc/targets/use-worktree-runtime-target'
 import {
   readHookContextIntegritySummary,
   type HookContextIntegritySummary

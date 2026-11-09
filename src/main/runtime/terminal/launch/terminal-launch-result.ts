@@ -1,6 +1,7 @@
 import { terminalLaunchFacts } from '../../../../shared/agent-session/lifecycle/agent-session-resume'
+import { resumeCheckpointWarning } from '../../../../shared/agent-session/lifecycle/resume-checkpoint-warning'
 import { admitStablePaneAdoption } from '../identity/runtime-terminal-pane-identity'
-import type { RuntimePtyController } from '../../runtime-pty-controller-contract'
+import type { RuntimePtyController } from '../lifecycle/runtime-pty-controller-contract'
 import type { TerminalCreateOptions } from './terminal-create-options'
 import type { RuntimePtyWorktreeRecord } from '../records/runtime-terminal-state-records'
 import type { TuiAgent } from '../../../../shared/agent-launch/catalog/tui-agent'
@@ -80,10 +81,12 @@ export function recordTerminalLaunchMetadata(
 export function terminalLaunchPublicFacts(
   result: TerminalSpawnResult,
   adoptedStablePane: boolean,
-  pty: RuntimePtyWorktreeRecord | null
+  pty: RuntimePtyWorktreeRecord | null,
+  warning?: string
 ) {
   return {
     ...terminalLaunchFacts(result),
+    ...resumeCheckpointWarning(warning, result.resumeCheckpointFailed),
     launchConfig: pty?.launchConfig ?? undefined,
     launchAgent: pty?.launchAgent ?? undefined,
     launchToken: pty?.launchToken ?? undefined,
