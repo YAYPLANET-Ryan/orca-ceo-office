@@ -36,7 +36,8 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerReq
     this.contextAdmissionSlot = new PrioritySemaphore(1)
     this.undecidedOwnerChallenges = new Map()
     this.resetContextIntegrityRejections()
-    this.requestedProviderIntents.reset()
+    // A listener restart does not end the physical PTY generation. Keep committed
+    // bindings until its exact exit; otherwise a lagging host ack can restore an old ID.
   }
 
   setHookContextSnapshotReader(reader: HookContextSnapshotReader): void {
@@ -75,7 +76,8 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerReq
   protected async admitLocalHookContext(
     source: AgentHookSource,
     body: unknown,
-    peer?: HookTransportPeer
+    peer?: HookTransportPeer,
+    replay = false
   ): Promise<boolean | AdmittedHookContext> {
     const read = this.readHookContextSnapshot
     if (source !== 'claude' && source !== 'codex') {
@@ -201,6 +203,8 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerReq
       if (signal.aborted || !current || !sameHookContextSnapshot(snapshot, current)) {
         return refuse('context_changed_during_verification')
       }
+      // Observation acknowledgements may advance while immutable PTY ownership stays unchanged.
+      snapshot.providerObservation = current.providerObservation
       if (peer && !peer.isCurrent()) {
         return refuse('hook_transport_caller_changed')
       }
@@ -213,7 +217,8 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerReq
           source,
           provider?.id,
           envelope.eventName,
-          envelope.hookPayloadRecord.source
+          envelope.hookPayloadRecord.source,
+          replay
         )
       ) {
         return false

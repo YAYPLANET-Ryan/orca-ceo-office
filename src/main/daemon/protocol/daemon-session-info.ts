@@ -2,6 +2,7 @@ import type { AgentSessionOwnerBinding } from '../../../shared/agent-session/age
 import type { SessionState, ShellReadyState } from './daemon-rpc-contract'
 import type { WslGuestRoot } from '../../../shared/wsl-guest-root-marker'
 import type { HookLaunchContext } from '../../agent-hooks/hook-launch-context'
+import type { HookProviderObservation } from '../../../shared/agent-hook-listener/state/hook-provider-observation'
 
 export type SessionInfo = {
   foregroundProcess?: string
@@ -14,6 +15,8 @@ export type SessionInfo = {
   /** ORCA_PANE_KEY the PTY was spawned with; absent from daemons that predate it. */
   paneKey?: string
   hookContext?: HookLaunchContext
+  providerObservation?: HookProviderObservation
+  attachedToRequester?: boolean
   wslDistro?: string | null
   /** Seen once in a WSL session's launch output; volatile metadata of this incarnation. */
   wslGuestRoot?: WslGuestRoot

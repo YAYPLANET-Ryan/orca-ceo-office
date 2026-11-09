@@ -1,5 +1,6 @@
 import type { ParsedHookEnvelope } from '../../../shared/agent-hook-listener/hook-envelope'
 import type { HookTransportPeer } from '../../../shared/agent-hook-listener/presence/hook-process-root-evidence'
+import type { HookProviderObservation } from '../../../shared/agent-hook-listener/state/hook-provider-observation'
 import {
   hookResumeIntentsEqual,
   type HookResumeIntent
@@ -14,6 +15,9 @@ export type HookContextSnapshot = {
   launchTokenHash: string
   cwd: string
   reportedCwd: string
+  ownerClientInstanceId?: string
+  launchCwd?: string
+  providerObservation?: HookProviderObservation
   resumeIntent?: HookResumeIntent | null
 }
 
@@ -40,6 +44,8 @@ export function sameHookContextSnapshot(a: HookContextSnapshot, b: HookContextSn
     a.launchTokenHash === b.launchTokenHash &&
     a.cwd === b.cwd &&
     a.reportedCwd === b.reportedCwd &&
+    a.ownerClientInstanceId === b.ownerClientInstanceId &&
+    a.launchCwd === b.launchCwd &&
     hookResumeIntentsEqual(a.resumeIntent, b.resumeIntent)
   )
 }

@@ -105,7 +105,8 @@ async function preparedHost() {
     title: 'shell',
     launchTokenHash: context.launchTokenHash,
     ownerClientInstanceId: context.ownerClientInstanceId,
-    paneBound: true
+    paneBound: true,
+    ownerClientAttached: true
   }
   return { root, server, env, row }
 }

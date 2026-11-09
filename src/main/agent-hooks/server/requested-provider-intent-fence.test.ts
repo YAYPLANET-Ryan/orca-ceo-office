@@ -75,3 +75,86 @@ it('never establishes a match from unavailable or declared-fresh metadata', () =
     fence.check(snapshot, 'claude', 'original-conversation', 'SessionStart', 'resume')
   ).toBeNull()
 })
+
+function observedSnapshot(): HookContextSnapshot {
+  const scope = {
+    ptyId: snapshot.ptyId,
+    incarnationId: snapshot.incarnationId,
+    paneKey: snapshot.paneKey,
+    worktreeId: snapshot.worktreeId,
+    ownerClientInstanceId: 'b'.repeat(64),
+    launchTokenHash: snapshot.launchTokenHash,
+    launchCwd: snapshot.cwd,
+    cwd: snapshot.cwd
+  }
+  return {
+    ...snapshot,
+    ...scope,
+    providerObservation: {
+      ...scope,
+      version: 1,
+      revision: 2,
+      agentType: 'claude',
+      providerSessionId: 'cleared-conversation',
+      originalProviderSessionId: 'original-conversation',
+      transition: 'clear'
+    }
+  }
+}
+
+it('seeds a new fence only from the same owned host generation, preserving the original intent', () => {
+  const resumed = observedSnapshot()
+  const fence = new RequestedProviderIntentFence()
+  expect(fence.check(resumed, 'claude', 'cleared-conversation', 'Stop', undefined)).toBeNull()
+  expect(fence.check(resumed, 'claude', 'original-conversation', 'Stop', undefined)).toBe(
+    'resume_provider_transition_unconfirmed'
+  )
+  expect(resumed.resumeIntent?.providerSessionId).toBe('original-conversation')
+})
+
+it.each([
+  { incarnationId: 'other-generation' },
+  { paneKey: 'other-pane' },
+  { worktreeId: 'other-workspace' },
+  { ownerClientInstanceId: 'c'.repeat(64) },
+  { launchTokenHash: 'd'.repeat(64) },
+  { launchCwd: '/other-root' },
+  { cwd: '/other-root' },
+  { originalProviderSessionId: 'foreign-conversation' },
+  { agentType: 'codex' as const }
+])('refuses restoration from a mismatched host observation', (changed) => {
+  const resumed = observedSnapshot()
+  resumed.providerObservation = {
+    ...resumed.providerObservation!,
+    ...changed
+  }
+  expect(
+    new RequestedProviderIntentFence().check(
+      resumed,
+      'claude',
+      'cleared-conversation',
+      'Stop',
+      undefined
+    )
+  ).toBe('resume_provider_id_mismatch')
+})
+
+it('does not seed host observations from replay or roll back a locally committed clear', () => {
+  const resumed = observedSnapshot()
+  expect(
+    new RequestedProviderIntentFence().check(
+      resumed,
+      'claude',
+      'cleared-conversation',
+      'Stop',
+      undefined,
+      true
+    )
+  ).toBe('resume_provider_replay_unverified')
+  const fence = new RequestedProviderIntentFence()
+  fence.commit(resumed, 'claude', 'next-clear', 'SessionStart', 'clear')
+  expect(fence.check(resumed, 'claude', 'next-clear', 'Stop', undefined)).toBeNull()
+  expect(fence.check(resumed, 'claude', 'cleared-conversation', 'Stop', undefined)).toBe(
+    'resume_provider_transition_unconfirmed'
+  )
+})

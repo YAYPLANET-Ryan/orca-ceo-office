@@ -3,9 +3,12 @@ import type { PtyIncarnationId } from '../../shared/terminal/pty/lifecycle/pty-i
 import type { ForegroundProcessEvidence } from '../../shared/foreground-process-evidence'
 import type { WslGuestRoot } from '../../shared/wsl-guest-root-marker'
 import type { HookResumeIntent } from '../../shared/agent-hook-listener/state/hook-resume-intent'
+import type { HookProviderObservation } from '../../shared/agent-hook-listener/state/hook-provider-observation'
 
 export type PtyProcessInfo = {
   hookResumeIntent?: HookResumeIntent | null
+  providerObservation?: HookProviderObservation
+  ownerClientAttached?: boolean
   id: string
   incarnationId?: PtyIncarnationId
   /** Host-issued launch capability hash for this exact PTY; absent is unverified. */

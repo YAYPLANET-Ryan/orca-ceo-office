@@ -7,7 +7,7 @@ import { SessionFocusReport } from './session-focus-report'
 import type { SessionShellReadyBarrier } from './session-shell-ready-barrier'
 import type { TerminalShellRecoveryBarrier } from '../shell-readiness/terminal-shell-recovery-barrier'
 import { SessionTerminationController } from './session-termination-controller'
-import { SessionProcessInspection } from './session-process-inspection'
+import { SessionOutputInspection } from './session-output-inspection'
 import type { JobTerminationOutcome } from '../../windows/windows-pty-job'
 import type { SessionOptions } from './session-options'
 import type { TuiAgent } from '../../../shared/agent-launch/catalog/tui-agent'
@@ -22,7 +22,7 @@ import type {
 import type { TerminalSnapshot } from '../protocol/terminal-snapshot'
 import type { TerminalExitCause } from '../../../shared/terminal/pty/lifecycle/terminal-exit-cause'
 
-export class Session extends SessionProcessInspection {
+export class Session extends SessionOutputInspection {
   readonly sessionId: string
   readonly incarnationId = randomUUID()
   readonly terminalHandle: string | null
@@ -36,7 +36,7 @@ export class Session extends SessionProcessInspection {
   private readonly initialOutput: ReturnType<typeof createSessionInitialOutput>
   private _disposed = false
   private readonly onSessionExit?: (code: number) => void
-  private readonly output: SessionOutputPlane
+  protected readonly output: SessionOutputPlane
   private readonly producerPause: SessionProducerPause
   private readonly shellReady: SessionShellReadyBarrier
   private readonly termination: SessionTerminationController
@@ -226,14 +226,6 @@ export class Session extends SessionProcessInspection {
     return this.output.getSnapshot(opts)
   }
 
-  getPartialEscapeTailAnsi(): string {
-    return this.output.getPartialEscapeTailAnsi()
-  }
-
-  getAppliedSize(): { cols: number; rows: number } | null {
-    return this.output.getAppliedSize()
-  }
-
   takePendingOutput(
     includeSnapshot: boolean,
     opts: { teardownSnapshot?: boolean } = {}
@@ -244,10 +236,6 @@ export class Session extends SessionProcessInspection {
     const heldBytes =
       includeSnapshot && opts.teardownSnapshot === true ? this.prepareForFinalSnapshot() : ''
     return this.output.takePendingOutput(includeSnapshot, heldBytes, () => this.getSnapshot())
-  }
-
-  getCwd(): string | null {
-    return this.output.getCwd()
   }
 
   confirmShellForeground(): Promise<boolean> {

@@ -13,6 +13,7 @@ const row: PtyProcessInfo = {
   launchTokenHash: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
   rootProcessId: 123,
   paneBound: true,
+  ownerClientAttached: true,
   ownerClientInstanceId: 'client-b',
   paneKey: PANE,
   worktreeId: 'wt-1',
@@ -32,6 +33,17 @@ function envelope(reported = cwd): ParsedHookEnvelope {
 }
 
 describe('trusted local hook context snapshot', () => {
+  it.each([undefined, false])(
+    'requires current attachment ownership rather than creator identity alone',
+    async (ownerClientAttached) => {
+      const read = createLocalHookContextSnapshotReader(
+        async () => ({ ...row, ownerClientAttached }),
+        async (path) => path,
+        'client-b'
+      )
+      expect(await read(envelope())).toBeNull()
+    }
+  )
   it.each([null, { agentType: 'codex' as const, providerSessionId: 'original-conversation' }])(
     'takes declared intent only from the exact host-owned inventory row',
     async (hookResumeIntent) => {

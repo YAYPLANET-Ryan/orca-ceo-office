@@ -17,6 +17,12 @@ export class DaemonSessionAttachments {
     return this.clientIdBySessionId.get(sessionId)
   }
 
+  tokenForSessionClient(sessionId: string, clientId: string): symbol | undefined {
+    return this.clientIdBySessionId.get(sessionId) === clientId
+      ? this.tokenBySessionId.get(sessionId)
+      : undefined
+  }
+
   recordInput(sessionId: string): void {
     this.lastInputAtBySessionId.set(sessionId, performance.now())
   }

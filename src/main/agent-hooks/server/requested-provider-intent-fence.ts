@@ -1,5 +1,9 @@
 import type { HookContextSnapshot } from './hook-context-snapshot'
 import { readHookResumeIntent } from '../../../shared/agent-hook-listener/state/hook-resume-intent'
+import {
+  matchesProviderObservationScope,
+  providerObservationScope
+} from './provider-observation-scope'
 
 const MAX_MATCHED_PTYS = 4096
 
@@ -31,6 +35,9 @@ export class RequestedProviderIntentFence {
     // Unavailable is not fresh or a successful resume; no match receipt is produced.
     if (intent == null) {
       return null
+    }
+    if (!replay) {
+      this.restoreObservedBinding(snapshot)
     }
     if (agent !== intent.agentType) {
       return 'resume_provider_agent_mismatch'
@@ -91,8 +98,34 @@ export class RequestedProviderIntentFence {
       snapshot.incarnationId,
       snapshot.launchTokenHash,
       snapshot.cwd,
+      snapshot.ownerClientInstanceId,
+      snapshot.launchCwd,
       snapshot.resumeIntent?.agentType,
       snapshot.resumeIntent?.providerSessionId
     ])
+  }
+
+  private restoreObservedBinding(snapshot: HookContextSnapshot): void {
+    const intent = snapshot.resumeIntent
+    const observation = snapshot.providerObservation
+    const current = this.bindings.get(snapshot.ptyId)
+    const expected = providerObservationScope(snapshot)
+    if (
+      !intent ||
+      !observation ||
+      !expected ||
+      current?.scope === this.scope(snapshot) ||
+      (!current && this.bindings.size >= MAX_MATCHED_PTYS) ||
+      !matchesProviderObservationScope(observation, expected) ||
+      observation.originalProviderSessionId !== intent.providerSessionId ||
+      observation.agentType !== intent.agentType
+    ) {
+      return
+    }
+    this.bindings.set(snapshot.ptyId, {
+      scope: this.scope(snapshot),
+      incarnationId: snapshot.incarnationId,
+      providerSessionId: observation.providerSessionId
+    })
   }
 }

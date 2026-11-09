@@ -8,13 +8,13 @@ import {
 
 export const HOOK_OWNER_ENV = 'ORCA_AGENT_HOOK_OWNER'
 
-export type HookLaunchContext = {
+export type HookLaunchContext = Readonly<{
   ownerClientInstanceId: string
   launchTokenHash: string
   cwd: string
   rootProcessCreationKey?: string
   resumeIntent?: HookResumeIntent | null
-}
+}>
 
 export function hookOwnerId(endpoint: string): string {
   return createHash('sha256').update(`orca-hook-owner:${endpoint}`).digest('hex')
@@ -34,13 +34,13 @@ export function captureHookLaunchContext(
     return undefined
   }
   return owner && /^[a-f0-9]{64}$/.test(owner) && hash && isAbsolute(cwd)
-    ? {
+    ? Object.freeze({
         ownerClientInstanceId: owner,
         launchTokenHash: hash,
         cwd,
         ...(resumeIntent !== undefined ? { resumeIntent } : {}),
         ...(rootProcessCreationKey ? { rootProcessCreationKey } : {})
-      }
+      })
     : undefined
 }
 
@@ -71,12 +71,12 @@ export function readHookLaunchContext(value: unknown): HookLaunchContext | undef
     isAbsolute(cwd) &&
     (rootProcessCreationKey === undefined ||
       (typeof rootProcessCreationKey === 'string' && /^\d{15,20}$/.test(rootProcessCreationKey)))
-    ? {
+    ? Object.freeze({
         ownerClientInstanceId,
         launchTokenHash,
         cwd,
         ...(resumeIntent !== undefined ? { resumeIntent } : {}),
         ...(rootProcessCreationKey ? { rootProcessCreationKey } : {})
-      }
+      })
     : undefined
 }

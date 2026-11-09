@@ -6,7 +6,7 @@ import { isUnknownRequestTypeError } from '../../endpoint/identity/daemon-endpoi
 import { GET_SIZE_PROTOCOL_VERSION } from '../../protocol/daemon-protocol-version'
 import { readDaemonAppliedPtySize, type DaemonAppliedPtySize } from './daemon-pty-applied-size'
 import { FinalCheckpointWaitExpiredError } from './daemon-pty-lifecycle-errors'
-import { DaemonPtySessionInput } from './daemon-pty-session-input'
+import { DaemonPtyProviderObservation } from './daemon-pty-provider-observation'
 import { remainingDaemonRequestTimeoutMs } from '../../launch/daemon-request-deadline'
 import { readDaemonLiveSleepCwd } from './daemon-live-sleep-cwd'
 import type { ColdRestoreInfo } from '../../history/restoration/terminal-history-cold-restore-info'
@@ -23,7 +23,7 @@ export const LIVENESS_PROBE_TIMEOUT_MS = 2_000
 const MAX_TOMBSTONES = 1000
 // A busy daemon must not eat the final checkpoint's share of the Sleep deadline.
 
-export abstract class DaemonPtySessionControl extends DaemonPtySessionInput {
+export abstract class DaemonPtySessionControl extends DaemonPtyProviderObservation {
   protected abstract adoptListedSessionForSleep(
     sessionId: string,
     deadlineMs?: number

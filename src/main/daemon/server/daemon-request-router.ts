@@ -1,4 +1,5 @@
 import { handleDaemonTerminalKill } from './daemon-terminal-kill'
+import { recordDaemonProviderObservation } from './daemon-hook-provider-observation'
 import { handleDaemonFencedTermination } from './daemon-fenced-termination'
 import { performance } from 'node:perf_hooks'
 import { setPtyOwnerHostColors } from '../../../shared/terminal/pty/ingress/pty-owner-color-query-colors'
@@ -41,6 +42,8 @@ export class DaemonRequestRouter {
   async route(clientId: string, request: DaemonRequest): Promise<unknown> {
     const client = this.options.connections.get(clientId)
     switch (request.type) {
+      case 'recordHookProviderObservation':
+        return recordDaemonProviderObservation(clientId, request.payload, this.options)
       case 'startHistorySeedTransfer': {
         if (!client?.authenticatedPairEstablished || client.streamSocket === null) {
           throw new Error('Daemon client connection is incomplete; reconnect')
@@ -156,7 +159,11 @@ export class DaemonRequestRouter {
         this.options.host.reportFocusLost(request.payload.sessionId)
         return {}
       case 'listSessions':
-        return { sessions: this.options.host.listSessions() }
+        return {
+          sessions: this.options.host.listSessions((id) =>
+            this.options.attachments.tokenForSessionClient(id, clientId)
+          )
+        }
       case 'shutdownIfIdle':
         return this.shutdownIfIdle(clientId, request.id)
       case 'getSnapshot':

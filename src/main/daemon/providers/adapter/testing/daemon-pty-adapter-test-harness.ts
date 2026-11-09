@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { DaemonPtyAdapter } from '../daemon-pty-adapter'
 import type { DaemonPtyAdapterOptions } from '../daemon-pty-adapter-options'
 import { DaemonServer } from '../../../server/daemon-server'
-import { getDaemonSocketPath } from '../../../launch/daemon-spawner'
+import { getDaemonSocketPath, getDaemonTokenPath } from '../../../launch/daemon-spawner'
 import type { SubprocessHandle } from '../../../sessions/session-subprocess-handle'
 import type { DaemonFileLog } from '../../../observability/daemon-file-log'
 import type { TerminalExitCause } from '../../../../../shared/terminal/pty/lifecycle/terminal-exit-cause'
@@ -85,13 +85,15 @@ export async function startDaemonAdapterHarness(
   spawnSubprocess: SpawnSubprocess,
   adapterOptions: Pick<
     DaemonPtyAdapterOptions,
-    'readRunningWslDistros' | 'historyPath' | 'wslBridgeBootIdentity'
+    'readRunningWslDistros' | 'historyPath' | 'wslBridgeBootIdentity' | 'protocolVersion'
   > = {},
-  serverOptions: { onPtySessionExit?: (sessionId: string) => void } = {}
+  serverOptions: { onPtySessionExit?: (sessionId: string) => void; protocolVersion?: number } = {}
 ): Promise<DaemonAdapterHarness> {
   const dir = createTestDir()
-  const socketPath = getDaemonSocketPath(dir)
-  const tokenPath = join(dir, 'test.token')
+  const socketPath = getDaemonSocketPath(dir, serverOptions.protocolVersion)
+  const tokenPath = serverOptions.protocolVersion
+    ? getDaemonTokenPath(dir, serverOptions.protocolVersion)
+    : join(dir, 'test.token')
   const daemonLogEvents: string[] = []
   const daemonLog: DaemonFileLog = {
     log: (event) => daemonLogEvents.push(event),

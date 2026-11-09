@@ -3,11 +3,29 @@ import { RequestedProviderIntentFence } from './requested-provider-intent-fence'
 import type { HookContextSnapshot, AdmittedHookContext } from './hook-context-snapshot'
 import type { EnrichedAgentHookEventPayload, NormalizedLocalHook } from './server-types'
 import type { AgentHookSource } from '../../../shared/agent-hook-listener/transport/agent-hook-relay'
+import {
+  ProviderObservationQueue,
+  type ProviderObservationWriter
+} from './provider-observation-queue'
+import { providerObservationScope } from './provider-observation-scope'
+import { readHookProviderObservationUpdate } from '../../../shared/agent-hook-listener/state/hook-provider-observation'
 
 export abstract class AgentHookServerRequestedProviderContext extends AgentHookServerContextDiagnostics {
   protected readonly requestedProviderIntents = new RequestedProviderIntentFence()
+  private readonly providerObservations = new ProviderObservationQueue(() => {
+    this.refuseUnverifiedContext('provider_observation_ack_unavailable')
+  })
+
+  setProviderObservationWriter(writer: ProviderObservationWriter): void {
+    this.providerObservations.setWriter(writer)
+  }
+
+  flushProviderObservations(): Promise<boolean> {
+    return this.providerObservations.flush()
+  }
   retireRequestedProviderIntent(ptyId: string, incarnationId: string | undefined): void {
     this.requestedProviderIntents.retire(ptyId, incarnationId)
+    this.providerObservations.retire(ptyId, incarnationId)
   }
   protected abstract isContextProtectedPane(rawPaneKey: unknown): boolean
 
@@ -77,5 +95,25 @@ export abstract class AgentHookServerRequestedProviderContext extends AgentHookS
       context.envelope.eventName,
       context.envelope.hookPayloadRecord.source
     )
+    const scope = providerObservationScope(context.snapshot)
+    const update =
+      scope &&
+      readHookProviderObservationUpdate({
+        ...scope,
+        expectedRevision: context.snapshot.providerObservation?.revision ?? 0,
+        agentType: source,
+        providerSessionId: event.providerSession?.id,
+        transition:
+          context.envelope.eventName === 'SessionStart' &&
+          context.envelope.hookPayloadRecord.source === 'clear'
+            ? 'clear'
+            : 'observed',
+        launchToken: context.envelope.launchToken
+      })
+    if (update) {
+      this.providerObservations.enqueue(update)
+    } else if (scope) {
+      this.refuseUnverifiedContext('provider_observation_ack_unavailable')
+    }
   }
 }

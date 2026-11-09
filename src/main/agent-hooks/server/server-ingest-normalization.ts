@@ -191,7 +191,7 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
       const pending = this.checkHookOwner(record.source, body, answerBy)
       return pending ? pending.then(() => apply()) : apply()
     }
-    return this.admitLocalHookContext(record.source, body).then((context) => {
+    return this.admitLocalHookContext(record.source, body, undefined, true).then((context) => {
       if (context) {
         try {
           apply(context === true ? undefined : context)

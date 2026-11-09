@@ -12,6 +12,10 @@ import type { TerminalOscLinkRange } from '../../shared/terminal/links/terminal-
 import type { PtyBackgroundStreamEvent, PtyDataEvent } from './pty-provider-events'
 import type { PtySpawnResult } from './pty-spawn-result'
 import type { HookResumeIntent } from '../../shared/agent-hook-listener/state/hook-resume-intent'
+import type {
+  HookProviderObservation,
+  HookProviderObservationUpdate
+} from '../../shared/agent-hook-listener/state/hook-provider-observation'
 import type { PtyIncarnationId } from '../../shared/terminal/pty/lifecycle/pty-incarnation'
 import type {
   AgentSessionExecutionClaim,
@@ -120,6 +124,9 @@ export type { PtyProcessInfo, PtySpawnResult }
 type PtyProbeOptions = { signal?: AbortSignal }
 
 export type IPtyProvider = {
+  recordHookProviderObservation?: (
+    update: HookProviderObservationUpdate
+  ) => Promise<HookProviderObservation | null>
   /** SSH providers only: the relay session generation that registered them. */
   readonly providerGeneration?: number
   requestHostRpc?: (

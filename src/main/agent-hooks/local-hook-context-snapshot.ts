@@ -3,6 +3,7 @@ import { isAbsolute, normalize } from 'node:path'
 import type { LocalPtyInventoryReader } from './local-tmux-managed-pty'
 import type { HookContextSnapshotReader } from './server/hook-context-snapshot'
 import { readHookResumeIntent } from '../../shared/agent-hook-listener/state/hook-resume-intent'
+import { readHookProviderObservation } from '../../shared/agent-hook-listener/state/hook-provider-observation'
 
 export function createLocalHookContextSnapshotReader(
   readInventory: LocalPtyInventoryReader,
@@ -25,6 +26,7 @@ export function createLocalHookContextSnapshotReader(
       row.exiting ||
       row.routed === false ||
       row.paneBound !== true ||
+      row.ownerClientAttached !== true ||
       !owner ||
       row.ownerClientInstanceId !== owner ||
       row.wslDistro ||
@@ -42,7 +44,11 @@ export function createLocalHookContextSnapshotReader(
     }
     const launchCwd = row.contextCwd
     const resumeIntent = readHookResumeIntent(row.hookResumeIntent)
+    const providerObservation = readHookProviderObservation(row.providerObservation)
     if (row.hookResumeIntent !== undefined && resumeIntent === undefined) {
+      return null
+    }
+    if (row.providerObservation !== undefined && !providerObservation) {
       return null
     }
     let cwd: string
@@ -59,6 +65,21 @@ export function createLocalHookContextSnapshotReader(
     if (reported !== comparable(launchCwd) && reported !== comparable(cwd)) {
       return null
     }
+    if (
+      providerObservation &&
+      (providerObservation.ptyId !== row.id ||
+        providerObservation.incarnationId !== row.incarnationId ||
+        providerObservation.paneKey !== row.paneKey ||
+        providerObservation.worktreeId !== row.worktreeId ||
+        providerObservation.ownerClientInstanceId !== owner ||
+        providerObservation.launchTokenHash !== row.launchTokenHash ||
+        providerObservation.launchCwd !== launchCwd ||
+        providerObservation.cwd !== cwd ||
+        providerObservation.originalProviderSessionId !== resumeIntent?.providerSessionId ||
+        (resumeIntent && providerObservation.agentType !== resumeIntent.agentType))
+    ) {
+      return null
+    }
     return {
       executionHostId: 'local',
       paneKey: row.paneKey,
@@ -66,9 +87,12 @@ export function createLocalHookContextSnapshotReader(
       ptyId: row.id,
       incarnationId: row.incarnationId,
       launchTokenHash: row.launchTokenHash,
+      ownerClientInstanceId: owner,
+      launchCwd,
       cwd,
       reportedCwd: cwd,
-      ...(resumeIntent !== undefined ? { resumeIntent } : {})
+      ...(resumeIntent !== undefined ? { resumeIntent } : {}),
+      ...(providerObservation ? { providerObservation } : {})
     }
   }
 }

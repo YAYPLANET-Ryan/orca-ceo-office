@@ -12,6 +12,7 @@ import { createWindowsHookRootEvidenceReader } from './windows-hook-root-evidenc
 import { createWindowsAgentProcessObservationReader } from './windows-agent-process-observation'
 import { setWindowsAgentProcessObservationReader } from '../../shared/agent-status/process/agent-process-presence-probe'
 import { getWindowsProcessMetadataQueries } from '../windows/windows-process-table'
+import { createLocalProviderObservationWriter } from './local-provider-observation-writer'
 
 /** Hooks posted on this host name panes its own provider owns; their roots come from that
  *  provider's inventory, read lazily because daemon swaps replace the provider. */
@@ -30,6 +31,9 @@ export function installLocalHookRootEvidence(server: AgentHookServer): LocalPtyI
     getPtyId: getPtyIdForPaneKey,
     listProcesses: () => getLocalPtyProvider().listProcesses()
   })
+  server.setProviderObservationWriter(
+    createLocalProviderObservationWriter(readInventory, getLocalPtyProvider)
+  )
   server.setHookContextSnapshotReader(
     createLocalHookContextSnapshotReader(readInventory, undefined, () => server.contextOwnerId)
   )

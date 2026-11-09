@@ -28,6 +28,8 @@ import {
   hasLiveTerminalHostSessions
 } from './terminal-host-session-listing'
 import { createOrAttachTerminalSession } from './terminal-host-session-create'
+import { recordSessionProviderObservation } from './terminal-host-provider-observation'
+import type { HookProviderObservationUpdate } from '../../../shared/agent-hook-listener/state/hook-provider-observation'
 import { TerminalAttachCanceledError } from '../protocol/daemon-errors'
 import { randomUUID } from 'node:crypto'
 import {
@@ -303,8 +305,13 @@ export class TerminalHost {
     return this.killedTombstones.has(sessionId)
   }
 
-  listSessions(): SessionInfo[] {
-    return listLiveTerminalHostSessions(this.sessions, this.agentSessionOwners)
+  listSessions(attachmentFor?: (id: string) => symbol | undefined): SessionInfo[] {
+    return listLiveTerminalHostSessions(this.sessions, this.agentSessionOwners, attachmentFor)
+  }
+
+  recordProviderObservation(update: HookProviderObservationUpdate, attachment: symbol) {
+    const session = getAliveTerminalHostSession(this.sessions, update.ptyId)
+    return recordSessionProviderObservation(session, attachment, update)
   }
 
   hasLiveSessions(): boolean {

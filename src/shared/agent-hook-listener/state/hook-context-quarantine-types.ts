@@ -26,6 +26,7 @@ const CONTEXT_REFUSAL_REASONS = [
   'resume_provider_replay_unverified',
   'resume_provider_verification_capacity',
   'resume_provider_transition_unconfirmed',
+  'provider_observation_ack_unavailable',
   'terminal_context_attestation_unavailable',
   'auxiliary_context_attestation_unavailable'
 ] as const

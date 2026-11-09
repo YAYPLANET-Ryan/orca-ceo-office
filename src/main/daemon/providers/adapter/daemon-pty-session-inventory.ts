@@ -66,6 +66,12 @@ export abstract class DaemonPtySessionInventory extends DaemonPtyProcessInspecti
                 ...(worktreeId ? { worktreeId } : {}),
                 ...(session.terminalHandle ? { terminalHandle: session.terminalHandle } : {}),
                 ...(session.paneKey ? { paneKey: session.paneKey } : {}),
+                ...(session.attachedToRequester !== undefined
+                  ? { ownerClientAttached: session.attachedToRequester }
+                  : {}),
+                ...(session.providerObservation
+                  ? { providerObservation: session.providerObservation }
+                  : {}),
                 ...(hookContext
                   ? {
                       ownerClientInstanceId: hookContext.ownerClientInstanceId,

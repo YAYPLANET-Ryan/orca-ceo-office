@@ -2,43 +2,16 @@ import type { ClaimedAgentPtyOwnerRegistry } from '../../../shared/claimed-agent
 import type { Session } from '../sessions/session'
 import type { SessionInfo } from '../protocol/daemon-session-info'
 import type { WslGuestRoot } from '../../../shared/wsl-guest-root-marker'
-import { readWindowsProcessCreationKey } from '../../windows/windows-hook-peer'
 import type { HookResumeIntent } from '../../../shared/agent-hook-listener/state/hook-resume-intent'
-import {
-  captureHookLaunchContext,
-  type HookLaunchContext
-} from '../../agent-hooks/hook-launch-context'
-
-// Why a side table: only the listing reads it, and Session is at its max-lines cap.
-const spawnPaneKeys = new WeakMap<Session, string>()
-const hookContexts = new WeakMap<Session, HookLaunchContext>()
+import { getSessionProviderObservation } from './terminal-host-provider-observation'
+import { getSessionHookContext } from './terminal-host-hook-context'
+export { recordSessionSpawnPaneKey } from './terminal-host-hook-context'
 
 export function getSessionHookResumeIntent(session: Session): HookResumeIntent | null | undefined {
-  return hookContexts.get(session)?.resumeIntent
-}
-
-/** Records the ORCA_PANE_KEY a session was spawned with; reattaching never rewrites it. */
-export function recordSessionSpawnPaneKey(
-  session: Session,
-  paneKey: string | undefined,
-  env?: Readonly<Record<string, string>>,
-  cwd?: string,
-  resumeIntent?: HookResumeIntent | null
-): void {
-  if (paneKey) {
-    spawnPaneKeys.set(session, paneKey)
-  }
-  if (!hookContexts.has(session) && cwd) {
-    const context = captureHookLaunchContext(
-      env,
-      cwd,
-      readWindowsProcessCreationKey(session.pid),
-      resumeIntent
-    )
-    if (context) {
-      hookContexts.set(session, context)
-    }
-  }
+  const observation = getSessionProviderObservation(session)
+  return observation
+    ? { agentType: observation.agentType, providerSessionId: observation.providerSessionId }
+    : getSessionHookContext(session).context?.resumeIntent
 }
 
 const wslGuestRoots = new WeakMap<Session, WslGuestRoot>()
@@ -50,7 +23,8 @@ export function recordSessionWslGuestRoot(session: Session, root: WslGuestRoot):
 
 export function listLiveTerminalHostSessions(
   sessions: ReadonlyMap<string, Session>,
-  agentSessionOwners: ClaimedAgentPtyOwnerRegistry
+  agentSessionOwners: ClaimedAgentPtyOwnerRegistry,
+  attachmentFor?: (id: string) => symbol | undefined
 ): SessionInfo[] {
   const result: SessionInfo[] = []
   for (const session of sessions.values()) {
@@ -58,8 +32,9 @@ export function listLiveTerminalHostSessions(
       continue
     }
     const size = session.getAppliedSize()
-    const paneKey = spawnPaneKeys.get(session)
-    const hookContext = hookContexts.get(session)
+    const { paneKey, context: hookContext } = getSessionHookContext(session)
+    const providerObservation = getSessionProviderObservation(session)
+    const attachment = attachmentFor?.(session.sessionId)
     const wslGuestRoot = wslGuestRoots.get(session)
     const foregroundProcess = session.getForegroundProcess({ cachedOnly: true })
     result.push({
@@ -73,6 +48,10 @@ export function listLiveTerminalHostSessions(
       ...(session.terminalHandle ? { terminalHandle: session.terminalHandle } : {}),
       ...(paneKey ? { paneKey } : {}),
       ...(hookContext ? { hookContext: { ...hookContext } } : {}),
+      ...(providerObservation ? { providerObservation } : {}),
+      ...(attachmentFor
+        ? { attachedToRequester: Boolean(attachment && session.hasAttachedClient(attachment)) }
+        : {}),
       wslDistro: session.wslDistro,
       ...(wslGuestRoot ? { wslGuestRoot } : {}),
       pid: session.pid,

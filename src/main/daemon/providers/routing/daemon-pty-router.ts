@@ -1,4 +1,5 @@
 import { DaemonPtyTargetInspection } from './daemon-pty-target-inspection'
+import { DaemonPtyOwnedProviderRoutes } from './daemon-pty-owned-provider-routes'
 import { terminateResolvedDaemonSession } from '../../server/daemon-fenced-termination'
 import type { PtyFencedTerminationRequest } from '../../../../shared/terminal/pty/lifecycle/pty-fenced-termination'
 import { reconcileDaemonRouterSessions } from './daemon-router-session-reconciliation'
@@ -27,10 +28,7 @@ import { retireExitedLegacyAdapter, type ExitedLegacyVerdict } from './daemon-ro
 import type { WriteSettlement } from '../../../../shared/terminal/pty/lifecycle/pty-write-settlement'
 import type { TerminalOscColorQueryReplyColors } from '../../../../shared/terminal/protocol/queries/terminal-osc-color-reply'
 
-export class DaemonPtyRouter implements IPtyProvider {
-  private current: DaemonPtyAdapter
-  private legacy: DaemonPtyAdapter[]
-  private sessionAdapters = new Map<string, DaemonPtyAdapter>()
+export class DaemonPtyRouter extends DaemonPtyOwnedProviderRoutes implements IPtyProvider {
   private readonly targetInspection: DaemonPtyTargetInspection
   private readonly ownerResolver: DaemonSessionOwnerResolver<DaemonPtyAdapter>
   private readonly subscriptions: DaemonPtyAdapterSubscriptionFanout
@@ -38,8 +36,7 @@ export class DaemonPtyRouter implements IPtyProvider {
   readonly retirement = new DaemonRouterRetirement(() => this.allAdapters())
 
   constructor(opts: { current: DaemonPtyAdapter; legacy: DaemonPtyAdapter[] }) {
-    this.current = opts.current
-    this.legacy = opts.legacy
+    super(opts)
     for (const adapter of this.allAdapters()) {
       // A close that finds no session asks every daemon this router knows before ending history.
       if (typeof adapter.shareSessionListingWith === 'function') {

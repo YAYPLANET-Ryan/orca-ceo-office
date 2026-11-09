@@ -1,5 +1,6 @@
 import type { TerminalStartFailure } from '../../../shared/terminal/pty/lifecycle/terminal-start-failure'
 import type { HookResumeIntent } from '../../../shared/agent-hook-listener/state/hook-resume-intent'
+import type { RecordHookProviderObservationRequest } from './daemon-hook-provider-observation-protocol'
 import type {
   AsyncIoHealthRequest,
   FullDiskAccessStatusRequest,
@@ -272,6 +273,7 @@ export type DaemonRequest =
   | TakePendingOutputRequest
   | PtyOwnerQueryProtocol.CloseStartupQueryAuthorityRequest
   | PtyOwnerQueryProtocol.SetColorQueryReplyColorsRequest
+  | RecordHookProviderObservationRequest
 
 export type RpcResponseOk<T = unknown> = {
   id: string
