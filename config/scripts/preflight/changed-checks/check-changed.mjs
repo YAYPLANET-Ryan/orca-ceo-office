@@ -12,6 +12,7 @@ import {
   writePassHash
 } from './check-changed-pass-cache.mjs'
 import { planChangedChecks } from './check-changed-selection.mjs'
+import { fileArgumentBatches } from './file-argument-batches.mjs'
 import { resolveOxcCliInvocation } from '../../tool-invocation/oxc-cli-invocation.mjs'
 import { resolvePnpmCliInvocation } from '../../tool-invocation/pnpm-cli-invocation.mjs'
 
@@ -175,14 +176,14 @@ function buildTasks(root, plan, { files, mergeBase, maxWorkers, bun }) {
     if (existing.length > 0) {
       tasks.push({
         name: 'format',
-        steps: [
+        steps: fileArgumentBatches(existing, MAX_PATH_ARGUMENT_CHARS).map((files) =>
           step(oxfmt.command, [
             ...oxfmt.prefixArgs,
             '--check',
             '--no-error-on-unmatched-pattern',
-            ...(fitsCommandLine(existing) ? existing : ['.'])
+            ...files
           ])
-        ]
+        )
       })
     }
     const lintable = existing.filter((file) => LINTABLE.test(file))

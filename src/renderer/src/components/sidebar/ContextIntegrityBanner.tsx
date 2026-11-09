@@ -3,10 +3,31 @@ import { useEffect, useState } from 'react'
 import { useAppStore } from '@/store'
 import { callRuntimeRpc } from '@/runtime/rpc/calls/runtime-rpc-call'
 import { useWorktreeRuntimeTarget } from '@/runtime/rpc/targets/use-worktree-runtime-target'
+import type { RuntimeClientTarget } from '../../../../shared/runtime-client-target'
 import {
   readHookContextIntegritySummary,
   type HookContextIntegritySummary
 } from '../../../../shared/agent-hook-listener/state/hook-context-quarantine-types'
+
+async function readOwningHostContextIntegrity(
+  target: RuntimeClientTarget
+): Promise<HookContextIntegritySummary | null> {
+  try {
+    const response = await callRuntimeRpc<unknown>(
+      target,
+      'diagnostics.contextIntegrity',
+      undefined,
+      {
+        timeoutMs: 5000,
+        reuseRecentCompatibilityFailure: true,
+        suppressFeatureInteraction: true
+      }
+    )
+    return readHookContextIntegritySummary(response)
+  } catch {
+    return null
+  }
+}
 
 /** Show the owning host's refusal state, never a local-machine substitute for an unknown host. */
 export function ContextIntegrityBanner(): React.JSX.Element | null {
@@ -33,34 +54,19 @@ export function ContextIntegrityBanner(): React.JSX.Element | null {
         return
       }
       inFlight = true
-      try {
-        const response = await callRuntimeRpc<unknown>(
-          target,
-          'diagnostics.contextIntegrity',
-          undefined,
-          {
-            timeoutMs: 5000,
-            reuseRecentCompatibilityFailure: true,
-            suppressFeatureInteraction: true
-          }
-        )
-        const summary = readHookContextIntegritySummary(response)
-        if (!summary) {
-          throw new Error('Context integrity health unavailable')
-        }
-        if (!disposed) {
-          setState({ key, summary, unavailable: false })
-        }
-      } catch {
-        if (!disposed) {
-          setState((previous) => ({
-            key,
-            summary: previous?.key === key ? previous.summary : null,
-            unavailable: true
-          }))
-        }
-      } finally {
-        inFlight = false
+      const summary = await readOwningHostContextIntegrity(target)
+      inFlight = false
+      if (disposed) {
+        return
+      }
+      if (summary) {
+        setState({ key, summary, unavailable: false })
+      } else {
+        setState((previous) => ({
+          key,
+          summary: previous?.key === key ? previous.summary : null,
+          unavailable: true
+        }))
       }
     }
     const onVisible = (): void => {

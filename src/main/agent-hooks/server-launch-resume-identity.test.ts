@@ -170,7 +170,7 @@ describe('a resume launch seeds the pane identity', () => {
       worktreeId: 'wt-1',
       agentType: 'codex',
       providerSession: RESUMED,
-      launchedAt: Date.now()
+      launchedAt: 1
     })
     expect(server.getStatusSnapshotForPane(PANE)).toEqual([
       expect.objectContaining({

@@ -1,5 +1,5 @@
 import { TriangleAlert } from 'lucide-react'
-import { translate } from '@/i18n/i18n'
+import { useTranslate } from '@/i18n/use-translate'
 import type { HookContextIntegritySummary } from '../../../../shared/agent-hook-listener/state/hook-context-quarantine-types'
 
 /** Persistent host-scoped warning; it offers no automatic resume or process-control action. */
@@ -10,6 +10,7 @@ export function ContextIntegrityNotice({
   summary: HookContextIntegritySummary | null
   unavailable: boolean
 }): React.JSX.Element | null {
+  const t = useTranslate()
   const verificationUnavailable = unavailable || !summary || summary.verification === 'unavailable'
   const refused = Boolean(summary && (summary.unverifiedCount > 0 || summary.overflowCount > 0))
   if (!verificationUnavailable && !refused && summary?.durability !== 'unavailable') {
@@ -30,27 +31,27 @@ export function ContextIntegrityNotice({
         <TriangleAlert className="mt-px size-3.5 shrink-0 text-destructive" aria-hidden="true" />
         <div className="min-w-0 flex-1 space-y-1.5">
           <p className="text-xs font-semibold leading-snug">
-            {translate('agent.contextIntegrity.title', 'Conversation ownership needs review')}
+            {t('agent.contextIntegrity.title', 'Conversation ownership needs review')}
           </p>
           <p className="text-xs leading-snug">
             {refused
-              ? translate(
+              ? t(
                   'agent.contextIntegrity.refused',
                   'Some agent events could not be matched to a workspace. Automatic association was blocked. Review the original conversation before resuming.'
                 )
               : verificationUnavailable
-                ? translate(
+                ? t(
                     'agent.contextIntegrity.unavailable',
                     'Conversation ownership verification is unavailable on this host. Review the original conversation before resuming.'
                   )
-                : translate(
+                : t(
                     'agent.contextIntegrity.saveUnavailable',
                     'Conversation diagnostic details could not be saved. Review the original conversation before resuming.'
                   )}
           </p>
           {refused && (verificationUnavailable || summary?.durability !== 'saved') ? (
             <p className="text-xs leading-snug text-muted-foreground">
-              {translate(
+              {t(
                 'agent.contextIntegrity.notSaved',
                 'Diagnostic details are not confirmed saved or current.'
               )}

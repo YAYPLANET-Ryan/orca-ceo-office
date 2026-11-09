@@ -27,7 +27,7 @@ on:
       - 'config/scripts/*orcad*'
       - 'package.json'
       - 'pnpm-lock.yaml'
-      - 'src/main/ssh/migration-source/**'
+      - 'src/main/ssh/**'
       - 'src/main/persistence/migrating-orcad-catalog/**'
       - 'src/main/managed-server/**'
       - 'src/packages/process-host/**'

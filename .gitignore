@@ -157,3 +157,7 @@ ci-shards/
 /.build/windows-native-benchmark/
 
 .local/static-analysis-research/
+# Per-worktree dependency stores and disposable package-patch fixtures are generated data.
+/.build/store-*/
+/.build/vs-*/
+/.build/lint-staged-stage-patch-*/
