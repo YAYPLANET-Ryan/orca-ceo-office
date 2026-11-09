@@ -13,11 +13,11 @@ import {
   type HookContextSnapshotReader,
   type AdmittedHookContext
 } from './hook-context-snapshot'
-import { AgentHookServerContextDiagnostics } from './server-context-diagnostics'
+import { AgentHookServerRequestedProviderContext } from './server-requested-provider-context'
 import type { RemoteAgentStatusEnvelope } from './server-remote-envelope-normalization'
 import type { NormalizedLocalHook } from './server-types'
 
-export abstract class AgentHookServerContextAdmission extends AgentHookServerContextDiagnostics {
+export abstract class AgentHookServerContextAdmission extends AgentHookServerRequestedProviderContext {
   beginRemoteRelaySession(connectionId: string): void {
     this.relaySessions.begin(connectionId)
   }
@@ -36,6 +36,7 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerCon
     this.contextAdmissionSlot = new PrioritySemaphore(1)
     this.undecidedOwnerChallenges = new Map()
     this.resetContextIntegrityRejections()
+    this.requestedProviderIntents.reset()
   }
 
   setHookContextSnapshotReader(reader: HookContextSnapshotReader): void {
@@ -68,17 +69,6 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerCon
       this.getStatusSnapshotForPane(paneKey).some(
         (row) => row.agentType === 'claude' || row.agentType === 'codex'
       )
-    )
-  }
-
-  protected requiresContextAdmission(source: AgentHookSource, body: unknown): boolean {
-    return (
-      source === 'claude' ||
-      source === 'codex' ||
-      (typeof body === 'object' &&
-        body !== null &&
-        'paneKey' in body &&
-        this.isContextProtectedPane(body.paneKey))
     )
   }
 
@@ -218,6 +208,17 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerCon
         return refuse('agent_exited_during_context_verification')
       }
       if (
+        !this.checkRequestedProvider(
+          snapshot,
+          source,
+          provider?.id,
+          envelope.eventName,
+          envelope.hookPayloadRecord.source
+        )
+      ) {
+        return false
+      }
+      if (
         provider &&
         this.getProviderSessionIdentities().some(
           (row) =>
@@ -258,7 +259,8 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerCon
 
   protected canCommitHookContext(
     context: AdmittedHookContext,
-    event: NormalizedLocalHook['event']
+    event: NormalizedLocalHook['event'],
+    replay = false
   ): boolean {
     if (
       !event ||
@@ -270,6 +272,9 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerCon
       return this.refuseUnverifiedContext('context_changed_before_commit')
     }
     const ids = [event.providerSession?.id, event.statusAdmissionSession].filter(Boolean)
+    if (!this.checkNormalizedRequestedProvider(context, event, replay)) {
+      return false
+    }
     if (
       this.getProviderSessionIdentities().some(
         (row) =>

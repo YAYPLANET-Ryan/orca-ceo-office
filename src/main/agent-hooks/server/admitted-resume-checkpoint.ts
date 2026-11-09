@@ -20,9 +20,12 @@ export abstract class AgentHookServerResumeCheckpoints extends AgentHookServerCo
       event,
       this.state.lastStatusByPaneKey
     )
-    if (checkpoint && this.writeLegacyStatusRow(checkpoint)) {
-      this.commitStatusRowMutation(event, checkpoint, false)
-      this.scheduleStatusPersist()
+    if (checkpoint) {
+      this.noteRequestedProviderCommit(source, context, checkpoint)
+      if (this.writeLegacyStatusRow(checkpoint)) {
+        this.commitStatusRowMutation(event, checkpoint, false)
+        this.scheduleStatusPersist()
+      }
     }
   }
 }

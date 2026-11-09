@@ -20,6 +20,12 @@ const CONTEXT_REFUSAL_REASONS = [
   'launch_context_attestation_unavailable',
   'resume_recipe_storage_unavailable',
   'resume_recipe_capacity_exceeded',
+  'resume_provider_agent_mismatch',
+  'resume_provider_id_unconfirmed',
+  'resume_provider_id_mismatch',
+  'resume_provider_replay_unverified',
+  'resume_provider_verification_capacity',
+  'resume_provider_transition_unconfirmed',
   'terminal_context_attestation_unavailable',
   'auxiliary_context_attestation_unavailable'
 ] as const

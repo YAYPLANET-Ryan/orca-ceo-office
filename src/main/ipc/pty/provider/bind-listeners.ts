@@ -1,4 +1,5 @@
 import { isCurrentPtyExit, ptyOwnership } from './ownership-state'
+import { agentHookServer } from '../../../agent-hooks/server'
 import { wslBridgePtyPresence } from '../../../agent-hooks/wsl-bridge-pty-presence'
 import {
   localBackgroundStreamUnsub,
@@ -92,6 +93,9 @@ export function bindProviderListeners(session: PtyIpcSession): void {
     localProvider.onExit((payload) => {
       if (!isCurrentPtyExit(payload)) {
         return
+      }
+      if (!payload.hostLost && !payload.replacedByRestart) {
+        agentHookServer.retireRequestedProviderIntent(payload.id, payload.incarnationId)
       }
       // Its distro's hook relay may idle out once no bridge terminal remains.
       wslBridgePtyPresence.noteExited(payload.id)

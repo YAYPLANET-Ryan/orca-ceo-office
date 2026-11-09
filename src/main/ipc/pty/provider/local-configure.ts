@@ -1,4 +1,5 @@
 import { getClaudeAgentViewService } from '../../../claude/agent-view/agent-view-service'
+import { agentHookServer } from '../../../agent-hooks/server'
 import { inheritOmpLaunchEnvironment } from '../host-env/omp-launch-environment'
 import { getAppEnvironment } from '../../../../shared/app-environment'
 import type { OrcaRuntimeService } from '../../../runtime/orca-runtime'
@@ -157,6 +158,7 @@ export function configureLocalPtyProvider(args: {
       if (!isCurrentPtyExit({ id, incarnationId })) {
         return
       }
+      agentHookServer.retireRequestedProviderIntent(id, incarnationId)
       const viewShown = ORCA_LAYOUT_OWNER_IS_MAIN && visibleRendererPtys.has(id)
       clearProviderPtyState(id)
       ptyOwnership.delete(id)

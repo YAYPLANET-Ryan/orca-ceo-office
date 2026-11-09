@@ -143,6 +143,8 @@ export const agentHookServerModuleMock = () => ({
   agentHookServer: {
     buildPtyEnv: buildAgentHookEnvMock,
     clearPaneState: clearAgentHookPaneStateMock,
+    retireRequestedProviderIntent:
+      vi.fn<(ptyId: string, incarnationId: string | undefined) => void>(),
     registerPaneKeyAlias: registerPaneKeyAliasMock,
     forgetRefusedPaneResume: forgetRefusedPaneResumeMock,
     recordLaunchResumeIdentity: () => 'seeded' as const,

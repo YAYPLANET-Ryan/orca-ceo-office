@@ -45,27 +45,31 @@ jobs:
           cache-pnpm-store: 'false'
           cache-pnpm-verification: 'false'
       - name: Verify compiled peer identity and context admission
-        run: >-
-          pnpm test
-          src/main/windows/windows-hook-peer-native.win32.test.ts
-          src/main/agent-hooks/windows-hook-root-evidence.test.ts
-          src/main/agent-hooks/windows-agent-process-observation.test.ts
-          src/main/agent-hooks/local-hook-context-snapshot.test.ts
-          src/main/agent-hooks/local-hook-positive-context.test.ts
-          src/main/agent-hooks/server-context-integrity.test.ts
-          src/main/agent-hooks/server/runtime-resume-checkpoint.test.ts
-          src/main/agent-hooks/server/resume-launch-recipe-journal.test.ts
-          src/main/agent-hooks/server/resume-launch-recipe-recovery.test.ts
-          src/main/agent-hooks/server-unverified-resume-recipes.test.ts
-            src/main/agent-hooks/hook-resume-intent.test.ts
-            src/main/providers/pty-process-list-admission.test.ts
-            src/main/daemon/providers/adapter/testing/daemon-pty-resume-intent.test.ts
-            src/main/ipc/pty/host-env/saved-resume-launch-intent.test.ts
-          src/main/agent-hooks/hook-context-quarantine.test.ts
-          src/main/agent-hooks/server-context-quarantine.test.ts
-          src/renderer/src/components/sidebar/ContextIntegrityBanner.test.tsx
-          config/scripts/preflight/changed-checks/lint-staged-worktree-backup.test.mjs
-          --maxWorkers=2
+        run: |
+          $testFiles = @(
+            'src/main/windows/windows-hook-peer-native.win32.test.ts'
+            'src/main/agent-hooks/windows-hook-root-evidence.test.ts'
+            'src/main/agent-hooks/windows-agent-process-observation.test.ts'
+            'src/main/agent-hooks/local-hook-context-snapshot.test.ts'
+            'src/main/agent-hooks/local-hook-positive-context.test.ts'
+            'src/main/agent-hooks/server-context-integrity.test.ts'
+            'src/main/agent-hooks/server/runtime-resume-checkpoint.test.ts'
+            'src/main/agent-hooks/server/resume-launch-recipe-journal.test.ts'
+            'src/main/agent-hooks/server/resume-launch-recipe-recovery.test.ts'
+            'src/main/agent-hooks/server-unverified-resume-recipes.test.ts'
+            'src/main/agent-hooks/hook-resume-intent.test.ts'
+            'src/main/providers/pty-process-list-admission.test.ts'
+            'src/main/daemon/providers/adapter/testing/daemon-pty-resume-intent.test.ts'
+            'src/main/ipc/pty/host-env/saved-resume-launch-intent.test.ts'
+            'src/main/agent-hooks/server-requested-provider-identity.test.ts'
+            'src/main/agent-hooks/server/requested-provider-intent-fence.test.ts'
+            'src/main/agent-hooks/hook-context-quarantine.test.ts'
+            'src/main/agent-hooks/server-context-quarantine.test.ts'
+            'src/renderer/src/components/sidebar/ContextIntegrityBanner.test.tsx'
+            'config/scripts/preflight/changed-checks/lint-staged-worktree-backup.test.mjs'
+          )
+          pnpm test @testFiles --maxWorkers=2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Check original resume compatibility without waivers
         if: ${{ !cancelled() }}
         run: >-

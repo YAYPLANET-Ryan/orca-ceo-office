@@ -212,7 +212,7 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
     if (!normalized.event) {
       return
     }
-    if (context && !this.canCommitHookContext(context, normalized.event)) {
+    if (context && !this.canCommitHookContext(context, normalized.event, true)) {
       return
     }
     const exit = this.agentExitedAtByPaneKey.get(this.resolvePaneKeyAlias(normalized.event.paneKey))
