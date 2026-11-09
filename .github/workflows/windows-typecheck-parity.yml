@@ -54,6 +54,8 @@ jobs:
           src/main/agent-hooks/local-hook-positive-context.test.ts
           src/main/agent-hooks/server-context-integrity.test.ts
           src/main/agent-hooks/server/runtime-resume-checkpoint.test.ts
+          src/main/agent-hooks/server/resume-launch-recipe-journal.test.ts
+          src/main/agent-hooks/server/resume-launch-recipe-recovery.test.ts
           src/main/agent-hooks/hook-context-quarantine.test.ts
           src/main/agent-hooks/server-context-quarantine.test.ts
           src/renderer/src/components/sidebar/ContextIntegrityBanner.test.tsx
