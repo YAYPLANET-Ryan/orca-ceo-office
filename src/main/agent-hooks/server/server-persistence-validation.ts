@@ -173,6 +173,8 @@ export function sanitizeHydratedEntry(
     retainedForLiveness: retainedForLiveness ? true : undefined,
     runtimeResumeCheckpoint:
       record.runtimeResumeCheckpoint === true && providerSession ? true : undefined,
+    runtimeResumePendingObservation:
+      record.runtimeResumePendingObservation === true ? true : undefined,
     payload,
     receivedAt,
     stateStartedAt,

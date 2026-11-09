@@ -56,6 +56,23 @@ async function createServer(): Promise<AgentHookServer> {
   const server = new AgentHookServer()
   servers.push(server)
   await server.start({ env: 'production', userDataPath: join(root, 'orca') })
+  server.setHookContextSnapshotReader(async (envelope) => {
+    if (envelope.paneKey !== PANE && envelope.paneKey !== GOOD_PANE) {
+      return null
+    }
+    return {
+      executionHostId: 'local',
+      paneKey: envelope.paneKey,
+      worktreeId: 'wt-1',
+      ptyId: `fixture-pty-${envelope.paneKey}`,
+      incarnationId: 'fixture-generation',
+      launchTokenHash: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+      cwd: '/work/repo',
+      reportedCwd:
+        typeof envelope.hookPayloadRecord.cwd === 'string' ? envelope.hookPayloadRecord.cwd : ''
+    }
+  })
+  server.setHookRootEvidenceReader(async () => ({ verdict: 'root', binding: 'fixture-generation' }))
   return server
 }
 
@@ -68,12 +85,18 @@ async function prompt(server: AgentHookServer, paneKey: string, sessionId: strin
         hook_event_name: 'UserPromptSubmit',
         session_id: sessionId,
         transcript_path: path,
+        cwd: '/work/repo',
         prompt: 'keep going'
       },
       {
         paneKey,
         tabId,
-        agentProcess: JSON.stringify({ pid: 4001, platform: process.platform, startTime: tabId })
+        launchToken: 'abc',
+        agentProcess: JSON.stringify({
+          pid: paneKey === PANE ? 4001 : 4002,
+          platform: process.platform,
+          startTime: tabId
+        })
       }
     )
   )
@@ -85,7 +108,7 @@ function row(server: AgentHookServer, paneKey = PANE) {
 }
 
 describe('Claude session continued into a daemon job', () => {
-  it('retains a validated transcript continuation after a resumed pane is torn down', async () => {
+  it('does not mint durable fork ownership from an unverified resume and a transcript pointer', async () => {
     const server = await createServer()
     const { oldPath } = forkOldIntoJob()
     server.recordLaunchResumeIdentity({
@@ -97,16 +120,16 @@ describe('Claude session continued into a daemon job', () => {
     })
     await prompt(server, PANE, OLD, oldPath)
     await server.checkAgentPresence(PANE)
-    expect(row(server)?.providerSession?.id).toBe(FORK)
+    expect(row(server)?.providerSession?.id).toBe(OLD)
     server.clearPaneState(PANE)
     expect(server.flushResumeIdentityCheckpoint()).toBe(true)
     const persisted = JSON.parse(readFileSync(server.lastStatusPath!, 'utf8'))
-    expect(persisted.entries[PANE]?.providerSession?.id).toBe(FORK)
+    expect(persisted.entries[PANE]?.providerSession?.id).toBe(OLD)
   })
 
-  it("rebinds the pane to the fork named by its own transcript, keeping the row's state", async () => {
+  it('keeps observed ownership when its transcript alone names a fork', async () => {
     const server = await createServer()
-    const { oldPath, forkPath } = forkOldIntoJob()
+    const { oldPath } = forkOldIntoJob()
     await prompt(server, PANE, OLD, oldPath)
     const before = row(server)
     expect(before?.providerSession).toMatchObject({ id: OLD, transcriptPath: oldPath })
@@ -116,8 +139,8 @@ describe('Claude session continued into a daemon job', () => {
     const after = row(server)
     expect(after?.providerSession).toEqual({
       key: 'session_id',
-      id: FORK,
-      transcriptPath: forkPath
+      id: OLD,
+      transcriptPath: oldPath
     })
     expect(after?.state).toBe(before?.state)
     expect(after?.prompt).toBe(before?.prompt)
@@ -125,7 +148,7 @@ describe('Claude session continued into a daemon job', () => {
     const persisted = JSON.parse(
       readFileSync(join(root, 'orca', 'agent-hooks', 'last-status.json'), 'utf8')
     )
-    expect(persisted.entries[PANE].providerSession.id).toBe(FORK)
+    expect(persisted.entries[PANE].providerSession.id).toBe(OLD)
   })
 
   it('does not claim a fork that another pane already reports', async () => {

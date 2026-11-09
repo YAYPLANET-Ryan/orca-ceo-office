@@ -2,26 +2,24 @@ import type { AgentHookEventPayload } from '../../../shared/agent-hook-listener/
 import { agentProviderSessionsEqual } from '../../../shared/agent-session/lifecycle/agent-session-resume'
 import type { EnrichedAgentHookEventPayload } from './server-types'
 import type { AgentStatusObservationOrigin } from '../../../shared/agent-status/contracts/agent-status-observation'
-import { sameAgentStatusTerminalOwner } from '../../../shared/agent-status/identity/agent-status-terminal-owner'
 
 export function retainResumeCheckpoint(
   previous: EnrichedAgentHookEventPayload | undefined,
   incoming: AgentHookEventPayload,
-  origin?: AgentStatusObservationOrigin
+  _origin?: AgentStatusObservationOrigin
 ): { runtimeResumeCheckpoint?: true } {
   return previous?.runtimeResumeCheckpoint &&
     previous.payload.agentType === incoming.payload.agentType &&
     incoming.payload.agentType &&
-    (agentProviderSessionsEqual(
+    previous.runtimeResumePendingObservation !== true &&
+    previous.paneKey === incoming.paneKey &&
+    previous.connectionId === incoming.connectionId &&
+    previous.worktreeId === incoming.worktreeId &&
+    agentProviderSessionsEqual(
       incoming.payload.agentType,
       previous.providerSession,
       incoming.providerSession
-    ) ||
-      (origin === 'hook' &&
-        previous.agentPresence?.ended !== true &&
-        (!previous.providerSessionOnly || previous.observation?.origin === 'launch') &&
-        sameAgentStatusTerminalOwner(previous, incoming) &&
-        incoming.providerSession))
+    )
     ? { runtimeResumeCheckpoint: true }
     : {}
 }
@@ -36,10 +34,6 @@ export function retainedResumeIdentity(
   ) {
     return null
   }
-  const {
-    launchToken: _launchToken,
-    runtimeResumePendingObservation: _pending,
-    ...identity
-  } = entry
+  const { launchToken: _launchToken, ...identity } = entry
   return { ...identity, providerSessionOnly: true, retainedForLiveness: true }
 }

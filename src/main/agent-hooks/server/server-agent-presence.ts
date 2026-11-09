@@ -1,10 +1,6 @@
 import { cliWriterTopology, type CliWriterObservation } from './cli-writer-observation'
 import type { AgentStatusIpcPayload } from '../../../shared/agent-status/contracts/agent-status-ipc-payload'
 import type { ParsedAgentStatusPayload } from '../../../shared/agent-status/contracts/agent-status-types'
-import {
-  ClaudeSessionContinuationTracker,
-  resolvePaneClaudeContinuation
-} from '../../../shared/agent-hook-listener/claude-session-continuation'
 import type { AgentHookEventPayload } from '../../../shared/agent-hook-listener/listener-event'
 import {
   isSameAgentProcess,
@@ -22,7 +18,6 @@ export abstract class AgentHookServerAgentPresence extends AgentHookServerLifecy
       promise: Promise<AgentProcessVerdict | null>
     }
   >()
-  private readonly claudeContinuations = new ClaudeSessionContinuationTracker()
 
   /** Issue pane-root bindings for a relay's request on the link generation current when it
    *  asked; a link restart during the read issues nothing. */
@@ -122,7 +117,6 @@ export abstract class AgentHookServerAgentPresence extends AgentHookServerLifecy
 
   checkAgentPresence(paneKey: string): Promise<AgentProcessVerdict | null> {
     const resolved = this.resolvePaneKeyAlias(paneKey)
-    this.followClaudeSessionContinuation(resolved)
     const row = this.state.lastStatusByPaneKey.get(resolved)
     if (!row?.agentPresence?.process || row.agentPresence.ended) {
       return Promise.resolve(null)
@@ -178,34 +172,6 @@ export abstract class AgentHookServerAgentPresence extends AgentHookServerLifecy
       })
     this.presenceChecks.set(row, { token, statusHookGeneration, promise: check })
     return check
-  }
-
-  /** A Claude session forked into a daemon job keeps running in this pane, but #15304 declines
-   *  the job's hooks; the pane's own transcript names the fork, so rebind the row to it. */
-  private followClaudeSessionContinuation(paneKey: string): void {
-    const row = this.state.lastStatusByPaneKey.get(paneKey)
-    if (!row || row.connectionId !== null) {
-      return
-    }
-    const next = resolvePaneClaudeContinuation(
-      this.claudeContinuations,
-      this.state.lastStatusByPaneKey,
-      paneKey
-    )
-    if (next) {
-      this.applyNormalizedStatus(
-        {
-          ...row,
-          providerSession: next,
-          // Why: only the identity moved; the state is unchanged, so keep its evidence clock.
-          isReplay: true,
-          hookEventName: undefined,
-          hasExplicitPrompt: undefined
-        },
-        undefined,
-        'process'
-      )
-    }
   }
 
   /** The last report of this pane's local agent, restored from disk or replayed from the offline

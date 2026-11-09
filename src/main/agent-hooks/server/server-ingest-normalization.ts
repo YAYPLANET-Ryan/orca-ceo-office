@@ -21,9 +21,9 @@ import type { EnrichedAgentHookEventPayload, NormalizedLocalHook } from './serve
 import type { AgentHookServerTmuxStatus } from './server-tmux-status'
 import { getClaudeObservedConfigDirs } from '../../claude-accounts/claude-profile-installed-router'
 import type { AdmittedHookContext } from './hook-context-snapshot'
-import { AgentHookServerContextAdmission } from './server-context-admission'
+import { AgentHookServerResumeCheckpoints } from './admitted-resume-checkpoint'
 
-export abstract class AgentHookServerIngestNormalization extends AgentHookServerContextAdmission {
+export abstract class AgentHookServerIngestNormalization extends AgentHookServerResumeCheckpoints {
   /** HTTP and spool hooks share one ownership preflight before provider folds; a drain passes
    *  the one answer deadline all its records share. */
   protected checkHookOwner(
@@ -236,7 +236,8 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
       this.observations.rebind(event.paneKey)
     }
     this.recordCurrentAuthorityObservation(event)
-    this.applyObservedLocalHook(event, normalized.onAccepted, record.receivedAt)
+    const enriched = this.applyObservedLocalHook(event, normalized.onAccepted, record.receivedAt)
+    this.checkpointAdmittedProvider(record.source, context, enriched)
     if (event.payload.state !== 'done') {
       this.withdrawReplayObservation(this.resolvePaneKeyAlias(event.paneKey))
     }
@@ -294,6 +295,7 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
       this.recordCurrentAuthorityObservation(event)
       toolCallOwner = event
       const enriched = this.applyObservedLocalHook(event, normalized.onAccepted)
+      this.checkpointAdmittedProvider(source, admitted, enriched)
       if (enriched && admitted === true) {
         this.checkAgentPresenceAfterHook(event, enriched)
         this.scheduleAssistantMessageRetry(source, aliasedBody, enriched)

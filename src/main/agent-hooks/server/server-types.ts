@@ -52,7 +52,7 @@ export type EnrichedAgentHookEventPayload = AgentHookEventPayload & {
   retainedForLiveness?: true
   /** Explicit resumes survive PTY cleanup while their original pane remains. */
   runtimeResumeCheckpoint?: true
-  /** One live launch may lend its identity to the first terminal observation; never persisted. */
+  /** Launch metadata is not observed provider ownership; preserve this restriction on disk. */
   runtimeResumePendingObservation?: true
   /** OSC 7501 facet stitched at publication, never persisted. */
   programStatus?: ProgramStatusFacet
@@ -73,7 +73,6 @@ export type PersistedAgentHookEventPayload = Omit<
   | 'programStatus'
   | 'programStatusOnly'
   | 'restoredUnconfirmed'
-  | 'runtimeResumePendingObservation'
   // Authority IDs and revision counters belong to the runtime that issued them.
   | 'observation'
   // Terminal handles belong to one runtime.
