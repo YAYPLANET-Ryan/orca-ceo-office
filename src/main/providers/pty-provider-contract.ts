@@ -11,6 +11,7 @@ import type { StartupCommandDelivery } from '../../shared/agent-launch/startup/c
 import type { TerminalOscLinkRange } from '../../shared/terminal/links/terminal-osc-link-ranges'
 import type { PtyBackgroundStreamEvent, PtyDataEvent } from './pty-provider-events'
 import type { PtySpawnResult } from './pty-spawn-result'
+import type { HookResumeIntent } from '../../shared/agent-hook-listener/state/hook-resume-intent'
 import type { PtyIncarnationId } from '../../shared/terminal/pty/lifecycle/pty-incarnation'
 import type {
   AgentSessionExecutionClaim,
@@ -49,6 +50,7 @@ export type PtyProviderBufferSnapshot = {
 }
 
 export type PtySpawnOptions = {
+  hookResumeIntent?: HookResumeIntent | null
   cols: number
   rows: number
   cwd?: string

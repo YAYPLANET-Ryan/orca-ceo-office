@@ -14,6 +14,7 @@ import {
 } from '../spawn-options-assembly'
 import { isRuntimeWslBackgroundStart, type RuntimePtySpawnState } from './spawn-state'
 import { prepareAntigravityAccountForLaunch } from '../../../antigravity/native-account-launch'
+import { hookResumeIntentFromLaunch } from '../../../../shared/agent-hook-listener/state/hook-resume-intent'
 
 export async function buildRuntimePtySpawnOptions(
   ctx: RuntimePtySpawnState
@@ -89,6 +90,10 @@ export async function buildRuntimePtySpawnOptions(
     claudeAuth: ctx.claudeAuth
   })
   ctx.spawnOptions = launch.spawnOptions
+  ctx.spawnOptions.hookResumeIntent = hookResumeIntentFromLaunch(
+    args.launchAgent,
+    args.resumeProviderSession
+  )
   ctx.env = launch.env
   ctx.launchCommand = launch.launchCommand
   ctx.provisionalPtySize = seedPtySpawnSize({

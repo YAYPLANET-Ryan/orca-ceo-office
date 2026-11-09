@@ -9,6 +9,32 @@ import {
 } from './pty-process-list-admission'
 
 describe('PtyProcessListAdmission', () => {
+  it.each([
+    ['launchTokenHash', 'invalid'],
+    ['ownerClientInstanceId', 'invalid'],
+    ['rootProcessCreationKey', 'invalid'],
+    ['paneBound', 'true'],
+    ['contextCwd', 'bad\0cwd'],
+    ['hookResumeIntent', { agentType: 'codex', providerSessionId: '' }]
+  ])('rejects malformed hook metadata %s instead of discarding it', (key, value) => {
+    const row = { id: 'pty-a', cwd: '/repo', title: 'shell' }
+    Reflect.set(row, key, value)
+    expect(() => new PtyProcessListAdmission().admit(row)).toThrow('invalid_pty_process_list')
+  })
+
+  it('counts retained hook metadata against the existing aggregate byte limit', () => {
+    const admission = new PtyProcessListAdmission()
+    const row = { id: 'pty-a', cwd: '/', title: '', contextCwd: '한'.repeat(8192) }
+    for (let index = 0; index < 1024; index++) {
+      admission.admit(row)
+    }
+    expect(() => {
+      for (let index = 0; index < 1024; index++) {
+        admission.admit(row)
+      }
+    }).toThrow('pty_process_list_capacity')
+  })
+
   const evidence = {
     verdict: 'live' as const,
     processName: 'codex',

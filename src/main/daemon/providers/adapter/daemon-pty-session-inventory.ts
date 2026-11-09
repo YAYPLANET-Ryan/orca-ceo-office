@@ -71,6 +71,7 @@ export abstract class DaemonPtySessionInventory extends DaemonPtyProcessInspecti
                       ownerClientInstanceId: hookContext.ownerClientInstanceId,
                       launchTokenHash: hookContext.launchTokenHash,
                       contextCwd: hookContext.cwd,
+                      hookResumeIntent: hookContext.resumeIntent,
                       rootProcessCreationKey: hookContext.rootProcessCreationKey,
                       paneBound: Boolean(session.paneKey)
                     }

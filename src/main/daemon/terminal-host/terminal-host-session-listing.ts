@@ -3,6 +3,7 @@ import type { Session } from '../sessions/session'
 import type { SessionInfo } from '../protocol/daemon-session-info'
 import type { WslGuestRoot } from '../../../shared/wsl-guest-root-marker'
 import { readWindowsProcessCreationKey } from '../../windows/windows-hook-peer'
+import type { HookResumeIntent } from '../../../shared/agent-hook-listener/state/hook-resume-intent'
 import {
   captureHookLaunchContext,
   type HookLaunchContext
@@ -12,18 +13,28 @@ import {
 const spawnPaneKeys = new WeakMap<Session, string>()
 const hookContexts = new WeakMap<Session, HookLaunchContext>()
 
+export function getSessionHookResumeIntent(session: Session): HookResumeIntent | null | undefined {
+  return hookContexts.get(session)?.resumeIntent
+}
+
 /** Records the ORCA_PANE_KEY a session was spawned with; reattaching never rewrites it. */
 export function recordSessionSpawnPaneKey(
   session: Session,
   paneKey: string | undefined,
   env?: Readonly<Record<string, string>>,
-  cwd?: string
+  cwd?: string,
+  resumeIntent?: HookResumeIntent | null
 ): void {
   if (paneKey) {
     spawnPaneKeys.set(session, paneKey)
   }
   if (!hookContexts.has(session) && cwd) {
-    const context = captureHookLaunchContext(env, cwd, readWindowsProcessCreationKey(session.pid))
+    const context = captureHookLaunchContext(
+      env,
+      cwd,
+      readWindowsProcessCreationKey(session.pid),
+      resumeIntent
+    )
     if (context) {
       hookContexts.set(session, context)
     }

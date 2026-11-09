@@ -2,8 +2,10 @@ import type { AgentSessionOwnerBinding } from '../../shared/agent-session/agent-
 import type { PtyIncarnationId } from '../../shared/terminal/pty/lifecycle/pty-incarnation'
 import type { ForegroundProcessEvidence } from '../../shared/foreground-process-evidence'
 import type { WslGuestRoot } from '../../shared/wsl-guest-root-marker'
+import type { HookResumeIntent } from '../../shared/agent-hook-listener/state/hook-resume-intent'
 
 export type PtyProcessInfo = {
+  hookResumeIntent?: HookResumeIntent | null
   id: string
   incarnationId?: PtyIncarnationId
   /** Host-issued launch capability hash for this exact PTY; absent is unverified. */

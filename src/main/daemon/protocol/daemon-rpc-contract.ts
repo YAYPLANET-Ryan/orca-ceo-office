@@ -1,4 +1,5 @@
 import type { TerminalStartFailure } from '../../../shared/terminal/pty/lifecycle/terminal-start-failure'
+import type { HookResumeIntent } from '../../../shared/agent-hook-listener/state/hook-resume-intent'
 import type {
   AsyncIoHealthRequest,
   FullDiskAccessStatusRequest,
@@ -43,6 +44,7 @@ export type CreateOrAttachRequest = {
     command?: string
     startupCommandDelivery?: StartupCommandDelivery
     launchAgent?: TuiAgent
+    hookResumeIntent?: HookResumeIntent | null
     /** Rejects an absent session instead of interpreting mount uncertainty as create permission. */
     attachOnly?: boolean
     /** Preserve the selected shell instead of defaulting to the daemon’s platform fallback. */

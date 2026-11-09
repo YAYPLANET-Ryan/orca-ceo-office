@@ -2,6 +2,7 @@ import { realpath } from 'node:fs/promises'
 import { isAbsolute, normalize } from 'node:path'
 import type { LocalPtyInventoryReader } from './local-tmux-managed-pty'
 import type { HookContextSnapshotReader } from './server/hook-context-snapshot'
+import { readHookResumeIntent } from '../../shared/agent-hook-listener/state/hook-resume-intent'
 
 export function createLocalHookContextSnapshotReader(
   readInventory: LocalPtyInventoryReader,
@@ -40,6 +41,10 @@ export function createLocalHookContextSnapshotReader(
       return null
     }
     const launchCwd = row.contextCwd
+    const resumeIntent = readHookResumeIntent(row.hookResumeIntent)
+    if (row.hookResumeIntent !== undefined && resumeIntent === undefined) {
+      return null
+    }
     let cwd: string
     try {
       cwd = normalize(await canonicalize(launchCwd))
@@ -62,7 +67,8 @@ export function createLocalHookContextSnapshotReader(
       incarnationId: row.incarnationId,
       launchTokenHash: row.launchTokenHash,
       cwd,
-      reportedCwd: cwd
+      reportedCwd: cwd,
+      ...(resumeIntent !== undefined ? { resumeIntent } : {})
     }
   }
 }

@@ -8,6 +8,7 @@ import {
 } from '../../shared/foreground-process-evidence'
 import type { PtyProcessInfo } from './pty-provider-contract'
 import { readWslGuestRoot } from '../../shared/wsl-guest-root-marker'
+import { readPtyHookContextMetadata } from './pty-hook-context-metadata'
 
 export const MAX_AGGREGATED_PTY_PROCESS_LIST_ENTRIES = 4096
 export const MAX_AGGREGATED_PTY_PROCESS_LIST_BYTES = 32 * 1024 * 1024
@@ -51,6 +52,9 @@ export class PtyProcessListAdmission {
     if (typeof value !== 'object' || value === null) {
       throw new Error('invalid_pty_process_list')
     }
+    const hookMetadata = readPtyHookContextMetadata(value)
+    const hookMetadataBytes =
+      Object.keys(hookMetadata).length > 0 ? Buffer.byteLength(JSON.stringify(hookMetadata)) : 0
     const idBytes = retainedStringBytes(value.id)
     const cwdBytes = retainedStringBytes(value.cwd)
     const titleBytes = retainedStringBytes(value.title)
@@ -118,6 +122,7 @@ export class PtyProcessListAdmission {
       paneKeyBytes +
       wslDistroBytes +
       evidenceBytes +
+      hookMetadataBytes +
       (wslGuestRoot?.startTime.length ?? 0) +
       ownerBytes
     if (
@@ -132,6 +137,7 @@ export class PtyProcessListAdmission {
     this.retainedBytes = nextBytes
 
     return {
+      ...hookMetadata,
       id: value.id,
       cwd: value.cwd,
       title: value.title,

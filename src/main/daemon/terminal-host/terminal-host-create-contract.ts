@@ -1,5 +1,6 @@
 import type { StartupCommandDelivery } from '../../../shared/agent-launch/startup/codex-startup-delivery'
 import type { TuiAgent } from '../../../shared/agent-launch/catalog/tui-agent'
+import type { HookResumeIntent } from '../../../shared/agent-hook-listener/state/hook-resume-intent'
 import type { ShellReadyState } from '../protocol/daemon-rpc-contract'
 import type { TerminalSnapshot } from '../protocol/terminal-snapshot'
 import type { PtyStartupIngressIntent } from '../../../shared/terminal/pty/ingress/pty-startup-ingress-intent'
@@ -21,6 +22,7 @@ export type CreateOrAttachOptions = {
   command?: string
   startupCommandDelivery?: StartupCommandDelivery
   launchAgent?: TuiAgent
+  hookResumeIntent?: HookResumeIntent | null
   /** Missing ownership is not permission to create during stable-pane adoption. */
   attachOnly?: boolean
   shellOverride?: string

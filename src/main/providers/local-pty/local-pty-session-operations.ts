@@ -138,6 +138,7 @@ export async function listLocalPtyProcesses(): Promise<PtyProcessInfo[]> {
           ownerClientInstanceId: ptyHookContexts.get(id)?.ownerClientInstanceId,
           launchTokenHash: ptyHookContexts.get(id)?.launchTokenHash,
           contextCwd: ptyHookContexts.get(id)?.cwd,
+          hookResumeIntent: ptyHookContexts.get(id)?.resumeIntent,
           paneBound: Boolean(ptySpawnPaneKeys.get(id))
         }
       : {}),

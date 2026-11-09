@@ -16,6 +16,11 @@ import { waitForTerminalAttachOperation } from './terminal-attach-cancellation'
 import { resolveWslSessionContext } from '../pty-subprocess/wsl-session-context'
 import { attachSessionInputViewer, isSessionInputClosed } from '../sessions/session-input-path'
 import { describeAgentRestore } from './terminal-host-session-process'
+import { getSessionHookResumeIntent } from './terminal-host-session-listing'
+import {
+  hookResumeIntentsEqual,
+  readHookResumeIntent
+} from '../../../shared/agent-hook-listener/state/hook-resume-intent'
 export type TerminalHostSessionCreateDependencies = {
   sessions: Map<string, Session>
   /** Re-checks the host's shutdown fence and this request's cancellation after any await. */
@@ -34,6 +39,10 @@ export async function createOrAttachTerminalSession(
   opts: InternalCreateOrAttachOptions,
   deps: TerminalHostSessionCreateDependencies
 ): Promise<CreateOrAttachResult> {
+  const requestedResumeIntent = readHookResumeIntent(opts.hookResumeIntent)
+  if (opts.hookResumeIntent !== undefined && requestedResumeIntent === undefined) {
+    throw new Error('invalid_resume_intent')
+  }
   opts.onSessionResolved?.(opts.sessionId)
   let existing = deps.sessions.get(opts.sessionId)
 
@@ -60,6 +69,16 @@ export async function createOrAttachTerminalSession(
   // Checkpoint readers that require settled ownership use getSettledSnapshot.
   if (existing && existing.isAlive && !existing.isTerminating) {
     deps.assertCreateAllowed()
+    const recordedResumeIntent = getSessionHookResumeIntent(existing)
+    if (opts.hookResumeIntent !== undefined && recordedResumeIntent === undefined) {
+      throw new Error('agent_resume_intent_unavailable')
+    }
+    if (
+      opts.hookResumeIntent !== undefined &&
+      !hookResumeIntentsEqual(requestedResumeIntent, recordedResumeIntent)
+    ) {
+      throw new Error('agent_resume_intent_mismatch')
+    }
     const attachedSession = existing
     opts.onPhysicalOwner?.(
       attachedSession.physicalCompletion,
@@ -125,7 +144,7 @@ export async function createOrAttachTerminalSession(
       deps.assertCreateAllowed()
     }
     const result = await spawnAndPublishSession(
-      opts,
+      { ...opts, hookResumeIntent: requestedResumeIntent },
       deps,
       { size, wslDistro },
       (publishedId, isAlive) => lease?.commit(publishedId, isAlive)

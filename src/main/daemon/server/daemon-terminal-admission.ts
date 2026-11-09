@@ -122,6 +122,7 @@ export class DaemonTerminalAdmission {
         startupCommandDelivery: payload.startupCommandDelivery,
         ...(attachOnly ? { attachOnly: true } : {}),
         ...(isTuiAgent(payload.launchAgent) ? { launchAgent: payload.launchAgent } : {}),
+        hookResumeIntent: payload.hookResumeIntent,
         shellOverride: payload.shellOverride,
         terminalShellArgs: payload.terminalShellArgs,
         terminalWindowsWslDistro: payload.terminalWindowsWslDistro,

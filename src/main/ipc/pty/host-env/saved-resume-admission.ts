@@ -1,9 +1,6 @@
-import type { TuiAgent } from '../../../../shared/agent-launch/catalog/tui-agent'
 import {
   normalizeAgentProviderSession,
   agentProviderSessionsEqual,
-  type AgentProviderSessionMetadata,
-  type SleepingAgentLaunchConfig,
   type SleepingAgentSessionRecord
 } from '../../../../shared/agent-session/lifecycle/agent-session-resume'
 import type {
@@ -23,17 +20,8 @@ import {
   terminalConversationKey
 } from '../../../native-chat/structured-conversation-key'
 
-export type ResumeSpawnArgs = {
-  connectionId?: string | null
-  command?: string
-  launchAgent?: TuiAgent
-  launchConfig?: SleepingAgentLaunchConfig
-  launchToken?: unknown
-  resumeProviderSession?: AgentProviderSessionMetadata
-  /** `saved`: the resume was built from a pane's saved facts, not asked for by the user. */
-  resumeOrigin?: unknown
-  env?: Record<string, string>
-}
+import type { ResumeSpawnArgs } from './saved-resume-launch-args'
+export type { ResumeSpawnArgs } from './saved-resume-launch-args'
 
 type AdmissionRuntime = {
   getAgentProviderSessionRows?(): AgentStatusIpcPayload[]
@@ -178,6 +166,7 @@ export function dropAgentLaunch(args: ResumeSpawnArgs): void {
   delete args.launchConfig
   delete args.launchToken
   delete args.resumeProviderSession
+  delete args.hookResumeIntent
 }
 
 export function resumeSpawnRefusal(

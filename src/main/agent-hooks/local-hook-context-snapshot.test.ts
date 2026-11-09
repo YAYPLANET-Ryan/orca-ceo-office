@@ -32,6 +32,34 @@ function envelope(reported = cwd): ParsedHookEnvelope {
 }
 
 describe('trusted local hook context snapshot', () => {
+  it.each([null, { agentType: 'codex' as const, providerSessionId: 'original-conversation' }])(
+    'takes declared intent only from the exact host-owned inventory row',
+    async (hookResumeIntent) => {
+      const read = createLocalHookContextSnapshotReader(
+        async () => ({ ...row, hookResumeIntent }),
+        async (path) => path,
+        'client-b'
+      )
+      expect(await read(envelope())).toMatchObject({ resumeIntent: hookResumeIntent })
+    }
+  )
+
+  it('rejects malformed host intent instead of silently treating it as a fresh launch', async () => {
+    const read = createLocalHookContextSnapshotReader(
+      async () => ({
+        ...row,
+        hookResumeIntent: {
+          agentType: 'codex',
+          providerSessionId: 'original-conversation',
+          command: 'synthetic-extra-field'
+        }
+      }),
+      async (path) => path,
+      'client-b'
+    )
+    expect(await read(envelope())).toBeNull()
+  })
+
   it('does not let an unrouted duplicate shadow the established PTY route', async () => {
     const inventory = createLocalPtyInventoryReader({
       getPtyId: () => 'pty',

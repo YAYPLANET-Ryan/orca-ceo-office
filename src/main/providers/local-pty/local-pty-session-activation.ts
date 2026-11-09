@@ -75,7 +75,8 @@ export function activateLocalPtySession(args: {
   const hookContext = captureHookLaunchContext(
     env,
     plan.cwd,
-    readWindowsProcessCreationKey(proc.pid)
+    readWindowsProcessCreationKey(proc.pid),
+    spawn.hookResumeIntent
   )
   if (hookContext) {
     ptyHookContexts.set(id, hookContext)
