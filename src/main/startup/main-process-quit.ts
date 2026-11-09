@@ -1,9 +1,6 @@
 import { killWslChannelsInCloseGrace } from '../wsl/execution/wsl-command-channel'
 import { markHostShuttingDown } from './quit/host-shutdown-state'
 import { app, type Event } from 'electron'
-import { closeAllWatchers } from '../ipc/filesystem/watchers/filesystem-watcher-shutdown'
-import { disposeWorktreeBaseDirectoryWatchers } from '../ipc/worktrees/creation/worktree-base-directory-watcher'
-import { stopFolderRepoGitUpgradeWatch } from '../ipc/folder-repo-git-upgrade'
 import { killAllPty } from '../ipc/pty/kill-all'
 import {
   disconnectDaemon,
@@ -40,39 +37,15 @@ import { mainProcessState as state } from './main-process-state'
 import { isDevParentShutdownRequested } from './configure-process'
 import { getCanonicalUserDataPath } from '../persistence/loading-store/user-data-path'
 import { flushUnsavedCloudSessions } from '../orca-profiles/profile-cloud-session-owner'
+import { stopProviderObservationIngressForQuit } from '../agent-hooks/provider-observation-quit-drain'
+import { shutdownWatchersOnce } from './quit/shutdown-watchers-once'
 
 // First will-quit pass awaits teardown; the re-fired pass must exit without starting writes again.
 let daemonDisconnectDone = false
-let watcherShutdownPromise: Promise<void> | null = null
 // Config deletion is best effort, not durable state.
 const GROK_HOOK_CLEANUP_DEADLINE_MS = 2_000
 // Allow pack-refs time to terminate and unlink its lock.
 const REF_MAINTENANCE_QUIT_DEADLINE_MS = 2_000
-
-function shutdownWatchersOnce(): Promise<void> {
-  if (state.watcherShutdownDone) {
-    return Promise.resolve()
-  }
-  if (!watcherShutdownPromise) {
-    // Await native watcher unsubscribe before Node environment teardown.
-    stopFolderRepoGitUpgradeWatch()
-    watcherShutdownPromise = Promise.allSettled([
-      closeAllWatchers(),
-      disposeWorktreeBaseDirectoryWatchers()
-    ])
-      .then((results) => {
-        for (const result of results) {
-          if (result.status === 'rejected') {
-            console.error('[filesystem-watcher] shutdown failed:', result.reason)
-          }
-        }
-      })
-      .then(() => {
-        state.watcherShutdownDone = true
-      })
-  }
-  return watcherShutdownPromise
-}
 
 function installBeforeQuitHandler(): void {
   app.on('before-quit', (event: Event) => {
@@ -166,7 +139,10 @@ function installWillQuitHandler(): void {
     // Deletes may take minutes; stop now and let durable records resume them next launch.
     stopBackgroundWorktreeRemovals()
     // Chat teardown reads background work afterward; clearing status loses subagent/command-only resume offers.
-    agentHookServer.stop({ keepStatus: true })
+    wslHookRelayManager.disposeAll()
+    killWslChannelsInCloseGrace()
+    const hookStop = stopProviderObservationIngressForQuit(agentHookServer, { keepStatus: true })
+    const providerObservationDrain = hookStop.drain
     // Windows bare hook paths lack POSIX ORCA_PANE_KEY guards, so remove Grok hooks on quit; bound cleanup because GROK_HOME can be a stalled network mount.
     const grokHookCleanup =
       process.platform === 'win32'
@@ -188,10 +164,6 @@ function installWillQuitHandler(): void {
             }
           })
         : Promise.resolve()
-    // Dispose relay timers and wsl.exe children explicitly rather than rely on pipe teardown.
-    wslHookRelayManager.disposeAll()
-    // A closed WSL-host channel still in its EOF grace must not outlive the app.
-    killWslChannelsInCloseGrace()
     const statsFlush = state.stats?.flushAsync() ?? Promise.resolve()
     // Await per-session close children so browser daemons cannot retain ports/state after quit (#16367); retire headless owners first to avoid duplicate fanout.
     const browserShutdown = (async (): Promise<void> => {
@@ -220,8 +192,10 @@ function installWillQuitHandler(): void {
         try {
           await finalStore.flushFinalOrThrowAsync()
           await finalStore.freezeWritesAsync()
-          state.profileStateAdmission?.release()
-          state.profileStateAdmission = undefined
+          if (hookStop.errors.length === 0) {
+            state.profileStateAdmission?.release()
+            state.profileStateAdmission = undefined
+          }
         } catch (error) {
           console.error('[persistence] Failed to finalize profile state:', error)
         }
@@ -229,8 +203,11 @@ function installWillQuitHandler(): void {
       return { sshShutdown, watcherShutdown, storeFlush }
     }
     // Flush pending pane grids first (bounded at 1s); without one, begin final save synchronously.
-    const finalSaves = paneGridFlush
-      ? paneGridFlush.then(beginSshShutdownAndFinalSave)
+    const finalSaveBarrier = providerObservationDrain
+      ? Promise.all([paneGridFlush, providerObservationDrain])
+      : paneGridFlush
+    const finalSaves = finalSaveBarrier
+      ? finalSaveBarrier.then(beginSshShutdownAndFinalSave)
       : beginSshShutdownAndFinalSave()
     const sshShutdown = Promise.resolve(finalSaves).then((saves) => saves.sshShutdown)
     const storeFlush = Promise.resolve(finalSaves).then((saves) => saves.storeFlush)
@@ -266,9 +243,20 @@ function installWillQuitHandler(): void {
       rpcStopAndClear
     ]).then(() => state.runtime?.closeNotificationDismissals())
     // Normal quits preserve the detached daemon for warm reattach; dev-parent death leaves its temporary profile ownerless.
-    const daemonTeardown = isDevParentShutdownRequested() ? shutdownDaemon() : disconnectDaemon()
+    const teardownDaemon = () =>
+      isDevParentShutdownRequested() ? shutdownDaemon() : disconnectDaemon()
+    const daemonTeardown = providerObservationDrain
+      ? providerObservationDrain.then(teardownDaemon)
+      : teardownDaemon()
     // Bound unsettled transports and final writes so quit cannot hang (#9447). Failures still exit; atomic swaps preserve old files if the final debounce is lost.
     settleTeardownWithinDeadline([
+      {
+        name: 'hook-ingress',
+        promise:
+          hookStop.errors.length > 0
+            ? Promise.reject(new AggregateError(hookStop.errors, 'hook_ingress_stop_failed'))
+            : Promise.resolve()
+      },
       { name: 'daemon', promise: daemonTeardown },
       { name: 'browser', promise: browserShutdown },
       { name: 'runtime-rpc', promise: rpcStopAndClear },

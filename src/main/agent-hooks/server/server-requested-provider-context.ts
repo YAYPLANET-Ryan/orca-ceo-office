@@ -23,6 +23,10 @@ export abstract class AgentHookServerRequestedProviderContext extends AgentHookS
   flushProviderObservations(): Promise<boolean> {
     return this.providerObservations.flush()
   }
+
+  get hasPendingProviderObservations(): boolean {
+    return this.providerObservations.hasPending
+  }
   retireRequestedProviderIntent(ptyId: string, incarnationId: string | undefined): void {
     this.requestedProviderIntents.retire(ptyId, incarnationId)
     this.providerObservations.retire(ptyId, incarnationId)

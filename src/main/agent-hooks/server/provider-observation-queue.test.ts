@@ -183,6 +183,22 @@ it('reports overflow without evicting pending transitions or claiming a successf
   expect(await queue.flush()).toBe(false)
 })
 
+it('does not acknowledge a pending write discarded by physical exit during the flush', async () => {
+  const queue = new ProviderObservationQueue(vi.fn())
+  let complete!: (value: HookProviderObservation) => void
+  queue.setWriter(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve
+      })
+  )
+  queue.enqueue(initial)
+  const flushing = queue.flush()
+  queue.retire(initial.ptyId, initial.incarnationId)
+  complete(receipt(initial))
+  expect(await flushing).toBe(false)
+})
+
 it('cannot retire a pending generation using a missing or foreign exit incarnation', async () => {
   const queue = new ProviderObservationQueue(vi.fn())
   queue.setWriter(async () => null)

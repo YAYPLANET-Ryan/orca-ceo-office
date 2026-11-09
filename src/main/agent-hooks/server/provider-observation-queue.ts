@@ -23,10 +23,16 @@ type PendingScope = {
 export class ProviderObservationQueue {
   private readonly scopes = new Map<string, PendingScope>()
   private writer: ProviderObservationWriter | undefined
+  // A dropped transition stays unqualified even after ordinary jobs drain.
   private overflowed = false
   private pendingCount = 0
+  private pendingRetirementRevision = 0
 
   constructor(private readonly unavailable: () => void) {}
+
+  get hasPending(): boolean {
+    return this.pendingCount > 0 || this.overflowed
+  }
 
   setWriter(writer: ProviderObservationWriter): void {
     this.writer = writer
@@ -39,6 +45,9 @@ export class ProviderObservationQueue {
     for (const [key, scope] of this.scopes) {
       if (scope.ptyId === ptyId && scope.incarnationId === incarnationId) {
         scope.retired = true
+        if (scope.jobs.length > 0) {
+          this.pendingRetirementRevision++
+        }
         this.pendingCount -= scope.jobs.length
         scope.jobs = []
         this.scopes.delete(key)
@@ -99,12 +108,17 @@ export class ProviderObservationQueue {
     if (!this.writer) {
       return false
     }
+    const retirementRevision = this.pendingRetirementRevision
     // One attempt per pending scope: failed writes remain queued, without a retry loop.
     const attempts = [...this.scopes.values()]
       .filter((scope) => scope.jobs.length > 0)
       .map((scope) => this.start(scope))
     await Promise.all(attempts)
-    return !this.overflowed && this.pendingCount === 0
+    return (
+      !this.overflowed &&
+      this.pendingCount === 0 &&
+      retirementRevision === this.pendingRetirementRevision
+    )
   }
 
   private start(scope: PendingScope): Promise<void> {

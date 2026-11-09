@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, expect, it, vi } from 'vitest'
 import { WILL_QUIT_TEARDOWN_DEADLINE_MS } from '../../shared/quit-teardown-deadline'
+import { createQuitRuntimeFixture as quitRuntime } from './testing/main-process-quit-runtime-fixture'
 
 const settled = () => vi.fn(async () => {})
 const idle = () => vi.fn()
@@ -8,22 +9,37 @@ const stopAgentHookServer = idle()
 const stopStructuredAgentSessionRuntime = settled()
 const beginSshShutdown = settled()
 const killAllPty = idle()
+const quitEffects = { ptyAttached: true, daemonConnected: true, saved: false }
+let pendingObservations = false
+const flushProviderObservations = vi.fn(async () => true)
 /** Final-save calls seen by the first microtask after the SSH shutdown began. */
 let flushesByNextMicrotask = -1
 
 // Every teardown member settles except the profile store, so only the writer can hold quit.
 const dependencies: Record<string, Record<string, unknown>> = {
-  '../ipc/filesystem-watcher': { closeAllWatchers: settled() },
-  '../ipc/worktree-base-directory-watcher': { disposeWorktreeBaseDirectoryWatchers: settled() },
+  '../ipc/filesystem/watchers/filesystem-watcher-shutdown': { closeAllWatchers: settled() },
+  '../ipc/worktrees/creation/worktree-base-directory-watcher': {
+    disposeWorktreeBaseDirectoryWatchers: settled()
+  },
   '../ipc/folder-repo-git-upgrade': { stopFolderRepoGitUpgradeWatch: idle() },
   '../ipc/pty/kill-all': { killAllPty },
   '../daemon/providers/lifecycle/daemon-provider-state': {
-    disconnectDaemon: settled(),
+    disconnectDaemon: vi.fn(async () => {
+      quitEffects.daemonConnected = false
+    }),
     shutdownDaemon: settled()
   },
   '../ipc/ssh/ssh-shutdown-drain': { beginSshShutdown },
   './main-process-connector-startup': { desktopConnectorCloud: () => null },
-  '../agent-hooks/server': { agentHookServer: { stop: stopAgentHookServer } },
+  '../agent-hooks/server': {
+    agentHookServer: {
+      stop: stopAgentHookServer,
+      flushProviderObservations,
+      get hasPendingProviderObservations() {
+        return pendingObservations
+      }
+    }
+  },
   '../agent-hooks/wsl-hook-relay-manager': { wslHookRelayManager: { disposeAll: idle() } },
   '../agent-hooks/managed-agent-hook-controls': {
     removeManagedAgentHooksAsync: vi.fn(async () => [])
@@ -48,16 +64,20 @@ const dependencies: Record<string, Record<string, unknown>> = {
   '../browser/routing/local-host-partitions/local-ssh-browser-route': {
     closeAllLocalSshBrowserRoutes: settled()
   },
-  '../codex/codex-state-db-backfill-recovery': { stopCodexStateDbBackfillRecoveries: settled() },
-  '../codex/codex-account-session-bridge': { stopCodexAccountSessionBridges: idle() },
+  '../codex/history/index/codex-state-db-backfill-recovery': {
+    stopCodexStateDbBackfillRecoveries: settled()
+  },
+  '../codex/history/bridges/codex-account-session-bridge': {
+    stopCodexAccountSessionBridges: idle()
+  },
   '../git/refs/maintenance/local-repo-ref-maintenance': { awaitPackedRefsLockRelease: settled() },
-  '../worktree-background-removal': { stopBackgroundWorktreeRemovals: idle() },
+  '../workspaces/removal/worktree-background-removal': { stopBackgroundWorktreeRemovals: idle() },
   '../dock/unread-badge': { setUnreadDockBadgeCount: idle() },
   '../tray/system-tray': { destroySystemTray: idle() },
   '../telemetry/client': { shutdownTelemetry: settled() },
   '../observability': { shutdownObservability: settled() },
-  '../updater': { isQuittingForUpdate: vi.fn(() => false) },
-  '../updater-lifecycle-diagnostics': { recordUpdaterLifecycle: idle() },
+  '../updater/updater-service': { isQuittingForUpdate: vi.fn(() => false) },
+  '../updater/updater-lifecycle-diagnostics': { recordUpdaterLifecycle: idle() },
   '../macos-permissions/macos-tcc-prompt-notice': { stopTccPromptNotice: idle() },
   '../pty/history/terminal-history-gc': { cancelHistoryGc: idle() },
   './window-all-closed-quit-policy': { shouldQuitWhenAllWindowsClosed: vi.fn(() => false) },
@@ -80,10 +100,17 @@ afterEach(() => {
 
 async function startQuit(
   flushFinalOrThrowAsync: () => Promise<void>,
-  services: Record<string, unknown> = {}
+  services: Record<string, unknown> = {},
+  observations?: () => Promise<boolean>
 ) {
   beginSshShutdown.mockClear()
   killAllPty.mockClear()
+  Object.assign(quitEffects, { ptyAttached: true, daemonConnected: true, saved: false })
+  killAllPty.mockImplementation(() => {
+    quitEffects.ptyAttached = false
+  })
+  pendingObservations = observations !== undefined
+  flushProviderObservations.mockImplementation(observations ?? (async () => true))
   flushesByNextMicrotask = -1
   vi.resetModules()
   vi.useFakeTimers()
@@ -121,6 +148,53 @@ async function startQuit(
   return { app, admission, store, state }
 }
 
+it('keeps the owned attachment until the final provider observation is acknowledged', async () => {
+  const observation = Promise.withResolvers<boolean>()
+  await startQuit(
+    async () => {
+      quitEffects.saved = true
+    },
+    {},
+    () => observation.promise
+  )
+  await vi.advanceTimersByTimeAsync(0)
+  expect(quitEffects).toEqual({ ptyAttached: true, daemonConnected: true, saved: false })
+  observation.resolve(true)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(quitEffects).toEqual({ ptyAttached: false, daemonConnected: false, saved: true })
+})
+
+it.each([
+  ['unreachable', 'timed-out'],
+  ['exception', 'failed'],
+  ['stop', 'timed-out']
+])('reports %s without preventing bounded normal teardown', async (failure, outcome) => {
+  if (failure === 'stop') {
+    stopAgentHookServer.mockImplementationOnce(() => {
+      throw new Error('Synthetic stop failure')
+    })
+  }
+  const { state, admission } = await startQuit(
+    async () => {
+      quitEffects.saved = true
+    },
+    {},
+    () => {
+      if (failure === 'exception') {
+        throw new Error('Synthetic failure')
+      }
+      return new Promise<boolean>(() => {})
+    }
+  )
+  await vi.runAllTimersAsync()
+  expect(quitEffects).toEqual({ ptyAttached: false, daemonConnected: false, saved: true })
+  expect(state.profileStateAdmission).toBe(failure === 'stop' ? admission : undefined)
+  expect(console.warn).toHaveBeenCalledWith(
+    '[agent-hooks] Provider observation acknowledgement incomplete at quit',
+    { outcome }
+  )
+})
+
 it('quits at the teardown deadline without releasing admission while the writer is pending', async () => {
   const { app, admission, store, state } = await startQuit(() => new Promise<void>(() => {}))
   await vi.advanceTimersByTimeAsync(WILL_QUIT_TEARDOWN_DEADLINE_MS - 1)
@@ -136,18 +210,32 @@ it('quits at the teardown deadline without releasing admission while the writer 
   expect(state.profileStateAdmission).toBe(admission)
 })
 
+it('joins pane-grid and observation drains before final save while detaching after acknowledgement', async () => {
+  const panes = Promise.withResolvers<void>()
+  const observation = Promise.withResolvers<boolean>()
+  await startQuit(
+    async () => {
+      quitEffects.saved = true
+    },
+    {
+      runtime: quitRuntime(() => panes.promise)
+    },
+    () => observation.promise
+  )
+  await vi.advanceTimersByTimeAsync(0)
+  expect(quitEffects).toEqual({ ptyAttached: true, daemonConnected: true, saved: false })
+  observation.resolve(true)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(quitEffects).toEqual({ ptyAttached: true, daemonConnected: false, saved: false })
+  panes.resolve()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(quitEffects).toEqual({ ptyAttached: false, daemonConnected: false, saved: true })
+})
+
 it('writes a pane grid still inside its write burst before the final flush', async () => {
   const paneGrids = Promise.withResolvers<void>()
   const { store } = await startQuit(async () => {}, {
-    runtime: {
-      getOffscreenBrowserBackend: () => null,
-      getAgentBrowserBridge: () => null,
-      getEmulatorBridge: () => null,
-      disposeSkillUploadSessions: settled(),
-      getRuntimeId: () => undefined,
-      closeNotificationDismissals: settled(),
-      flushPaneGrids: () => paneGrids.promise
-    }
+    runtime: quitRuntime(() => paneGrids.promise)
   })
   await vi.advanceTimersByTimeAsync(0)
   // Before the SSH shutdown too: nothing is awaited between it and the final save.
@@ -177,15 +265,7 @@ it.each([
     stopStructuredAgentSessionRuntime.mockImplementationOnce(() => sessionTeardown.promise)
     const closeNotificationDismissals = vi.fn(() => new Promise<void>(() => {}))
     const { app } = await startQuit(async () => {}, {
-      runtime: {
-        getOffscreenBrowserBackend: () => null,
-        getAgentBrowserBridge: () => null,
-        getEmulatorBridge: () => null,
-        disposeSkillUploadSessions: settled(),
-        getRuntimeId: () => undefined,
-        closeNotificationDismissals,
-        flushPaneGrids: () => null
-      },
+      runtime: quitRuntime(() => null, closeNotificationDismissals),
       runtimeRpc: { setMobileRelayPairingProvider: idle(), stop: vi.fn(() => rpcStop.promise) }
     })
     expect(stopStructuredAgentSessionRuntime).toHaveBeenCalledOnce()

@@ -190,7 +190,8 @@ it('recovers a lost acknowledgement through a fresh owner-checked idempotent RPC
   expect((await client.listProcesses())[0]?.providerObservation?.revision).toBe(1)
 })
 
-it('restores an acknowledged clear in a new hook server using the same physical daemon session', async () => {
+it('drains a pending clear after hook stop and restores the same physical session in a new server', async () => {
+  const releaseClear = Promise.withResolvers<void>()
   async function hookServer(adapter: DaemonPtyAdapter) {
     const server = new AgentHookServer()
     hookServers.push(server)
@@ -207,9 +208,13 @@ it('restores an acknowledged clear in a new hook server using the same physical 
       verdict: 'root',
       binding: update.incarnationId
     }))
-    server.setProviderObservationWriter(
-      createLocalProviderObservationWriter(inventory, () => adapter)
-    )
+    const write = createLocalProviderObservationWriter(inventory, () => adapter)
+    server.setProviderObservationWriter(async (observation) => {
+      if (observation.transition === 'clear') {
+        await releaseClear.promise
+      }
+      return write(observation)
+    })
     return server
   }
   async function post(
@@ -246,7 +251,11 @@ it('restores an acknowledged clear in a new hook server using the same physical 
   await post(original, 'original-conversation')
   expect(await original.flushProviderObservations()).toBe(true)
   await post(original, 'cleared-conversation', 'SessionStart', 'clear')
-  expect(await original.flushProviderObservations()).toBe(true)
+  expect(original.hasPendingProviderObservations).toBe(true)
+  original.stop({ keepStatus: true })
+  const draining = original.flushProviderObservations()
+  releaseClear.resolve()
+  expect(await draining).toBe(true)
   expect((await harness.adapter.listProcesses())[0]?.providerObservation).toMatchObject({
     revision: 2,
     providerSessionId: 'cleared-conversation'

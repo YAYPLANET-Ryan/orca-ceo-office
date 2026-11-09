@@ -64,6 +64,8 @@ jobs:
             'src/main/agent-hooks/server-requested-provider-identity.test.ts'
             'src/main/agent-hooks/server/requested-provider-intent-fence.test.ts'
             'src/main/agent-hooks/server/provider-observation-queue.test.ts'
+            'src/main/agent-hooks/provider-observation-quit-drain.test.ts'
+            'src/main/startup/main-process-quit-pending-writer.test.ts'
             'src/main/providers/pty-provider-observation-metadata.test.ts'
             'src/shared/agent-hook-listener/state/hook-provider-observation.test.ts'
             'src/main/daemon/terminal-host/testing/terminal-host-provider-observation.test.ts'
