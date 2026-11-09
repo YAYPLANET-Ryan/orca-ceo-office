@@ -57,6 +57,7 @@ jobs:
             'src/main/agent-hooks/server/resume-launch-recipe-journal.test.ts'
             'src/main/agent-hooks/server/resume-launch-recipe-recovery.test.ts'
             'src/main/agent-hooks/server-unverified-resume-recipes.test.ts'
+            'src/main/agent-hooks/server-admitted-resume-continuity.test.ts'
             'src/main/agent-hooks/hook-resume-intent.test.ts'
             'src/main/providers/pty-process-list-admission.test.ts'
             'src/main/daemon/providers/adapter/testing/daemon-pty-resume-intent.test.ts'
