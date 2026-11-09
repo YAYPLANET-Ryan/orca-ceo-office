@@ -62,7 +62,7 @@ it('retains unknown resume diagnostics after server restart without promoting a 
         providerSession: { key: 'session_id', id: 'unverified-original' },
         launchedAt: 1
       })
-    ).toBe('refused')
+    ).toBe('recorded')
     expect(server.getProviderSessionIdentities()).toEqual([])
     expect(server.getContextIntegritySummary()).toMatchObject({
       version: 1,

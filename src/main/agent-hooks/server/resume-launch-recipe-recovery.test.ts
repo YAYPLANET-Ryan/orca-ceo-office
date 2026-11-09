@@ -74,6 +74,61 @@ it('preserves an unrecognized zero-byte file instead of claiming a new journal',
   expect(() => readFileSync(`${file}.owner-v1.json`)).toThrow()
 })
 
+it('retries a tab tombstone after an unreadable journal without resurrecting its recipe', () => {
+  const journal = new ResumeLaunchRecipeJournal(file, PROFILE)
+  expect(journal.record(event)).toBe(true)
+  expect(journal.flush()).toBe(true)
+  const originalBytes = readFileSync(file)
+  writeFileSync(file, 'Synthetic unreadable fixture')
+  expect(journal.markTabClosed('tab-1', 1000)).toBe(false)
+  expect(journal.hasPending).toBe(true)
+  writeFileSync(file, originalBytes)
+  expect(journal.flush()).toBe(true)
+  expect(journal.hasPending).toBe(false)
+  expect(new ResumeLaunchRecipeJournal(file, PROFILE).snapshot().recipes).toMatchObject([
+    { providerSession: { id: 'original-conversation' }, closedAt: 1000 }
+  ])
+})
+
+it('does not apply a parked closure to a later launch in a reused tab', () => {
+  const journal = new ResumeLaunchRecipeJournal(file, PROFILE)
+  const blocked = vi.spyOn(journal, 'flush').mockReturnValue(false)
+  expect(journal.markTabClosed('tab-1', 1000)).toBe(false)
+  expect(journal.record({ ...event, launchedAt: 2000 })).toBe(true)
+  expect(journal.snapshot().recipes[0]?.closedAt).toBeUndefined()
+  blocked.mockRestore()
+  expect(journal.flush()).toBe(true)
+  expect(
+    new ResumeLaunchRecipeJournal(file, PROFILE).snapshot().recipes[0]?.closedAt
+  ).toBeUndefined()
+})
+
+it('retains the first durable closure time when a reused tab closes again', () => {
+  const journal = new ResumeLaunchRecipeJournal(file, PROFILE)
+  journal.record(event)
+  expect(journal.markTabClosed('tab-1', 1000)).toBe(true)
+  expect(journal.markTabClosed('tab-1', 3000)).toBe(true)
+  expect(journal.snapshot().recipes[0]?.closedAt).toBe(1000)
+  expect(new ResumeLaunchRecipeJournal(file, PROFILE).snapshot().recipes[0]?.closedAt).toBe(1000)
+})
+
+it('commits queued recipes and known closures after closure overflow without acknowledging the lost closure', () => {
+  const journal = new ResumeLaunchRecipeJournal(file, PROFILE)
+  journal.record(event)
+  const blocked = vi.spyOn(journal, 'flush').mockReturnValue(false)
+  journal.markTabClosed('tab-1', 1000)
+  for (let index = 0; index < 1024; index++) {
+    journal.markTabClosed(`other-tab-${index}`, 1000)
+  }
+  blocked.mockRestore()
+  expect(journal.flush()).toBe(false)
+  expect(journal.lastRefusal).toBe('capacity')
+  expect(journal.snapshot().unavailable).toBe(true)
+  expect(new ResumeLaunchRecipeJournal(file, PROFILE).snapshot().recipes).toMatchObject([
+    { providerSession: { id: 'original-conversation' }, closedAt: 1000 }
+  ])
+})
+
 it.each(['malformed', 'foreign'] as const)(
   'preserves a %s ownership marker and its database',
   (kind) => {
@@ -115,6 +170,7 @@ async function interruptSqliteFixture(statements: string[]): Promise<void> {
     execPath: process.execPath,
     execArgv: [],
     env: {},
+    windowsHide: true,
     stdio: ['ignore', 'ignore', 'ignore', 'ipc']
   })
   try {

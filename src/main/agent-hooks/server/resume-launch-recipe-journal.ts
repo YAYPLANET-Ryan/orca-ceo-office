@@ -6,6 +6,7 @@ import { parsePaneKey } from '../../../shared/workspace-layout/stable-pane-id'
 import type { LaunchResumeIdentityEvent } from './launch-resume-identity-event'
 import {
   decodeResumeLaunchRecipe,
+  isValidResumeRecipeClosure,
   projectResumeLaunchRecipe,
   resumeLaunchRecipeKey,
   type UnverifiedResumeLaunchRecipe
@@ -34,10 +35,20 @@ type RecipeEntry = { recipe: UnverifiedResumeLaunchRecipe; closedAt?: number }
 /** Separate from status caches and provider authority; a full journal never evicts original IDs. */
 export class ResumeLaunchRecipeJournal {
   private readonly pending = new Map<string, RecipeEntry>()
+  private readonly pendingClosures = new Map<string, number>()
+  private closureCapacityExceeded = false
   private refusal: 'none' | 'invalid-input' | 'capacity' | 'storage-unavailable' = 'none'
 
   get lastRefusal() {
     return this.refusal
+  }
+
+  get hasPending(): boolean {
+    return this.pending.size > 0 || this.pendingClosures.size > 0 || this.closureCapacityExceeded
+  }
+
+  belongsTo(file: string, profileId: string): boolean {
+    return this.file === file && this.profileId === profileId
   }
 
   constructor(
@@ -61,7 +72,7 @@ export class ResumeLaunchRecipeJournal {
       return false
     }
     this.pending.set(key, this.pending.get(key) ?? { recipe })
-    this.refusal = 'none'
+    this.refusal = this.closureCapacityExceeded ? 'capacity' : 'none'
     return true
   }
 
@@ -80,48 +91,45 @@ export class ResumeLaunchRecipeJournal {
       entries.set(key, { ...entry, ...(closedAt > 0 ? { closedAt } : {}) })
     }
     return {
-      unavailable,
-      pending: this.pending.size > 0,
+      unavailable: unavailable || this.closureCapacityExceeded,
+      pending: this.hasPending,
       recipes: [...entries.values()]
         .filter(({ recipe }) => paneKey === undefined || recipe.paneKey === paneKey)
-        .map(({ recipe, closedAt }) => ({
-          ...recipe,
-          providerSession: { ...recipe.providerSession },
-          ...(closedAt !== undefined ? { closedAt } : {})
-        }))
+        .map(({ recipe, closedAt }) => {
+          const closure = this.pendingClosures.get(parsePaneKey(recipe.paneKey)?.tabId ?? '')
+          const effectiveClosure =
+            closedAt ?? (closure !== undefined && closure >= recipe.launchedAt ? closure : 0)
+          return {
+            ...recipe,
+            providerSession: { ...recipe.providerSession },
+            ...(effectiveClosure > 0 ? { closedAt: effectiveClosure } : {})
+          }
+        })
     }
   }
 
   markTabClosed(tabId: string, closedAt: number): boolean {
-    if (!Number.isSafeInteger(closedAt) || closedAt <= 0) {
+    if (!isValidResumeRecipeClosure(tabId, closedAt)) {
       return false
     }
-    let snapshot = this.snapshot()
-    if (snapshot.unavailable) {
-      this.flush()
-      snapshot = this.snapshot()
+    if (!this.pendingClosures.has(tabId) && this.pendingClosures.size >= MAX_RECIPES) {
+      this.closureCapacityExceeded = true
+      this.refusal = 'capacity'
+      return false
     }
-    for (const { closedAt: previous, ...recipe } of snapshot.recipes) {
-      if (parsePaneKey(recipe.paneKey)?.tabId !== tabId) {
-        continue
-      }
-      this.pending.set(resumeLaunchRecipeKey(recipe), {
-        recipe,
-        closedAt: Math.max(closedAt, previous ?? 0)
-      })
-    }
-    return !snapshot.unavailable && this.flush()
+    this.pendingClosures.set(tabId, Math.max(closedAt, this.pendingClosures.get(tabId) ?? 0))
+    return this.flush()
   }
 
   flush(): boolean {
-    if (this.pending.size === 0) {
+    if (this.pending.size === 0 && this.pendingClosures.size === 0) {
       try {
         this.readSaved()
         if (existsSync(this.file)) {
           markRecipeJournalReady(this.file, this.profileId)
         }
-        this.refusal = 'none'
-        return true
+        this.refusal = this.closureCapacityExceeded ? 'capacity' : 'none'
+        return !this.closureCapacityExceeded
       } catch (error) {
         try {
           const state = inspectOwnedRecipeJournal(this.file, this.profileId)
@@ -170,7 +178,7 @@ export class ResumeLaunchRecipeJournal {
       } else if (version !== 1 || application !== RECIPE_JOURNAL_APPLICATION_ID) {
         throw new Error('Unsupported resume recipe schema')
       }
-      this.readRows(db)
+      const savedRows = this.readRows(db)
       let count = Number(db.prepare('SELECT count(*) AS count FROM resume_recipes').get()?.count)
       const committedKeys: string[] = []
       for (const [key, entry] of this.pending) {
@@ -192,12 +200,16 @@ export class ResumeLaunchRecipeJournal {
             entry.closedAt ?? null
           )
           count++
-        } else if (entry.closedAt !== undefined) {
-          db.prepare(
-            'UPDATE resume_recipes SET closed_at=MAX(COALESCE(closed_at,0),?) WHERE recipe_key=?'
-          ).run(entry.closedAt, key)
         }
         committedKeys.push(key)
+      }
+      for (const { recipe } of [...savedRows, ...this.pending.values()]) {
+        const closedAt = this.pendingClosures.get(parsePaneKey(recipe.paneKey)?.tabId ?? '')
+        if (closedAt !== undefined && closedAt >= recipe.launchedAt) {
+          db.prepare(
+            'UPDATE resume_recipes SET closed_at=COALESCE(closed_at,?) WHERE recipe_key=?'
+          ).run(closedAt, resumeLaunchRecipeKey(recipe))
+        }
       }
       db.exec('COMMIT')
       hardenSqliteDatabaseFiles(this.file)
@@ -205,8 +217,16 @@ export class ResumeLaunchRecipeJournal {
       for (const key of committedKeys) {
         this.pending.delete(key)
       }
-      this.refusal = this.pending.size > 0 ? 'capacity' : 'none'
-      return this.pending.size === 0
+      const unresolvedTabs = new Set(
+        [...this.pending.values()].map(({ recipe }) => parsePaneKey(recipe.paneKey)?.tabId)
+      )
+      for (const tabId of this.pendingClosures.keys()) {
+        if (!unresolvedTabs.has(tabId)) {
+          this.pendingClosures.delete(tabId)
+        }
+      }
+      this.refusal = this.pending.size > 0 || this.closureCapacityExceeded ? 'capacity' : 'none'
+      return this.pending.size === 0 && !this.closureCapacityExceeded
     } catch {
       this.refusal = 'storage-unavailable'
       if (db?.isTransaction) {

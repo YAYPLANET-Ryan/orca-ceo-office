@@ -20,6 +20,15 @@ function boundedText(value: unknown, limit: number): value is string {
   )
 }
 
+export function isValidResumeRecipeClosure(tabId: string, closedAt: number): boolean {
+  return (
+    boundedText(tabId, MAX_PANE_KEY_LEN) &&
+    tabId === tabId.trim() &&
+    Number.isSafeInteger(closedAt) &&
+    closedAt > 0
+  )
+}
+
 /** A resume request is history metadata, never evidence that a process owns its provider ID. */
 export function projectResumeLaunchRecipe(
   event: LaunchResumeIdentityEvent
@@ -28,8 +37,10 @@ export function projectResumeLaunchRecipe(
   if (
     (event.agentType !== 'claude' && event.agentType !== 'codex') ||
     !boundedText(event.paneKey, MAX_PANE_KEY_LEN) ||
+    event.paneKey !== event.paneKey.trim() ||
     !parsePaneKey(event.paneKey) ||
     (event.worktreeId !== undefined && !boundedText(event.worktreeId, 8192)) ||
+    (event.worktreeId !== undefined && event.worktreeId !== event.worktreeId.trim()) ||
     !Number.isSafeInteger(event.launchedAt) ||
     event.launchedAt <= 0 ||
     !providerSession ||

@@ -19,6 +19,14 @@ const event: LaunchResumeIdentityEvent = {
 let root: string
 let file: string
 
+it('refuses whitespace workspace identifiers on both request and stored metadata paths', () => {
+  const malformed = { ...event, worktreeId: ' workspace-a' }
+  expect(projectResumeLaunchRecipe(malformed)).toBeNull()
+  expect(() =>
+    decodeResumeLaunchRecipe(JSON.stringify({ verification: 'unverified', ...malformed }))
+  ).toThrow()
+})
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'orca-resume-recipe-journal-'))
   file = join(root, 'resume-recipes-v1.sqlite')

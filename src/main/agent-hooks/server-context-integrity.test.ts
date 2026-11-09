@@ -301,7 +301,7 @@ describe('hook context integrity before attributed state', () => {
     const original = server.getProviderSessionIdentities()
     server.setHookContextSnapshotReader(async () => snapshot)
     expect(server.recordLaunchResumeIdentity({ ...seed, paneKey: PANE, worktreeId: 'wt-1' })).toBe(
-      'refused'
+      'recorded'
     )
     expect(server.getContextIntegrityRejections()).toHaveProperty(
       'launch_context_attestation_unavailable',

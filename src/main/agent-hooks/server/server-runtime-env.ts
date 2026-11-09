@@ -9,6 +9,7 @@ import {
 } from '../../../shared/agent-hook-listener/configuration/agent-hook-types'
 import { AgentHookServerIngestRemote } from './server-ingest-remote'
 import { HOOK_OWNER_ENV, hookOwnerId } from '../hook-launch-context'
+import { ResumeLaunchRecipeJournal } from './resume-launch-recipe-journal'
 
 export abstract class AgentHookServerRuntimeEnv extends AgentHookServerIngestRemote {
   buildPtyEnv(): Record<string, string> {
@@ -71,5 +72,26 @@ export abstract class AgentHookServerRuntimeEnv extends AgentHookServerIngestRem
     this.endpointFilePathCache = join(this.endpointDir, getEndpointFileName())
     this.lastStatusFilePath = join(this.endpointDir, 'last-status.json')
     this.contextQuarantine.open(join(this.endpointDir, 'context-quarantine-v1.json'))
+    const file = join(this.endpointDir, 'resume-recipes-v1.sqlite')
+    const profileId = hookOwnerId(this.endpointFilePathCache)
+    const previous = this.resumeRecipeJournal
+    this.resumeRecipeJournalBindingValid = false
+    try {
+      const sameProfile = previous?.belongsTo(file, profileId)
+      // Keep failed writes bound to their original profile.
+      if (!previous || sameProfile || !previous.hasPending || previous.flush()) {
+        if (!sameProfile) {
+          this.resumeRecipeJournal = new ResumeLaunchRecipeJournal(file, profileId)
+        }
+        this.resumeRecipeJournalBindingValid = true
+      }
+      this.resumeRecipePersistenceFailing =
+        !this.resumeRecipeJournalBindingValid || !this.resumeRecipeJournal?.flush()
+    } catch {
+      this.resumeRecipePersistenceFailing = true
+    }
+    if (this.resumeRecipePersistenceFailing) {
+      this.contextQuarantine.record('resume_recipe_storage_unavailable')
+    }
   }
 }

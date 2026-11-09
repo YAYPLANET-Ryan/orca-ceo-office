@@ -5,7 +5,7 @@ import {
 } from '../../../../shared/agent-session/lifecycle/agent-session-resume'
 import type { PtySpawnResult } from '../../../providers/pty-provider-contract'
 
-/** Both spawn entry points seed resume identity before the first hook so phone/chat/process readers can address its transcript. */
+/** Save the resume request without claiming that the new process already owns its conversation. */
 export function seedResumeLaunchIdentityFromSpawn(args: {
   paneKey: string | null | undefined
   launchAgent: unknown
@@ -13,7 +13,7 @@ export function seedResumeLaunchIdentityFromSpawn(args: {
   connectionId: string | null | undefined
   worktreeId: unknown
   launchedAt: Date | undefined
-  /** The Codex resume fell back to a fresh session, so the pane does not hold this one. */
+  /** Dropped resume arguments cannot checkpoint the requested conversation. */
   resumeArgvDropped: boolean
   result: PtySpawnResult
 }): boolean {
@@ -59,7 +59,9 @@ export function seedResumeLaunchIdentity(args: {
       providerSession,
       launchedAt: args.launchedAt
     })
-    return outcome !== 'refused' && agentHookServer.flushResumeIdentityCheckpoint()
+    return (
+      outcome !== 'refused' && agentHookServer.flushResumeIdentityCheckpoint(outcome === 'recorded')
+    )
   } catch {
     // The physical terminal already exists; preserve its handle and report the failed checkpoint.
     console.warn('[agent-hooks] Resume identity checkpoint unavailable')

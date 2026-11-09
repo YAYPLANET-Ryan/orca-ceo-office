@@ -128,14 +128,33 @@ export abstract class AgentHookServerPersistence extends AgentHookServerHydratio
       return
     }
     this.runStatusPersist()
+    if (this.resumeRecipeJournal) {
+      try {
+        this.resumeRecipePersistenceFailing =
+          !this.resumeRecipeJournalBindingValid || !this.resumeRecipeJournal.flush()
+      } catch {
+        this.resumeRecipePersistenceFailing = true
+      }
+      if (this.resumeRecipePersistenceFailing) {
+        this.contextQuarantine.record(
+          this.resumeRecipeJournalBindingValid &&
+            this.resumeRecipeJournal.lastRefusal === 'capacity'
+            ? 'resume_recipe_capacity_exceeded'
+            : 'resume_recipe_storage_unavailable'
+        )
+      }
+    }
   }
 
-  flushResumeIdentityCheckpoint(): boolean {
+  flushResumeIdentityCheckpoint(includeUnverifiedRecipes = true): boolean {
     if (!this.lastStatusFilePath) {
       return false
     }
     this.flushStatusPersistSync()
-    return !this.statusPersistFailing
+    return (
+      !this.statusPersistFailing &&
+      (!includeUnverifiedRecipes || !this.resumeRecipePersistenceFailing)
+    )
   }
 
   /** Quit, hook-disable and hydration repair need synchronous writes; routine updates are async. */

@@ -19,7 +19,7 @@ import type {
   StatusDropListener
 } from './server-types'
 import { toAgentStatusIpcPayload } from './server-status-identity'
-import { AgentHookServerState } from './server-state'
+import { AgentHookServerResumeRecipeState } from './server-resume-recipe-state'
 import { serializeAgentStatusSubject } from '../../../shared/agent-status/contracts/agent-status-subject'
 import { structuredStatusLegacyEvent } from './server-structured-status-row'
 import { PaneTimers } from './program-status/pane-timers'
@@ -29,7 +29,7 @@ import { parsePaneKey } from '../../../shared/workspace-layout/stable-pane-id'
 // Unassigned rows sort after the listing counter, which starts at 1.
 const UNORDERED_STATUS_ROW = Number.MAX_SAFE_INTEGER
 
-export abstract class AgentHookServerListeners extends AgentHookServerState {
+export abstract class AgentHookServerListeners extends AgentHookServerResumeRecipeState {
   protected providerRowsByTab: Map<string, AgentStatusIpcPayload[]> | null = null
   protected statusChangeNotificationVersion = 0
   protected cliWriterExecutionMatches: CliWriterExecutionMatches | null = null

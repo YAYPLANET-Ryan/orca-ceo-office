@@ -36,6 +36,23 @@ export abstract class AgentHookServerTabCleanup extends AgentHookServerConnectio
 
   /** Drop every status/cache claim attributable to a closed tab prefix. */
   dropStatusEntriesByTabPrefix(tabId: string): void {
+    if (this.resumeRecipeJournal) {
+      try {
+        this.resumeRecipePersistenceFailing =
+          !this.resumeRecipeJournalBindingValid ||
+          !this.resumeRecipeJournal.markTabClosed(tabId, Date.now())
+      } catch {
+        this.resumeRecipePersistenceFailing = true
+      }
+      if (this.resumeRecipePersistenceFailing) {
+        this.contextQuarantine.record(
+          this.resumeRecipeJournalBindingValid &&
+            this.resumeRecipeJournal.lastRefusal === 'capacity'
+            ? 'resume_recipe_capacity_exceeded'
+            : 'resume_recipe_storage_unavailable'
+        )
+      }
+    }
     this.markTabClosedForAgentStatus(tabId)
     this.clearTmuxTabSubjects(tabId)
     const paneKeysToClear = new Set<string>()

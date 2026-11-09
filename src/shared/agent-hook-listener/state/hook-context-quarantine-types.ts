@@ -18,6 +18,8 @@ const CONTEXT_REFUSAL_REASONS = [
   'normalized_provider_owned_by_another_pane',
   'remote_context_attestation_unavailable',
   'launch_context_attestation_unavailable',
+  'resume_recipe_storage_unavailable',
+  'resume_recipe_capacity_exceeded',
   'terminal_context_attestation_unavailable',
   'auxiliary_context_attestation_unavailable'
 ] as const
