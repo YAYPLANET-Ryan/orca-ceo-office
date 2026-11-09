@@ -132,6 +132,7 @@ async function interruptSqliteFixture(statements: string[]): Promise<void> {
   }
 }
 
+// Real child startup, durable page spill and forced-exit cleanup need their bounded CI time budget.
 it('recovers a real rollback journal after only its isolated fixture writer is interrupted', async () => {
   const journal = new ResumeLaunchRecipeJournal(file, PROFILE)
   journal.record(event)
@@ -154,6 +155,7 @@ it('recovers a real rollback journal after only its isolated fixture writer is i
   ])
 }, 15000)
 
+// Real child startup, durable page spill and forced-exit cleanup need their bounded CI time budget.
 it('initializes on the first retry when rollback restores a pre-schema owned database', async () => {
   prepareRecipeJournalOwner(file, PROFILE, true)
   writeFileSync(file, '')
