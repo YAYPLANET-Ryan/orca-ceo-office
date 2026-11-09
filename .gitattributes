@@ -1,4 +1,10 @@
 # CRLF shebangs break Vite's SSR transform.
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
 /config/scripts/**/*.mjs text eol=lf
 /skill-guides/*.md text eol=lf
 /skill-stubs/*.md text eol=lf
