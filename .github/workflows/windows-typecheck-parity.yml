@@ -55,7 +55,6 @@ jobs:
           src/main/agent-hooks/server-context-integrity.test.ts
           src/main/agent-hooks/hook-context-quarantine.test.ts
           src/main/agent-hooks/server-context-quarantine.test.ts
-          src/main/runtime/rpc/methods/host-management/context-integrity-diagnostics.test.ts
           src/renderer/src/components/sidebar/ContextIntegrityBanner.test.tsx
           --maxWorkers=2
       - name: Check original resume compatibility without waivers

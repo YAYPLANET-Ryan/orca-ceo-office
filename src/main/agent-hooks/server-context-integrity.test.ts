@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer } from './server'
 import { buildBody, postHookEvent, PANE, GOOD_PANE } from './server.test-fixtures'
 import type { HookContextSnapshot } from './server/hook-context-snapshot'
@@ -27,6 +27,12 @@ class ContextTestServer extends AgentHookServer {
     this.clearPaneState(PANE)
   }
 }
+
+const NOW = 1800000000000
+
+beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(NOW)
+})
 
 const servers: ContextTestServer[] = []
 const roots: string[] = []
@@ -106,8 +112,8 @@ async function historicalServer(resumeInPane = false) {
           connectionId: null,
           providerSessionOnly: true,
           retainedForLiveness: true,
-          receivedAt: Date.now() - 1000,
-          stateStartedAt: Date.now() - 1000,
+          receivedAt: NOW - 1000,
+          stateStartedAt: NOW - 1000,
           providerSession: { key: 'session_id', id: sessionId },
           payload: { state: 'done', prompt: '', agentType: 'claude' }
         }
@@ -256,7 +262,7 @@ describe('hook context integrity before attributed state', () => {
       worktreeId: 'wt-other',
       agentType: 'claude',
       providerSession: { key: 'session_id' as const, id: sessionId },
-      launchedAt: Date.now()
+      launchedAt: NOW
     }
     const original = server.getProviderSessionIdentities()
     server.setHookContextSnapshotReader(async () => snapshot)
@@ -296,7 +302,7 @@ describe('hook context integrity before attributed state', () => {
             agent: 'claude',
             status: 'idle',
             latestPrompt: '',
-            updatedAt: Date.now(),
+            updatedAt: NOW,
             providerSession: { key: 'session_id', id: sessionId }
           },
           makeStructuredAgentStatusSubject(
@@ -353,7 +359,7 @@ describe('hook context integrity before attributed state', () => {
       worktreeId: 'wt-other',
       env: 'production',
       source: 'claude',
-      receivedAt: Date.now(),
+      receivedAt: NOW,
       agentProcess: processIdentity,
       launchToken: 'abc',
       payload: body().payload
@@ -456,7 +462,7 @@ describe('hook context integrity before attributed state', () => {
       worktreeId: 'wt-1',
       env: 'production',
       source: 'claude',
-      receivedAt: Date.now(),
+      receivedAt: NOW,
       agentProcess: processIdentity,
       payload: body('/workspace-a').payload
     })
@@ -512,7 +518,7 @@ describe('hook context integrity before attributed state', () => {
       worktreeId: 'wt-1',
       env: 'production',
       source: 'jcode',
-      receivedAt: Date.now(),
+      receivedAt: NOW,
       payload: body().payload
     })
     expect(server.getProviderSessionIdentities()).toEqual(original)
