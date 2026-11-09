@@ -14,6 +14,7 @@ import {
   ptyIncarnations,
   ptyInitialCwd,
   ptyHookContexts,
+  ptyShutdownOperations,
   ptySpawnPaneKeys,
   ptyProcesses,
   getPtyShellName,
@@ -27,6 +28,7 @@ import {
 } from './local-pty-provider-state'
 import type { LocalPtyProviderOptions } from './local-pty-provider-types'
 import type { PtyProcessInfo } from '../pty-process-info'
+import { getLocalProviderObservation } from './local-pty-provider-observation'
 
 export function writeLocalPty(id: string, data: string): boolean {
   // Hold private DSR/OSC replies through cooked-mode echo; CPR/DA cannot overtake held replies (#13137, #7329, #15559).
@@ -129,6 +131,10 @@ export function closeLocalPtyStartupQueryAuthority(id: string): number {
 export async function listLocalPtyProcesses(): Promise<PtyProcessInfo[]> {
   return Array.from(ptyProcesses.entries()).map(([id, proc]) => ({
     id,
+    ...(ptyShutdownOperations.has(id) ? { exiting: true as const } : {}),
+    ...(getLocalProviderObservation(id)
+      ? { providerObservation: getLocalProviderObservation(id) }
+      : {}),
     ...(ptyIncarnations.get(id) ? { incarnationId: ptyIncarnations.get(id) } : {}),
     ...(proc.pid > 0 ? { rootProcessId: proc.pid } : {}),
     rootProcessCreationKey: ptyHookContexts.get(id)?.rootProcessCreationKey,

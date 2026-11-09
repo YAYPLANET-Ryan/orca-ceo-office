@@ -118,10 +118,11 @@ it('permits an explicit Claude clear only after matching the original ID in the 
   expect(server.getStatusSnapshotForPane(PANE)[0]?.providerSession?.id).toBe('cleared-conversation')
   await hook('claude', 'cleared-conversation', 'Stop')
   await hook('claude', 'original-conversation', 'Stop')
+  await hook('claude', 'original-conversation', 'SessionStart', 'clear')
   expect(server.getStatusSnapshotForPane(PANE)[0]?.providerSession?.id).toBe('cleared-conversation')
   expect(server.getContextIntegrityRejections()).toHaveProperty(
     'resume_provider_transition_unconfirmed',
-    1
+    2
   )
 })
 

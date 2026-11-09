@@ -3,6 +3,7 @@ import type {
   HookProviderObservation,
   HookProviderObservationScope
 } from '../../../shared/agent-hook-listener/state/hook-provider-observation'
+import { sameHookProviderObservationScope } from '../../../shared/agent-hook-listener/state/hook-provider-observation-transition'
 
 export function providerObservationScope(
   snapshot: HookContextSnapshot
@@ -26,14 +27,5 @@ export function matchesProviderObservationScope(
   observation: HookProviderObservation,
   expected: HookProviderObservationScope
 ): boolean {
-  return (
-    observation.ptyId === expected.ptyId &&
-    observation.incarnationId === expected.incarnationId &&
-    observation.paneKey === expected.paneKey &&
-    observation.worktreeId === expected.worktreeId &&
-    observation.ownerClientInstanceId === expected.ownerClientInstanceId &&
-    observation.launchTokenHash === expected.launchTokenHash &&
-    observation.launchCwd === expected.launchCwd &&
-    observation.cwd === expected.cwd
-  )
+  return sameHookProviderObservationScope(observation, expected)
 }

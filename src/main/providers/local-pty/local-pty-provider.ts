@@ -52,6 +52,8 @@ import {
   writeLocalPty
 } from './local-pty-session-operations'
 import { spawnLocalPty } from './local-pty-spawn'
+import { recordLocalProviderObservation } from './local-pty-provider-observation'
+import type { HookProviderObservationUpdate } from '../../../shared/agent-hook-listener/state/hook-provider-observation'
 import { cancelAllPendingLocalPtySpawns } from './local-pty-spawn-state'
 import { killAllLocalPtys, killOrphanedLocalPtys, shutdownLocalPty } from './local-pty-termination'
 
@@ -71,6 +73,10 @@ export class LocalPtyProvider implements IPtyProvider {
 
   spawn(args: PtySpawnOptions): Promise<PtySpawnResult> {
     return spawnLocalPty(args, () => this.opts)
+  }
+
+  recordHookProviderObservation(update: HookProviderObservationUpdate) {
+    return recordLocalProviderObservation(update)
   }
 
   // Local PTYs are always attached -- no-op. Remote providers use this to resubscribe.

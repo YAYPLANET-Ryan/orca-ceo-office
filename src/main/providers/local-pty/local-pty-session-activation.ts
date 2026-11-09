@@ -20,6 +20,7 @@ import {
 import { POSIX_SHELL_STARTUP_COMMAND_ENV } from '../../pty/shell-startup/posix-shell-startup-command'
 import { getAgentForegroundContextPaths } from '../agent-foreground-context-paths'
 import { getSpawnedShellName } from './local-pty-launch-context'
+import { recordLocalProviderObservationLaunch } from './local-pty-provider-observation'
 import type { LocalPtyLaunchPlan } from './local-pty-launch-plan'
 import type { LocalPtyProviderOptions } from './local-pty-provider-types'
 import {
@@ -71,6 +72,7 @@ export function activateLocalPtySession(args: {
   createPtyPhysicalExit(id)
   ptyReportsChildExitStatus.set(id, args.reportsChildExitStatus)
   ptyProcesses.set(id, proc)
+  recordLocalProviderObservationLaunch(proc, spawn.launchAgent ?? null)
   ptyInitialCwd.set(id, plan.cwd)
   const hookContext = captureHookLaunchContext(
     env,

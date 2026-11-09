@@ -1,5 +1,10 @@
 import type { PtySpawnResult } from '../pty-spawn-result'
 import {
+  hookResumeIntentsEqual,
+  type HookResumeIntent
+} from '../../../shared/agent-hook-listener/state/hook-resume-intent'
+import { getLocalPtyCurrentResumeIntent } from './local-pty-provider-observation'
+import {
   pendingLocalPtySpawns,
   ptyIncarnations,
   ptyProcesses,
@@ -59,10 +64,25 @@ export function cancelAllPendingLocalPtySpawns(): void {
   }
 }
 
-export function reattachLocalPty(id: string, cols: number, rows: number): PtySpawnResult | null {
+export function reattachLocalPty(
+  id: string,
+  cols: number,
+  rows: number,
+  requestedResumeIntent?: HookResumeIntent | null
+): PtySpawnResult | null {
   const existing = ptyProcesses.get(id)
   if (!existing) {
     return null
+  }
+  const recordedResumeIntent = getLocalPtyCurrentResumeIntent(id)
+  if (requestedResumeIntent !== undefined && recordedResumeIntent === undefined) {
+    throw new Error('agent_resume_intent_unavailable')
+  }
+  if (
+    requestedResumeIntent !== undefined &&
+    !hookResumeIntentsEqual(requestedResumeIntent, recordedResumeIntent)
+  ) {
+    throw new Error('agent_resume_intent_mismatch')
   }
   let resized = false
   try {

@@ -67,6 +67,7 @@ jobs:
             'src/main/agent-hooks/provider-observation-quit-drain.test.ts'
             'src/main/startup/main-process-quit-pending-writer.test.ts'
             'src/main/providers/pty-provider-observation-metadata.test.ts'
+            'src/main/providers/local-pty/local-pty-provider-observation.test.ts'
             'src/shared/agent-hook-listener/state/hook-provider-observation.test.ts'
             'src/main/daemon/terminal-host/testing/terminal-host-provider-observation.test.ts'
             'src/main/daemon/providers/adapter/testing/daemon-pty-provider-observation.test.ts'

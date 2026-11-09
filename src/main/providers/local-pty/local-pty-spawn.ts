@@ -29,18 +29,27 @@ import { destroyPtyProcess } from './local-pty-termination'
 import { updateHistoryEnvForFallback } from '../../pty/history/terminal-history'
 import type { PtySpawnOptions } from '../pty-provider-contract'
 import type { PtySpawnResult } from '../pty-spawn-result'
+import { readHookResumeIntent } from '../../../shared/agent-hook-listener/state/hook-resume-intent'
 
 export async function spawnLocalPty(
-  args: PtySpawnOptions,
+  input: PtySpawnOptions,
   getOptions: () => LocalPtyProviderOptions
 ): Promise<PtySpawnResult> {
+  const resumeIntent = readHookResumeIntent(input.hookResumeIntent)
+  if (input.hookResumeIntent !== undefined && resumeIntent === undefined) {
+    throw new Error('invalid_agent_resume_intent')
+  }
+  const args = {
+    ...input,
+    ...(resumeIntent !== undefined ? { hookResumeIntent: resumeIntent } : {})
+  }
   const reattachId = normalizeLocalCallerSessionId(args.sessionId, args.attachOnly === true)
   if (reattachId) {
     const pendingShutdown = ptyShutdownOperations.get(reattachId)
     if (pendingShutdown) {
       await pendingShutdown.promise
     }
-    const existing = reattachLocalPty(reattachId, args.cols, args.rows)
+    const existing = reattachLocalPty(reattachId, args.cols, args.rows, resumeIntent)
     if (existing) {
       return existing
     }
@@ -109,7 +118,9 @@ export async function spawnLocalPty(
       }
       checkCanceled()
       // Preflight can yield to a same-id winner; attach before creating another shell.
-      const concurrentWinner = reattachId ? reattachLocalPty(id, args.cols, args.rows) : null
+      const concurrentWinner = reattachId
+        ? reattachLocalPty(id, args.cols, args.rows, resumeIntent)
+        : null
       if (concurrentWinner) {
         return concurrentWinner
       }

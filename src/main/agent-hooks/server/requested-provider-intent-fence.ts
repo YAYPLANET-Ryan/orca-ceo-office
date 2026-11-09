@@ -63,7 +63,11 @@ export class RequestedProviderIntentFence {
       return null
     }
     // Codex has no verified in-process transition contract yet.
-    return !replay && agent === 'claude' && eventName === 'SessionStart' && eventSource === 'clear'
+    return !replay &&
+      agent === 'claude' &&
+      eventName === 'SessionStart' &&
+      eventSource === 'clear' &&
+      asserted.providerSessionId !== intent.providerSessionId
       ? null
       : 'resume_provider_transition_unconfirmed'
   }
