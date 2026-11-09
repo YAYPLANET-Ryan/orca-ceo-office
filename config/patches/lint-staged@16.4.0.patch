@@ -1,5 +1,5 @@
 diff --git a/lib/gitWorkflow.js b/lib/gitWorkflow.js
-index 3a32d6a9cd65c7ecb6b3cbccfce5a15c96530435..363513128bf7302eab73ea775102bb8a633a3b8b 100644
+index 3a32d6a..fc9fdb6 100644
 --- a/lib/gitWorkflow.js
 +++ b/lib/gitWorkflow.js
 @@ -50,6 +50,9 @@ export const STASH = 'lint-staged automatic backup'
@@ -26,7 +26,7 @@ index 3a32d6a9cd65c7ecb6b3cbccfce5a15c96530435..363513128bf7302eab73ea775102bb8a
     */
    async getBackupStash(ctx) {
 +    if (this.backupRef) {
-+      const backupOid = await this.execGit(['rev-parse', '--verify', this.backupRef])
++      const backupOid = await this.execGit(['rev-parse', '--verify', this.backupRef]).catch(() => null)
 +
 +      if (backupOid !== this.backupOid) {
 +        ctx.errors.add(GetBackupStashError)
@@ -56,7 +56,23 @@ index 3a32d6a9cd65c7ecb6b3cbccfce5a15c96530435..363513128bf7302eab73ea775102bb8a
          debugLog(task.title)
        }
      } catch (error) {
-@@ -425,7 +444,11 @@ export class GitWorkflow {
+@@ -313,6 +332,15 @@ export class GitWorkflow {
+    * In case of a merge-conflict retry with 3-way merge.
+    */
+   async applyModifications(ctx) {
++    try {
++      await this.applyTaskModifications(ctx)
++    } catch (error) {
++      if (ctx.errors.size > 0) throw error
++      handleError(error, ctx)
++    }
++  }
++
++  async applyTaskModifications(ctx) {
+     if (ctx.shouldFailOnChanges) {
+       debugLog(
+         'Calculating SHA-256 hash of changes after tasks because "--fail-on-changes" was used...'
+@@ -425,7 +453,11 @@ export class GitWorkflow {
    async cleanup(ctx) {
      try {
        debugLog('Dropping backup stash...')
@@ -70,7 +86,7 @@ index 3a32d6a9cd65c7ecb6b3cbccfce5a15c96530435..363513128bf7302eab73ea775102bb8a
      } catch (error) {
        handleError(error, ctx)
 diff --git a/lib/index.js b/lib/index.js
-index 75eeacee48759ef90249df5524639d61bce10918..24b4852eba9b14e05e10c3df8a2b2dae75af19f3 100644
+index 75eeace..24b4852 100644
 --- a/lib/index.js
 +++ b/lib/index.js
 @@ -157,7 +157,7 @@ const lintStaged = async (
@@ -92,7 +108,7 @@ index 75eeacee48759ef90249df5524639d61bce10918..24b4852eba9b14e05e10c3df8a2b2dae
        }
  
 diff --git a/lib/messages.js b/lib/messages.js
-index 993f8d81cac48132b5ae2ebdc8ca452c7217caad..2dc2291bc82451eacc5babfc8ce408051e1101e3 100644
+index 993f8d8..2dc2291 100644
 --- a/lib/messages.js
 +++ b/lib/messages.js
 @@ -66,9 +66,12 @@ export const PREVENTED_EMPTY_COMMIT = `
@@ -112,7 +128,7 @@ index 993f8d81cac48132b5ae2ebdc8ca452c7217caad..2dc2291bc82451eacc5babfc8ce40805
    > git stash list --format="%h %s"
    ${hash} On main: lint-staged automatic backup
 diff --git a/lib/state.js b/lib/state.js
-index da30e6f639d31307ebf503691aa991bb93948f8a..4a38799fa7773a8e8629c7c3a6b72287e6b22f4b 100644
+index da30e6f..4a38799 100644
 --- a/lib/state.js
 +++ b/lib/state.js
 @@ -15,6 +15,7 @@ export const getInitialState = ({

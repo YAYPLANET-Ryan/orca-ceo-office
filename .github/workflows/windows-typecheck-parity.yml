@@ -56,6 +56,7 @@ jobs:
           src/main/agent-hooks/hook-context-quarantine.test.ts
           src/main/agent-hooks/server-context-quarantine.test.ts
           src/renderer/src/components/sidebar/ContextIntegrityBanner.test.tsx
+          config/scripts/preflight/changed-checks/lint-staged-worktree-backup.test.mjs
           --maxWorkers=2
       - name: Check original resume compatibility without waivers
         if: ${{ !cancelled() }}

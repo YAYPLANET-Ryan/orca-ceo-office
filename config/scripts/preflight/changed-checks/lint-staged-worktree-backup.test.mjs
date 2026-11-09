@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import lintStaged from 'lint-staged'
 import { expect, it } from 'vitest'
@@ -10,6 +10,7 @@ const silentLogger = { error() {}, log() {}, warn() {} }
 
 it('keeps lint-staged backups isolated to the current worktree', async () => {
   const root = mkdtempSync(join(tmpdir(), 'orca-lint-staged-worktree-'))
+  assertOwnedFixture(root)
 
   try {
     const repo = join(root, 'repo')
@@ -59,6 +60,86 @@ it('keeps lint-staged backups isolated to the current worktree', async () => {
     rmSync(root, { force: true, recursive: true })
   }
 })
+
+it('fails and retains the original staged bytes when a task result cannot be added', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'orca-lint-staged-stage-'))
+  assertOwnedFixture(root)
+  try {
+    initializeRepo(root)
+    writeFileSync(join(root, 'old.txt'), 'original\n')
+    git(root, ['add', 'old.txt'])
+    git(root, ['commit', '--quiet', '-m', 'initial'])
+    writeFileSync(join(root, '.gitignore'), 'old.txt\nnew.txt\n')
+    git(root, ['add', '.gitignore'])
+    git(root, ['commit', '--quiet', '-m', 'ignore generated old path'])
+    git(root, ['mv', 'old.txt', 'new.txt'])
+    const probe = join(root, 'recreate.cjs')
+    writeFileSync(
+      probe,
+      "const fs=require('node:fs'),cp=require('node:child_process');cp.execFileSync('git',['rm','--cached','--quiet','--force','new.txt']);fs.writeFileSync('new.txt','formatted\\n')"
+    )
+    const passed = await lintStaged(
+      {
+        config: { '*.txt': [process.execPath, probe].map(quote).join(' ') },
+        cwd: root,
+        quiet: true
+      },
+      silentLogger
+    )
+    expect(passed).toBe(false)
+    const backupRef = gitTrim(root, ['for-each-ref', '--format=%(refname)', BACKUP_REFS])
+    expect(backupRef).toMatch(/^refs\/worktree\/lint-staged-backups\//)
+    expect(git(root, ['show', `${backupRef}^2:new.txt`])).toBe('original\n')
+    expect(git(root, ['ls-files', '--unmerged'])).toBe('')
+  } finally {
+    rmSync(root, { force: true, recursive: true })
+  }
+})
+
+it('restores an unstaged edit when fail-on-changes rejects a formatter result', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'orca-lint-staged-stage-'))
+  assertOwnedFixture(root)
+  try {
+    initializeRepo(root)
+    const file = join(root, 'tracked.txt')
+    writeFileSync(file, 'base-one\nbase-two\n')
+    git(root, ['add', 'tracked.txt'])
+    git(root, ['commit', '--quiet', '-m', 'initial'])
+    writeFileSync(file, 'staged\nbase-two\n')
+    git(root, ['add', 'tracked.txt'])
+    writeFileSync(file, 'staged\nunstaged\n')
+    const probe = join(root, 'format.cjs')
+    writeFileSync(
+      probe,
+      "require('node:fs').writeFileSync('tracked.txt','formatted\\nbase-two\\n')"
+    )
+    const passed = await lintStaged(
+      {
+        config: { '*.txt': [process.execPath, probe].map(quote).join(' ') },
+        cwd: root,
+        quiet: true,
+        failOnChanges: true
+      },
+      silentLogger
+    )
+    expect(passed).toBe(false)
+    expect(readFileSync(file, 'utf8')).toBe('formatted\nunstaged\n')
+    expect(git(root, ['show', ':tracked.txt'])).toBe('staged\nbase-two\n')
+  } finally {
+    rmSync(root, { force: true, recursive: true })
+  }
+})
+
+function assertOwnedFixture(root) {
+  if (
+    dirname(resolve(root)) !== resolve(tmpdir()) ||
+    !['orca-lint-staged-stage-', 'orca-lint-staged-worktree-'].some((prefix) =>
+      basename(root).startsWith(prefix)
+    )
+  ) {
+    throw new Error('Refusing work outside the owned lint-staged fixture')
+  }
+}
 
 function initializeRepo(repo) {
   git(repo, ['init', '--quiet'])

@@ -140,7 +140,10 @@ describe('hook context integrity before attributed state', () => {
     const incoming = body()
     delete incoming.agentProcess
     expect(await server.admitTransportPeer(incoming)).toBe(false)
-    expect(server.getContextIntegrityRejections()).toHaveProperty('process_generation_unconfirmed', 1)
+    expect(server.getContextIntegrityRejections()).toHaveProperty(
+      'process_generation_unconfirmed',
+      1
+    )
     server.setHookRootEvidenceReader(async () => ({
       verdict: 'root',
       binding: 'generation-b',
