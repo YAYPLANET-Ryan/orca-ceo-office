@@ -57,6 +57,7 @@ export function SessionRowTrailingActions({
   onCopyResume,
   onCopyId,
   onCopyPath,
+  onViewConversation,
   onOpenLog,
   onRevealLog,
   onOpenCwd,
@@ -85,6 +86,7 @@ export function SessionRowTrailingActions({
   onCopyResume?: () => void
   onCopyId: () => void
   onCopyPath?: () => void
+  onViewConversation?: () => void
   onOpenLog?: () => void
   onRevealLog?: () => void
   onOpenCwd?: () => void
@@ -294,6 +296,7 @@ export function SessionRowTrailingActions({
               onCopyResume={onCopyResume}
               onCopyId={onCopyId}
               onCopyPath={onCopyPath}
+              onViewConversation={onViewConversation}
               onOpenLog={onOpenLog}
               onRevealLog={onRevealLog}
               onOpenCwd={onOpenCwd}

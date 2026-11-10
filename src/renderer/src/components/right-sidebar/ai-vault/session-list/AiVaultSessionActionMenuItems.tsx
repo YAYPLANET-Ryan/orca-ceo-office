@@ -4,6 +4,7 @@ import {
   FolderOpen,
   LocateFixed,
   MessageSquarePlus,
+  MessageSquareText,
   PanelTopOpen,
   Play,
   Trash2
@@ -31,6 +32,7 @@ export function SessionActionMenuItems({
   onCopyResume,
   onCopyId,
   onCopyPath,
+  onViewConversation,
   onOpenLog,
   onRevealLog,
   onOpenCwd,
@@ -55,6 +57,8 @@ export function SessionActionMenuItems({
   onCopyResume?: () => void
   onCopyId: () => void
   onCopyPath?: () => void
+  // Read-only stored transcript; works without the agent CLI and never resumes.
+  onViewConversation?: () => void
   onOpenLog?: () => void
   onRevealLog?: () => void
   onOpenCwd?: () => void
@@ -66,7 +70,9 @@ export function SessionActionMenuItems({
   const t = useTranslate()
   const Item = menuKind === 'context' ? ContextMenuItem : DropdownMenuItem
   const Separator = menuKind === 'context' ? ContextMenuSeparator : DropdownMenuSeparator
-  const hasLocalPathActions = Boolean(onOpenLog || onRevealLog || onOpenCwd || onRevealArtifacts)
+  const hasLocalPathActions = Boolean(
+    onViewConversation || onOpenLog || onRevealLog || onOpenCwd || onRevealArtifacts
+  )
   // Why: Jump/Resume items act on this conversation; the hand-off starts a new one, so it sits apart.
   const hasItemsAboveHandOff = Boolean(
     onJumpToOriginalPane ||
@@ -152,6 +158,15 @@ export function SessionActionMenuItems({
       {hasLocalPathActions ? (
         <>
           <Separator />
+          {onViewConversation ? (
+            <Item onSelect={onViewConversation}>
+              <MessageSquareText className="size-3.5" />
+              {t(
+                'auto.components.right.sidebar.AiVaultSessionRow.viewConversation',
+                'View Conversation'
+              )}
+            </Item>
+          ) : null}
           {onOpenLog ? (
             <Item onSelect={onOpenLog}>
               <FileJson className="size-3.5" />

@@ -31,7 +31,7 @@ const session: AiVaultSession = {
   subagent: null
 }
 
-function renderRow(): ReactElement {
+function renderRow(onViewConversation?: () => void): ReactElement {
   return (
     <SessionRowTrailingActions
       session={session}
@@ -46,6 +46,7 @@ function renderRow(): ReactElement {
       onResume={vi.fn()}
       onCopyId={vi.fn()}
       onCopyPath={vi.fn()}
+      onViewConversation={onViewConversation}
       deleteBlockedReason={null}
       onRequestDelete={vi.fn()}
     />
@@ -72,5 +73,23 @@ describe('SessionRowTrailingActions overflow menus', () => {
       expect(first.getAttribute('aria-expanded')).toBe('false')
       expect(document.querySelectorAll('[role="menu"]')).toHaveLength(1)
     })
+  })
+
+  it('offers a read-only View Conversation item only when the row can view its transcript', async () => {
+    const onViewConversation = vi.fn()
+    render(<TooltipProvider>{renderRow(onViewConversation)}</TooltipProvider>)
+    const trigger = screen.getByTestId('ai-vault-session-more-actions')
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' })
+    const item = await screen.findByRole('menuitem', { name: 'View Conversation' })
+    fireEvent.click(item)
+    expect(onViewConversation).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides View Conversation when the row cannot view its transcript', async () => {
+    render(<TooltipProvider>{renderRow()}</TooltipProvider>)
+    const trigger = screen.getByTestId('ai-vault-session-more-actions')
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' })
+    await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('true'))
+    expect(screen.queryByRole('menuitem', { name: 'View Conversation' })).toBeNull()
   })
 })

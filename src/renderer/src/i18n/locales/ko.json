@@ -14124,7 +14124,8 @@
             "resumeInNewNativeChat": "새 채팅에서 재개",
             "resumeInNewCli": "새 터미널에서 재개",
             "resumeInNewCliTooltipFork": "이 대화의 복사본으로 새 터미널 에이전트 세션을 시작합니다.",
-            "resumeInNewCliTooltipChat": "이 채팅은 그대로 유지됩니다."
+            "resumeInNewCliTooltipChat": "이 채팅은 그대로 유지됩니다.",
+            "viewConversation": "대화 보기"
           },
           "AiVaultSessionDeleteDialog": {
             "title": "이 세션을 삭제할까요?",
@@ -14337,6 +14338,14 @@
             "createInProgress": "PR 생성 중...",
             "workspaceHostUnresolved": "워크스페이스 호스트를 확인할 수 없습니다. 워크스페이스를 새로 고친 후 다시 시도하세요.",
             "branchDiscoveryFailed": "브랜치를 감지하지 못했습니다."
+          },
+          "AiVaultConversationViewer": {
+            "assistant": "에이전트",
+            "empty": "이 대화에는 메시지가 없습니다.",
+            "error": "저장된 대화를 읽지 못했습니다: {{value0}}",
+            "loading": "불러오는 중…",
+            "readOnly": "저장된 대화를 읽기 전용으로 보여 줍니다. 보기만 해도 에이전트를 시작하거나 재개하지 않습니다.",
+            "user": "나"
           }
         }
       },

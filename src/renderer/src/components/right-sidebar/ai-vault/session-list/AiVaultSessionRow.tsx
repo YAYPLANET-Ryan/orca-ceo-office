@@ -59,6 +59,7 @@ export function VaultSessionRow({
   onCopyResume,
   onCopyId,
   onCopyPath,
+  onViewConversation,
   onOpenLog,
   onRevealLog,
   onOpenCwd,
@@ -93,6 +94,7 @@ export function VaultSessionRow({
   onCopyResume?: () => void
   onCopyId: () => void
   onCopyPath?: () => void
+  onViewConversation?: () => void
   onOpenLog?: () => void
   onRevealLog?: () => void
   onOpenCwd?: () => void
@@ -220,6 +222,7 @@ export function VaultSessionRow({
           onCopyResume={onCopyResume}
           onCopyId={onCopyId}
           onCopyPath={onCopyPath}
+          onViewConversation={onViewConversation}
           onOpenLog={onOpenLog}
           onRevealLog={onRevealLog}
           onOpenCwd={onOpenCwd}
@@ -300,6 +303,7 @@ export function VaultSessionRow({
           onCopyResume={onCopyResume}
           onCopyId={onCopyId}
           onCopyPath={onCopyPath}
+          onViewConversation={onViewConversation}
           onOpenLog={onOpenLog}
           onRevealLog={onRevealLog}
           onOpenCwd={onOpenCwd}

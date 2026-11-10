@@ -1,4 +1,8 @@
 import type { AgentDotState } from '@/components/AgentStateDot'
+import {
+  canViewAiVaultConversation,
+  openAiVaultConversationViewer
+} from '../session-actions/ai-vault-conversation-viewer'
 import { memo } from 'react'
 import { shallow } from 'zustand/shallow'
 import { isAntigravityReferenceSession } from '../../../../../../shared/antigravity-session-origin'
@@ -297,6 +301,11 @@ export const AiVaultVirtualRow = memo(function AiVaultVirtualRow({
           }
           onCopyId={() => onCopyId(row.session)}
           onCopyPath={searchPathAllowed ? () => onCopyPath(row.session) : undefined}
+          onViewConversation={
+            searchPathAllowed && canViewAiVaultConversation(row.session)
+              ? () => openAiVaultConversationViewer(row.session)
+              : undefined
+          }
           onOpenLog={
             searchPathAllowed && canOpenLogInOrca ? () => onOpenLog(row.session) : undefined
           }

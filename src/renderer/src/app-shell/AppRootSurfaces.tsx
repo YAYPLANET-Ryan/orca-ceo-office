@@ -32,6 +32,7 @@ import {
 } from './app-root-surface-settings'
 import type { FloatingWorkspacePanelState } from './use-floating-workspace-panel'
 import type { OnboardingGate } from './use-onboarding-and-feature-tips'
+import AiVaultConversationViewerHost from '../components/right-sidebar/ai-vault/session-list/AiVaultConversationViewerHost'
 
 const QuickOpen = lazy(() => import('../components/QuickOpen'))
 const WorkspaceCleanupDialog = lazy(
@@ -216,6 +217,7 @@ export const AppRootSurfaces = memo(function AppRootSurfaces(props: {
             <AiVaultSessionHistoryDialog />
           </ModalBoundary>
         ) : null}
+        <AiVaultConversationViewerHost />
         {activeModal === 'chat-account-usage' ? (
           <ModalBoundary boundaryId="modal.chat-account-usage" resetKey>
             <NativeChatAccountUsageDialog />

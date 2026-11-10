@@ -15169,7 +15169,8 @@
             "resumeInNewNativeChat": "Resume in New Chat",
             "resumeInNewCli": "Resume in New Terminal",
             "resumeInNewCliTooltipFork": "Start a new terminal agent session with a copy of this conversation.",
-            "resumeInNewCliTooltipChat": "This chat stays unchanged."
+            "resumeInNewCliTooltipChat": "This chat stays unchanged.",
+            "viewConversation": "View Conversation"
           },
           "AiVaultSessionDeleteDialog": {
             "title": "Delete this session?",
@@ -15393,6 +15394,14 @@
             "createInProgress": "Create PR in progress...",
             "workspaceHostUnresolved": "The workspace host is unresolved. Refresh the workspace and retry.",
             "branchDiscoveryFailed": "Branch discovery failed."
+          },
+          "AiVaultConversationViewer": {
+            "readOnly": "Read-only view of the saved conversation. Viewing does not start or resume the agent.",
+            "loading": "Loading…",
+            "error": "Could not read the saved conversation: {{value0}}",
+            "empty": "No messages in this conversation.",
+            "user": "You",
+            "assistant": "Agent"
           }
         }
       },
