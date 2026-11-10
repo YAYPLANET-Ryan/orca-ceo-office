@@ -10,6 +10,8 @@ import type {
 const MAX_ENTRIES = 256
 const MAX_FILE_BYTES = 128 * 1024
 const MAX_COUNT = Number.MAX_SAFE_INTEGER
+/** A refusal that has not recurred for this long is released, so a resolved cause stops warning. */
+export const HOOK_CONTEXT_QUARANTINE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 const validReason = (value: unknown): value is string =>
   typeof value === 'string' && normalizeHookContextReason(value) === value
 const validCount = (value: unknown): value is number =>
@@ -114,6 +116,7 @@ export class HookContextQuarantine {
     this.overflowCount = 0
     this.retryDelayMs = 1000
     this.durability = 'pending'
+    let released = false
     try {
       if (statSync(file).size > MAX_FILE_BYTES) {
         throw new Error('Quarantine summary too large')
@@ -124,6 +127,7 @@ export class HookContextQuarantine {
       }
       this.overflowCount = saved.overflowCount
       this.durability = 'saved'
+      released = this.releaseExpired(Date.now())
     } catch (error) {
       if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) {
         // Preserve malformed/oversized bytes for review; never overwrite them with defaults.
@@ -142,6 +146,10 @@ export class HookContextQuarantine {
       this.durability = 'saved'
     }
     this.emit()
+    if (released) {
+      this.revision++
+      this.persist()
+    }
   }
 
   record(reason: string, fingerprint?: string): void {
@@ -153,6 +161,7 @@ export class HookContextQuarantine {
       fingerprint = undefined
     }
     const now = Date.now()
+    this.releaseExpired(now)
     const key = this.key({ reason, fingerprint })
     const previous = this.entries.get(key)
     if (previous) {
@@ -216,6 +225,21 @@ export class HookContextQuarantine {
       this.writer = undefined
     }
     this.emit()
+  }
+
+  /** Drops entries quiet past retention; overflow clears only once nothing is left to explain it. */
+  private releaseExpired(now: number): boolean {
+    let released = false
+    for (const [key, entry] of this.entries) {
+      if (now - entry.lastSeenAt > HOOK_CONTEXT_QUARANTINE_RETENTION_MS) {
+        this.entries.delete(key)
+        released = true
+      }
+    }
+    if (released && this.entries.size === 0) {
+      this.overflowCount = 0
+    }
+    return released
   }
 
   private key(entry: { reason: string; fingerprint?: string }): string {

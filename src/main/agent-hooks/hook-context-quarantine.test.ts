@@ -3,7 +3,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { AtomicSnapshotWriter } from '../persistence/atomic-snapshot-writer'
-import { HookContextQuarantine, hookContextClaimFingerprint } from './hook-context-quarantine'
+import {
+  HOOK_CONTEXT_QUARANTINE_RETENTION_MS,
+  HookContextQuarantine,
+  hookContextClaimFingerprint
+} from './hook-context-quarantine'
 
 const roots: string[] = []
 const stores: HookContextQuarantine[] = []
@@ -135,5 +139,59 @@ describe('unattributed context quarantine', () => {
     expect(store.snapshot().entries[0]?.fingerprint).toBe(
       'dcccf351e7d698f0cf62c5b7329169458952e5f144af31df32d8c9f5aa8cdb53'
     )
+  })
+})
+
+describe('context quarantine retention', () => {
+  const DAY = 24 * 60 * 60 * 1000
+
+  it('releases a refusal that has not recurred within retention, keeping recent ones', () => {
+    const { store, file } = fixture()
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000 * DAY)
+    store.open(file)
+    store.record('provider_owned_by_another_pane')
+    now.mockReturnValue(1_000 * DAY + HOOK_CONTEXT_QUARANTINE_RETENTION_MS + 1)
+    store.record('resume_provider_id_mismatch')
+    expect(store.snapshot().entries.map((entry) => entry.reason)).toEqual([
+      'resume_provider_id_mismatch'
+    ])
+  })
+
+  it('a recurring refusal stays quarantined past the original retention window', () => {
+    const { store, file } = fixture()
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000 * DAY)
+    store.open(file)
+    store.record('provider_owned_by_another_pane')
+    now.mockReturnValue(1_000 * DAY + HOOK_CONTEXT_QUARANTINE_RETENTION_MS - DAY)
+    store.record('provider_owned_by_another_pane')
+    now.mockReturnValue(1_000 * DAY + HOOK_CONTEXT_QUARANTINE_RETENTION_MS + DAY)
+    store.record('resume_provider_id_mismatch')
+    expect(store.snapshot().entries).toEqual([
+      expect.objectContaining({ reason: 'provider_owned_by_another_pane', count: 2 }),
+      expect.objectContaining({ reason: 'resume_provider_id_mismatch', count: 1 })
+    ])
+  })
+
+  it('drops expired saved entries on reopen and saves the release', async () => {
+    const { store, file } = fixture()
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          { reason: 'provider_owned_by_another_pane', firstSeenAt: DAY, lastSeenAt: DAY, count: 3 }
+        ],
+        overflowCount: 2
+      })
+    )
+    vi.spyOn(Date, 'now').mockReturnValue(DAY + HOOK_CONTEXT_QUARANTINE_RETENTION_MS + 1)
+    store.open(file)
+    expect(store.snapshot()).toMatchObject({ entries: [], overflowCount: 0 })
+    store.close()
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({
+      version: 1,
+      entries: [],
+      overflowCount: 0
+    })
   })
 })
