@@ -40,7 +40,9 @@ const dependencies: Record<string, Record<string, unknown>> = {
       }
     }
   },
-  '../agent-hooks/wsl-relay/wsl-hook-relay-manager': { wslHookRelayManager: { disposeAll: idle() } },
+  '../agent-hooks/wsl-relay/wsl-hook-relay-manager': {
+    wslHookRelayManager: { disposeAll: idle() }
+  },
   '../agent-hooks/installation/managed-agent-hook-controls': {
     removeManagedAgentHooksAsync: vi.fn(async () => [])
   },

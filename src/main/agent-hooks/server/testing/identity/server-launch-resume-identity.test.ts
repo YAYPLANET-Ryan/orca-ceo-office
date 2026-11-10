@@ -131,8 +131,8 @@ describe('a resume launch keeps the pane identity without lending it', () => {
     server
       .getUnverifiedResumeLaunchRecipesForPane(PANE, host?.worktreeId)
       .recipes.map((recipe) => recipe.providerSession.id)
-  const rejections = (server: AgentHookServer, reason: string) =>
-    (server.getContextIntegrityRejections() as Record<string, number>)[reason] ?? 0
+  const rejections = (server: AgentHookServer, reason: string): number =>
+    server.getContextIntegrityRejections()[reason] ?? 0
 
   it('retains an admitted claude clear replacement through pane teardown and restart', async () => {
     const server = await start('claude')
