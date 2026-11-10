@@ -14,6 +14,7 @@ import {
 } from './node-websocket-lifecycle'
 import { RemoteRuntimeServerHeartbeat } from './remote-runtime-server-heartbeat'
 import { assertPortNotShadowingListener } from './shadowed-port-probe'
+import { listenAfterPortHandoff } from './ws-port-handoff-wait'
 import { REMOTE_RUNTIME_MAX_INBOUND_FRAME_BYTES } from '../../../shared/remote-runtime/remote-runtime-memory-limits'
 import { classifyNetworkSource, type NetworkSourceClass } from './network-source-class'
 import { UnauthenticatedSourceCap } from './ws-unauthenticated-source-cap'
@@ -51,6 +52,8 @@ export type WebSocketTransportOptions = {
   requirePinnedPort?: boolean
   // Deterministic rungs precede port 0 to keep fallbacks stable across reboots.
   fallbackLadder?: readonly number[]
+  // Wait for an in-use first configured port before moving the pairing endpoint; tests default to 0.
+  portHandoffWaitMs?: number
 }
 
 export class WebSocketTransport implements RpcTransport {
@@ -58,6 +61,7 @@ export class WebSocketTransport implements RpcTransport {
   private readonly port: number
   private readonly heartbeat: RemoteRuntimeServerHeartbeat
   private readonly preAuthTimeoutMs: number
+  private readonly portHandoffWaitMs: number
   private readonly staticRoot: string | undefined
   private readonly sourceGuard: WebSocketSourceGuard | undefined
   private readonly fallbackPort: number | undefined
@@ -91,7 +95,8 @@ export class WebSocketTransport implements RpcTransport {
     fallbackPort,
     preferPinnedPort,
     requirePinnedPort,
-    fallbackLadder
+    fallbackLadder,
+    portHandoffWaitMs
   }: WebSocketTransportOptions) {
     this.host = host
     this.port = port
@@ -107,6 +112,7 @@ export class WebSocketTransport implements RpcTransport {
     this.preferPinnedPort = preferPinnedPort === true
     this.requirePinnedPort = requirePinnedPort === true
     this.fallbackLadder = fallbackLadder ?? []
+    this.portHandoffWaitMs = portHandoffWaitMs ?? 0
   }
 
   // True when the persisted fallback was tried and refused, so the caller can drop it.
@@ -191,7 +197,13 @@ export class WebSocketTransport implements RpcTransport {
     ]
     for (const port of candidatePorts) {
       try {
-        await this.tryListen(port)
+        await (port === configuredPorts[0] && port !== 0 && this.portHandoffWaitMs > 0
+          ? listenAfterPortHandoff({
+              port,
+              waitMs: this.portHandoffWaitMs,
+              tryListen: (candidate) => this.tryListen(candidate)
+            })
+          : this.tryListen(port))
         return
       } catch (error: unknown) {
         if (port === persistedFallbackPort) {

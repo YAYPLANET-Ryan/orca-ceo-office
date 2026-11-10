@@ -1,4 +1,5 @@
 import { stat } from 'node:fs/promises'
+import { PAIRING_PORT_HANDOFF_WAIT_MS } from '../ws-port-handoff-wait'
 import { basename, join } from 'node:path'
 import { AGENT_LAUNCH_RUNTIME_CAPABILITY } from '../../../../shared/agent-launch/contracts/agent-launch-runtime-capability'
 import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../../../shared/layout-owner-switch'
@@ -226,6 +227,8 @@ export class RuntimeRpcLifecycle extends RuntimeRpcWebSocketDispatch {
       ...(options.fallbackPort !== undefined ? { fallbackPort: options.fallbackPort } : {}),
       ...(options.preferPinnedPort ? { preferPinnedPort: true } : {}),
       ...(options.requirePinnedPort ? { requirePinnedPort: true } : {}),
+      // A relaunch during update overlap reclaims the paired endpoint instead of moving it; port 0 stays random.
+      portHandoffWaitMs: options.port === 0 ? 0 : PAIRING_PORT_HANDOFF_WAIT_MS,
       fallbackLadder: wsFallbackPortLadder(this.wsPort)
     })
     const mobileSocketWiring = this.ensureMobileSocketWiring(deviceRegistry, e2eeKeypair)
