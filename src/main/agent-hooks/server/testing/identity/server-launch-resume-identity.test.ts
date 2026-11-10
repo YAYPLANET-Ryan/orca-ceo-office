@@ -147,7 +147,26 @@ describe('a resume launch keeps the pane identity without lending it', () => {
     expect(activeId(restarted)).toBe('replacement-conversation')
   })
 
-  // Codex has no verified in-process transition contract yet; the proven original stays the checkpoint.
+  it('retains an admitted codex in-process clear from the same process through teardown and restart', async () => {
+    const server = await start('codex')
+    expect(request(server, 'codex')).toBe('recorded')
+    await hook(server, 'codex', ORIGINAL)
+    await hook(server, 'codex', 'replacement-conversation', 'clear', 'SessionStart', {
+      transcript_path: '/codex/sessions/rollout-replacement.jsonl'
+    })
+    expect(activeId(server)).toBe('replacement-conversation')
+    expect(host?.observations.map((row) => [row.providerSessionId, row.transition])).toEqual([
+      [ORIGINAL, 'requested-id-matched'],
+      ['replacement-conversation', 'clear']
+    ])
+    server.clearPaneState(PANE)
+    expect(server.flushResumeIdentityCheckpoint()).toBe(true)
+    expect(savedEntry(server)?.providerSession?.id).toBe('replacement-conversation')
+    const restarted = await restart(server, 'codex')
+    expect(activeId(restarted)).toBe('replacement-conversation')
+  })
+
+  // Without a persisted transcript (hidden/ephemeral threads) a Codex clear stays unconfirmed.
   it('keeps the admitted codex original when an in-process clear is unconfirmed', async () => {
     const server = await start('codex')
     expect(request(server, 'codex')).toBe('recorded')

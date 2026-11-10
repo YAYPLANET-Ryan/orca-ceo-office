@@ -158,3 +158,50 @@ it('does not seed host observations from replay or roll back a locally committed
     'resume_provider_transition_unconfirmed'
   )
 })
+
+it('accepts a Codex in-process clear only from the same admitted process with a persisted transcript', () => {
+  const codex = {
+    ...snapshot,
+    resumeIntent: { agentType: 'codex' as const, providerSessionId: 'original-conversation' }
+  }
+  const same = { processKey: 'win32\n1001\nstart-a', transcriptPath: '/codex/rollout-new.jsonl' }
+  const fence = new RequestedProviderIntentFence()
+  fence.commit(codex, 'codex', 'original-conversation', 'SessionStart', 'resume', {
+    processKey: same.processKey
+  })
+  const clear = (evidence: Parameters<RequestedProviderIntentFence['check']>[6]) =>
+    fence.check(codex, 'codex', 'new-conversation', 'SessionStart', 'clear', false, evidence)
+  expect(clear(same)).toBeNull()
+  expect(clear({ ...same, processKey: 'win32\n1001\nstart-b' })).toBe(
+    'resume_provider_transition_unconfirmed'
+  )
+  expect(clear({ ...same, transcriptPath: null })).toBe('resume_provider_transition_unconfirmed')
+  expect(clear({ ...same, agentId: 'subagent-1' })).toBe('resume_provider_transition_unconfirmed')
+  expect(clear({})).toBe('resume_provider_transition_unconfirmed')
+  expect(
+    fence.check(codex, 'codex', 'new-conversation', 'SessionStart', 'startup', false, same)
+  ).toBe('resume_provider_transition_unconfirmed')
+  expect(fence.check(codex, 'codex', 'new-conversation', 'SessionStart', 'clear', true, same)).toBe(
+    'resume_provider_transition_unconfirmed'
+  )
+})
+
+it('follows a committed Codex clear and refuses a Codex clear on a binding restored without a process', () => {
+  const codex = {
+    ...snapshot,
+    resumeIntent: { agentType: 'codex' as const, providerSessionId: 'original-conversation' }
+  }
+  const evidence = { processKey: 'win32\n1001\nstart-a', transcriptPath: '/codex/rollout.jsonl' }
+  const fence = new RequestedProviderIntentFence()
+  fence.commit(codex, 'codex', 'original-conversation', 'SessionStart', 'resume', evidence)
+  fence.commit(codex, 'codex', 'second-conversation', 'SessionStart', 'clear', evidence)
+  expect(fence.check(codex, 'codex', 'second-conversation', 'Stop', undefined)).toBeNull()
+  expect(fence.check(codex, 'codex', 'original-conversation', 'Stop', undefined)).toBe(
+    'resume_provider_transition_unconfirmed'
+  )
+  const unbound = new RequestedProviderIntentFence()
+  unbound.commit(codex, 'codex', 'original-conversation', 'SessionStart', 'resume')
+  expect(
+    unbound.check(codex, 'codex', 'new-conversation', 'SessionStart', 'clear', false, evidence)
+  ).toBe('resume_provider_transition_unconfirmed')
+})

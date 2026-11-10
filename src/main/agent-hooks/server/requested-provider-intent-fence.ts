@@ -7,7 +7,20 @@ import {
 
 const MAX_MATCHED_PTYS = 4096
 
-type Binding = { scope: string; incarnationId: string; providerSessionId: string }
+type Binding = {
+  scope: string
+  incarnationId: string
+  providerSessionId: string
+  // Admitted agent process that reported the bound ID; absent on bindings restored from an observation.
+  processKey?: string
+}
+
+/** Hook facts beyond the scope that a Codex in-process clear must carry to replace the bound ID. */
+export type RequestedProviderTransitionEvidence = {
+  processKey?: string
+  transcriptPath?: unknown
+  agentId?: unknown
+}
 
 /** A known request can reject a contradictory report; it never proves clean conversation contents. */
 export class RequestedProviderIntentFence {
@@ -29,7 +42,8 @@ export class RequestedProviderIntentFence {
     providerSessionId: string | undefined,
     eventName: unknown,
     eventSource: unknown,
-    replay = false
+    replay = false,
+    evidence: RequestedProviderTransitionEvidence = {}
   ): string | null {
     const intent = snapshot.resumeIntent
     // Unavailable is not fresh or a successful resume; no match receipt is produced.
@@ -62,14 +76,25 @@ export class RequestedProviderIntentFence {
     if (asserted.providerSessionId === matched.providerSessionId) {
       return null
     }
-    // Codex has no verified in-process transition contract yet.
-    return !replay &&
-      agent === 'claude' &&
+    const cleared =
+      !replay &&
       eventName === 'SessionStart' &&
       eventSource === 'clear' &&
       asserted.providerSessionId !== intent.providerSessionId
-      ? null
-      : 'resume_provider_transition_unconfirmed'
+    if (cleared && agent === 'claude') {
+      return null
+    }
+    // Codex /clear starts a new root thread in the same process: require that exact admitted process,
+    // a persisted transcript (hidden threads have none) and no subagent identity.
+    const codexInProcessClear =
+      cleared &&
+      agent === 'codex' &&
+      evidence.processKey !== undefined &&
+      matched.processKey === evidence.processKey &&
+      typeof evidence.transcriptPath === 'string' &&
+      evidence.transcriptPath.length > 0 &&
+      evidence.agentId === undefined
+    return codexInProcessClear ? null : 'resume_provider_transition_unconfirmed'
   }
 
   commit(
@@ -77,19 +102,22 @@ export class RequestedProviderIntentFence {
     agent: unknown,
     providerSessionId: string | undefined,
     eventName: unknown,
-    eventSource: unknown
+    eventSource: unknown,
+    evidence: RequestedProviderTransitionEvidence = {}
   ): void {
     if (
       snapshot.resumeIntent == null ||
       !providerSessionId ||
-      this.check(snapshot, agent, providerSessionId, eventName, eventSource) !== null
+      this.check(snapshot, agent, providerSessionId, eventName, eventSource, false, evidence) !==
+        null
     ) {
       return
     }
     this.bindings.set(snapshot.ptyId, {
       scope: this.scope(snapshot),
       incarnationId: snapshot.incarnationId,
-      providerSessionId
+      providerSessionId,
+      ...(evidence.processKey !== undefined ? { processKey: evidence.processKey } : {})
     })
   }
 

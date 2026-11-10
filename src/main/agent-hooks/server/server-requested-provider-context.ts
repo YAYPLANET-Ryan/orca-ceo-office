@@ -1,5 +1,11 @@
 import { AgentHookServerContextDiagnostics } from './server-context-diagnostics'
-import { RequestedProviderIntentFence } from './requested-provider-intent-fence'
+import {
+  RequestedProviderIntentFence,
+  type RequestedProviderTransitionEvidence
+} from './requested-provider-intent-fence'
+import { readHookAgentProcess } from '../../../shared/agent-status/process/agent-process-presence'
+import type { AgentProcessIdentity } from '../../../shared/agent-status/process/agent-process-presence'
+import { hookProcessKey } from '../../../shared/agent-hook-listener/presence/hook-process-root-evidence'
 import type { HookContextSnapshot, AdmittedHookContext } from './hook-context-snapshot'
 import type { EnrichedAgentHookEventPayload, NormalizedLocalHook } from './server-types'
 import type { AgentHookSource } from '../../../shared/agent-hook-listener/transport/agent-hook-relay'
@@ -50,7 +56,8 @@ export abstract class AgentHookServerRequestedProviderContext extends AgentHookS
     providerSessionId: string | undefined,
     eventName: unknown,
     eventSource: unknown,
-    replay = false
+    replay = false,
+    evidence: RequestedProviderTransitionEvidence = {}
   ): boolean {
     const reason = this.requestedProviderIntents.check(
       snapshot,
@@ -58,7 +65,8 @@ export abstract class AgentHookServerRequestedProviderContext extends AgentHookS
       providerSessionId,
       eventName,
       eventSource,
-      replay
+      replay,
+      evidence
     )
     return reason
       ? this.refuseUnverifiedContext(reason, {
@@ -80,8 +88,27 @@ export abstract class AgentHookServerRequestedProviderContext extends AgentHookS
       event.providerSession?.id,
       context.envelope.eventName,
       context.envelope.hookPayloadRecord.source,
-      replay
+      replay,
+      this.providerTransitionEvidence(event.payload.agentType, context.envelope)
     )
+  }
+
+  /** Same-process proof for an in-process provider transition, read from the admitted envelope. */
+  protected providerTransitionEvidence(
+    source: unknown,
+    envelope: Pick<AdmittedHookContext['envelope'], 'record' | 'hookPayloadRecord'>,
+    verifiedProcess?: AgentProcessIdentity
+  ): RequestedProviderTransitionEvidence {
+    const process =
+      verifiedProcess ??
+      (typeof source === 'string'
+        ? readHookAgentProcess(source, envelope.record.agentProcess)
+        : undefined)
+    return {
+      ...(process ? { processKey: hookProcessKey(process) } : {}),
+      transcriptPath: envelope.hookPayloadRecord.transcript_path,
+      agentId: envelope.hookPayloadRecord.agent_id
+    }
   }
 
   protected noteRequestedProviderCommit(
@@ -97,7 +124,8 @@ export abstract class AgentHookServerRequestedProviderContext extends AgentHookS
       source,
       event.providerSession?.id,
       context.envelope.eventName,
-      context.envelope.hookPayloadRecord.source
+      context.envelope.hookPayloadRecord.source,
+      this.providerTransitionEvidence(source, context.envelope)
     )
     const scope = providerObservationScope(context.snapshot)
     const update =

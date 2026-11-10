@@ -62,7 +62,7 @@ export function advanceHookProviderObservation(
   }
   if (
     previous &&
-    (update.agentType !== 'claude' ||
+    ((update.agentType !== 'claude' && update.agentType !== 'codex') ||
       update.transition !== 'clear' ||
       update.providerSessionId === previous.originalProviderSessionId)
   ) {

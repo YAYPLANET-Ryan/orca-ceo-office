@@ -217,7 +217,8 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerReq
           provider?.id,
           envelope.eventName,
           envelope.hookPayloadRecord.source,
-          replay
+          replay,
+          this.providerTransitionEvidence(source, envelope, proof.process)
         )
       ) {
         return false
