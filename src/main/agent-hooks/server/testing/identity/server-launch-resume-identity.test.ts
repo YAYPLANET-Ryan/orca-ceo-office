@@ -110,7 +110,11 @@ describe('a resume launch keeps the pane identity without lending it', () => {
         {
           worktreeId: host?.worktreeId,
           launchToken: 'abc',
-          agentProcess: JSON.stringify({ pid: 1001, platform: 'linux', startTime: 'synthetic-start' })
+          agentProcess: JSON.stringify({
+            pid: 1001,
+            platform: 'linux',
+            startTime: 'synthetic-start'
+          })
         }
       ),
       `/hook/${agent}`
