@@ -24,6 +24,7 @@ import { bindFreshSpawnFollowReset } from './output/fresh-spawn-follow-reset'
 import { bindReplacedProcessInputModes } from './output/replaced-process-input-modes'
 import { deferHiddenAgentResume } from './spawn/hidden-agent-resume-deferral'
 import { holdInPlaceResumeUntilSettled } from './startup/in-place-resume-hold'
+import { startShellWhenResumeRequired } from './startup/resume-required-shell-restart'
 import { attachToMainResumedSleepPane, mainResumedSleepPane } from './spawn/main-resumed-sleep-pane'
 import { startPaneThroughMainThenAttach } from './spawn/main-pane-start-request'
 
@@ -141,7 +142,8 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
   ): Promise<string | null> =>
     deferHiddenAgentResume(session, startup)
       ? Promise.resolve(null)
-      : session.spawnColdRestoreAgentResume(startup, options)
+      : (startShellWhenResumeRequired(session, startup, options) ??
+        session.spawnColdRestoreAgentResume(startup, options))
   // Visibility wake runs from the outer binding after this deferred-connect closure returns.
   session.wakeHibernatedAgentPane = () => session.spawnColdRestoreAgentResume()
   const isStartupPasteTargetCurrent = (ptyId: string | null): boolean =>

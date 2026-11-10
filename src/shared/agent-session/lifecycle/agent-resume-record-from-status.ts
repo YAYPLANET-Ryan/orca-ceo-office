@@ -157,10 +157,33 @@ export function liveResumeRecordChange(
   existing: SleepingAgentSessionRecord | undefined,
   live: SleepingAgentSessionRecord | null
 ): { set: SleepingAgentSessionRecord } | 'clear' | null {
+  if (existing?.requiresManualResume === true) {
+    return manuallyResumedRecordChange(existing, live)
+  }
   if (live) {
     return recoveryRecordMatches(existing, live) ? null : { set: live }
   }
   return existing ? 'clear' : null
+}
+
+/**
+ * A conversation the user exited stays saved for a manual resume, never an automatic one: a late
+ * completion of the same session keeps the fence, a missing status keeps the record, and only the
+ * same session running again (or another session taking the pane) replaces it.
+ */
+function manuallyResumedRecordChange(
+  existing: SleepingAgentSessionRecord,
+  live: SleepingAgentSessionRecord | null
+): { set: SleepingAgentSessionRecord } | null {
+  if (!live) {
+    return null
+  }
+  if (live.state === 'done' && recoveryRecordTargetsSameSession(existing, live)) {
+    return recoveryRecordMatches(existing, live)
+      ? null
+      : { set: { ...live, requiresManualResume: true } }
+  }
+  return { set: live }
 }
 
 /** Quit captures keep running agents resumable; periodic capture must not replace a quit record. Null leaves the existing record. */

@@ -388,7 +388,11 @@ export function registerPtyConnectionColdRestoreAgentResumeTests(): void {
       expect(replacement.connect).toHaveBeenCalledWith(
         expect.objectContaining({
           command: "codex '-c' 'disable_paste_burst=true' 'resume' 'codex-session-1'",
-          resumeProviderSession: { key: 'session_id', id: 'codex-session-1', transcriptPath }
+          resumeProviderSession: {
+            key: 'session_id',
+            id: 'codex-session-1',
+            transcriptPath
+          }
         })
       )
     })
@@ -458,7 +462,10 @@ export function registerPtyConnectionColdRestoreAgentResumeTests(): void {
       if (ORCA_LAYOUT_OWNER_IS_MAIN) {
         expectNoWindowStart(transport, mockStoreState)
         expect(transport.connect).toHaveBeenCalledWith(
-          expect.objectContaining({ sessionId: 'lost-pty', attachOnlyView: true })
+          expect.objectContaining({
+            sessionId: 'lost-pty',
+            attachOnlyView: true
+          })
         )
         expect(pane.terminal.write).toHaveBeenCalledWith(
           `${RESET_GRAPHIC_RENDITION}cold-payload`,
@@ -650,6 +657,134 @@ export function registerPtyConnectionColdRestoreAgentResumeTests(): void {
         expect.objectContaining({ command: expect.stringContaining('resume') })
       )
       expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+    })
+
+    async function coldRestoreLostPane(
+      seed: (paneKey: string) => void,
+      onDeps?: (deps: ReturnType<typeof createDeps>) => void
+    ): Promise<{ transport: MockTransport; paneKey: string }> {
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+      const { connectPanePty } = await import('../connect-pane-pty')
+      const titleMocks = await vi.importMock<PtyConnectionAgentTitleMocks>('@/lib/agent-status')
+      const transport = createMockTransport('fresh-pty')
+      transport.connect.mockImplementation(async ({ sessionId }: { sessionId?: string }) =>
+        sessionId
+          ? {
+              id: 'fresh-pty',
+              coldRestore: { scrollback: 'cold-payload', cwd: '/tmp/wt-1' }
+            }
+          : 'fresh-pty'
+      )
+      transportFactoryQueue.push(transport)
+      const paneKey = makePaneKey('tab-1', LEAF_1)
+      mockStoreState.tabsByWorktree = {
+        'wt-1': [{ id: 'tab-1', ptyId: 'lost-pty' }]
+      }
+      mockStoreState.settings = {
+        ...mockStoreState.settings,
+        agentCmdOverrides: {}
+      }
+      mockStoreState.agentStatusByPaneKey = {}
+      mockStoreState.sleepingAgentSessionsByPaneKey = {}
+      seed(paneKey)
+      const deps = createDeps({
+        restoredLeafId: LEAF_1,
+        restoredPtyIdByLeafId: { [LEAF_1]: 'lost-pty' }
+      })
+      onDeps?.(deps)
+      connectPanePty(
+        ...mockPanePtyArgs(
+          createPane(1),
+          createManager(1),
+          bindPaneAgentTitleMocks(deps, titleMocks)
+        )
+      )
+      await flushAsyncTicks(20)
+      await vi.advanceTimersByTimeAsync(70)
+      return { transport, paneKey }
+    }
+
+    it('keeps an exited conversation saved without relaunching it on cold restore', async () => {
+      const { transport, paneKey } = await coldRestoreLostPane((key) => {
+        mockStoreState.sleepingAgentSessionsByPaneKey[key] = {
+          paneKey: key,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          agent: 'codex',
+          providerSession: { key: 'session_id', id: 'codex-exited' },
+          prompt: '',
+          state: 'done',
+          capturedAt: 1,
+          updatedAt: 1,
+          origin: 'live',
+          requiresManualResume: true
+        }
+      })
+      expect(transport.connect).not.toHaveBeenCalledWith(
+        expect.objectContaining({ command: expect.stringContaining('resume') })
+      )
+      expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+      expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
+        providerSession: { id: 'codex-exited' },
+        requiresManualResume: true
+      })
+    })
+
+    it('resumes a completed conversation that only its done status still names', async () => {
+      const { transport } = await coldRestoreLostPane((key) => {
+        mockStoreState.agentStatusByPaneKey[key] = {
+          state: 'done',
+          prompt: '',
+          agentType: 'codex',
+          paneKey: key,
+          updatedAt: 1,
+          stateStartedAt: 1,
+          stateHistory: [],
+          providerSession: { key: 'session_id', id: 'codex-done' }
+        }
+      })
+      if (ORCA_LAYOUT_OWNER_IS_MAIN) {
+        return
+      }
+      expect(transport.connect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'lost-pty',
+          command: "codex '-c' 'disable_paste_burst=true' 'resume' 'codex-done'"
+        })
+      )
+    })
+
+    it('cold-restores a lost agent without a resumable session as a shell with a resume banner', async () => {
+      const seen: { deps?: ReturnType<typeof createDeps> } = {}
+      const { transport } = await coldRestoreLostPane(
+        (key) => {
+          mockStoreState.agentStatusByPaneKey[key] = {
+            state: 'working',
+            prompt: 'draft the memo',
+            agentType: 'claude',
+            paneKey: key,
+            updatedAt: 1,
+            stateStartedAt: 1,
+            stateHistory: []
+          }
+        },
+        (created) => {
+          seen.deps = created
+        }
+      )
+      if (ORCA_LAYOUT_OWNER_IS_MAIN) {
+        return
+      }
+      expect(transport.connect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'lost-pty',
+          inheritStartupCommand: false
+        })
+      )
+      expect(transport.connect).not.toHaveBeenCalledWith(
+        expect.objectContaining({ command: expect.stringContaining('claude') })
+      )
+      expect(seen.deps?.onShowSessionRestoredBanner).toHaveBeenCalledWith(1, 'resume-required')
     })
   })
 }

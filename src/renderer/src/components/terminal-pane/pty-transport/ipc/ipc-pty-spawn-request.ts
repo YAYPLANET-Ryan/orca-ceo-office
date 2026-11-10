@@ -95,7 +95,7 @@ export async function spawnIpcPty(
     terminalKittyKeyboardProtocol,
     telemetry,
     agentLaunch
-  } = transportOptions
+  } = withoutPaneLaunch(transportOptions, connectOptions.inheritStartupCommand === false)
   const resumesAgent = Boolean(connectOptions.resumeProviderSession ?? resumeProviderSession)
   const spawnIntent =
     resumesAgent && !admittedSessionId ? connectOptions.resumeSpawnIntent : undefined
@@ -155,4 +155,19 @@ export async function spawnIpcPty(
     ...(telemetry ? { telemetry } : {}),
     ...(agentLaunch && !admittedSessionId ? { agentLaunch } : {})
   })
+}
+
+/** A lost agent with no resumable session restarts as a shell: replaying its launch would open a new conversation. */
+function withoutPaneLaunch<T extends object>(transportOptions: T, dropLaunch: boolean): T {
+  return dropLaunch
+    ? {
+        ...transportOptions,
+        command: undefined,
+        commandDelivery: undefined,
+        launchConfig: undefined,
+        launchAgent: undefined,
+        startupCommandDelivery: undefined,
+        agentLaunch: undefined
+      }
+    : transportOptions
 }

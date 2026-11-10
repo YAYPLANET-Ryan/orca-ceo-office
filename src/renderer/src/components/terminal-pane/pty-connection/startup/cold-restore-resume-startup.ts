@@ -38,7 +38,12 @@ export function findColdRestoreResumeSource(session: ConnectPanePtySession, stat
   const entry = state.agentStatusByPaneKey[session.cacheKey]
   const sleepingRecordEntry = session.getSleepingRecordForPane(state)
   const sleepingRecord = sleepingRecordEntry?.record
-  const liveEntry = entry && entry.state !== 'done' ? entry : null
+  // A completed turn still names a resumable conversation when no durable record was captured.
+  const liveEntry = entry && (entry.state !== 'done' || !sleepingRecord) ? entry : null
+  // The user exited this conversation: keep it for a manual resume unless a turn is running again.
+  if (sleepingRecord?.requiresManualResume === true && (!liveEntry || liveEntry.state === 'done')) {
+    return null
+  }
   const agent = liveEntry ? liveEntry.agentType : sleepingRecord?.agent
   if (!agent || !isResumableTuiAgent(agent)) {
     return null

@@ -13,10 +13,11 @@ import { STARTUP_CWD_FALLBACK_NOTICE } from '../../../../../../shared/startup-cw
 import { pendingSpawnByPaneKey, pendingSpawnGenerationByPaneKey } from './pending-pane-spawn'
 import { shouldWritePtyOutputForeground } from '../output/foreground-output-visibility'
 import { toProcessExitStartup } from '../startup/process-exit-startup'
-import type {
-  PendingStartupCommand,
-  FreshSpawnOptions,
-  ColdRestoreAgentResumeStartup
+import {
+  freshSpawnCommandFields,
+  type PendingStartupCommand,
+  type FreshSpawnOptions,
+  type ColdRestoreAgentResumeStartup
 } from '../startup/fresh-spawn-types'
 
 import type { ConnectPanePtySession } from '../connect-pane-pty-session'
@@ -95,10 +96,7 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
       url: '',
       cols: session.cols,
       rows: session.rows,
-      ...(startupOverride?.command ? { command: startupOverride.command } : {}),
-      ...(startupOverride?.env
-        ? { env: session.mergeStartupEnvWithPaneIdentity(startupOverride.env) }
-        : {}),
+      ...freshSpawnCommandFields(startupOverride, options, session.mergeStartupEnvWithPaneIdentity),
       ...(coldRestoreOverride ? { launchConfig: coldRestoreOverride.launchConfig } : {}),
       ...(coldRestoreOverride
         ? {

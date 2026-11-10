@@ -3626,14 +3626,17 @@ export function createRemoteRuntimePtyTransport(
         }
       }
 
-      const commandToSend = options.command ?? command
-      const startupCommandDeliveryToSend = options.startupCommandDelivery ?? startupCommandDelivery
+      // A lost agent with no resumable session restarts as a shell, never as its original launch.
+      const inheritsLaunch = options.inheritStartupCommand !== false
+      const commandToSend = options.command ?? (inheritsLaunch ? command : undefined)
+      const startupCommandDeliveryToSend =
+        options.startupCommandDelivery ?? (inheritsLaunch ? startupCommandDelivery : undefined)
       const envToSend = options.env ?? env
       const envToDeleteToSend = options.envToDelete ?? envToDelete
-      const launchConfigToSend = options.launchConfig ?? launchConfig
+      const launchConfigToSend = options.launchConfig ?? (inheritsLaunch ? launchConfig : undefined)
       const resumeProviderSessionToSend = options.resumeProviderSession ?? resumeProviderSession
       const launchTokenToSend = options.launchToken ?? launchToken
-      const launchAgentToSend = options.launchAgent ?? launchAgent
+      const launchAgentToSend = options.launchAgent ?? (inheritsLaunch ? launchAgent : undefined)
       const restoreSpawnIntent = resumeProviderSessionToSend ? options.resumeSpawnIntent : undefined
       // Why only for a restore: an extra await would reorder every plain create against destroy.
       const spawnIntentParams = restoreSpawnIntent

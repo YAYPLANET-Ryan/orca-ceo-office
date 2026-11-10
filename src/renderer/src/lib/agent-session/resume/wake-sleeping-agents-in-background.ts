@@ -159,8 +159,9 @@ export function wakeSleepingAgentsForWorktreeInBackground(worktreeId: string): v
   const passiveTabIds = new Set<string>()
   let hasUntargetablePassiveRecord = false
   // Phone workspace opens must preserve explicit sleep until each tab opens (#11598). Filter before canonicalization so lazy records cannot steal/delete active hibernation claims.
+  // An exited conversation waits for a manual resume, never a background wake.
   const backgroundWakeRecords = worktreeRecords.filter(
-    (record) => record.restoreOnTabOpenOnly !== true
+    (record) => record.restoreOnTabOpenOnly !== true && record.requiresManualResume !== true
   )
   for (const record of getCanonicalPassiveWakeRecords(backgroundWakeRecords, wokenClaimKeys)) {
     const tabId = getSleepingRecordTabId(record)

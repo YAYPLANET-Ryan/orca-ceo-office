@@ -167,7 +167,9 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
         (ptyId && state.suppressedPtyExitIds[ptyId]) ||
         (wake && wake.record === sleepingRecord?.record && (ptyId === null || wake.ptyId === ptyId))
       if (sleepingRecord && !isHibernationWakeRecord) {
-        session.clearSleepingRecordProviderDuplicates(state, sleepingRecord)
+        // An exited conversation stays saved for a manual resume; only its aliases on other panes go.
+        session.clearSleepingRecordProviderDuplicates(state, sleepingRecord, sleepingRecord.paneKey)
+        state.markSleepingAgentSessionExited(sleepingRecord.paneKey)
       }
       session.clearStaleAgentTabTitleOnConfirmedShell()
       // Confirmed hard-kill exit must disarm leftover mouse/focus/Kitty modes; guard reset auto-replies from reaching the shell.

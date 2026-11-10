@@ -264,7 +264,7 @@ describe('shell showing through a hibernation kill', () => {
     }
   )
 
-  it('clears the record once another PTY is bound in place of the hibernated one', async () => {
+  it('fences the record once another PTY is bound in place of the hibernated one', async () => {
     const pane = await connectHibernatingPane(true)
 
     pane.exitPty()
@@ -275,16 +275,24 @@ describe('shell showing through a hibernation kill', () => {
     pane.finishCommand()
     await vi.advanceTimersByTimeAsync(350)
 
-    expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledExactlyOnceWith(pane.paneKey)
+    // A real exit keeps the conversation saved and fences its automatic resume.
+    expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+    expect(mockStoreState.markSleepingAgentSessionExited).toHaveBeenCalledExactlyOnceWith(
+      pane.paneKey
+    )
   })
 
-  it('still clears a record beside a PTY that is not being hibernated', async () => {
+  it('still fences a record beside a PTY that is not being hibernated', async () => {
     const pane = await connectHibernatingPane(false)
 
     pane.finishCommand()
     await vi.advanceTimersByTimeAsync(350)
 
-    expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledExactlyOnceWith(pane.paneKey)
+    // A real exit keeps the conversation saved and fences its automatic resume.
+    expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+    expect(mockStoreState.markSleepingAgentSessionExited).toHaveBeenCalledExactlyOnceWith(
+      pane.paneKey
+    )
   })
 
   it('does not protect a replacement record with the old wake target', async () => {
@@ -299,6 +307,10 @@ describe('shell showing through a hibernation kill', () => {
     pane.finishCommand()
     await vi.advanceTimersByTimeAsync(350)
 
-    expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledExactlyOnceWith(pane.paneKey)
+    // A real exit keeps the conversation saved and fences its automatic resume.
+    expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+    expect(mockStoreState.markSleepingAgentSessionExited).toHaveBeenCalledExactlyOnceWith(
+      pane.paneKey
+    )
   })
 })

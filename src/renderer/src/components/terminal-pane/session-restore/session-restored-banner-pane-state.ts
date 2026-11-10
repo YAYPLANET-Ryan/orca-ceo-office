@@ -3,8 +3,10 @@ import type { ManagedPane } from '@/lib/pane-manager/pane-manager-types'
 export type SessionRestoredBannerPane = Pick<ManagedPane, 'id' | 'container'>
 
 /** `resume-unavailable`: the pane asked to resume a provider session Orca could not
- *  verify, so it launched a fresh one — silence would read as a successful restore. */
-export type SessionRestoredBannerReason = 'restored' | 'resume-unavailable'
+ *  verify, so it launched a fresh one — silence would read as a successful restore.
+ *  `resume-required`: the lost agent left no resumable session (or the user exited it), so the
+ *  pane restarted as a shell and the conversation waits for a manual resume. */
+export type SessionRestoredBannerReason = 'restored' | 'resume-unavailable' | 'resume-required'
 
 export type SessionRestoredBannerPaneReasons = ReadonlyMap<number, SessionRestoredBannerReason>
 

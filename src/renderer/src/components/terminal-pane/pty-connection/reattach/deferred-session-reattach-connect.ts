@@ -20,6 +20,10 @@ import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../../../../../shared/layout-owner
 import { holdInPlaceResumeUntilSettled } from '../startup/in-place-resume-hold'
 import { mainStartsPane, startMainPaneOnFirstView } from '../spawn/main-starts-pane'
 import { attachResumeCheck } from '../spawn/main-pane-resume-banner'
+import {
+  isColdRestoreResult,
+  reattachRequiresManualResume
+} from '../startup/resume-required-shell-restart'
 
 import {
   awaitAgentStatusStartupSnapshot,
@@ -101,6 +105,8 @@ function connectDeferredSessionReattach(
   const resumeStartup = session.buildColdRestoreAgentResumeStartup()
   const coldRestoreStartup = attachOnlyView ? null : resumeStartup
   const resumedAgent = attachResumeCheck(session, coldRestoreStartup)
+  // A lost agent with no resumable session must cold-restore as a shell, never as a new conversation.
+  const resumeRequired = reattachRequiresManualResume(session, attachOnlyView, resumeStartup)
   const outputCallbacks = session.captureTransportOutputCallbacks(
     (message) => {
       if (isSshSessionGoneError(message)) {
@@ -140,6 +146,7 @@ function connectDeferredSessionReattach(
     rows: session.rows,
     sessionId: deferredReattachSessionId,
     ...(coldRestoreStartup?.command ? { command: coldRestoreStartup.command } : {}),
+    ...(resumeRequired ? { inheritStartupCommand: false as const } : {}),
     ...(coldRestoreStartup?.env
       ? { env: session.mergeStartupEnvWithPaneIdentity(coldRestoreStartup.env) }
       : {}),
@@ -241,6 +248,9 @@ function connectDeferredSessionReattach(
       )
       if (accepted && isCurrentReattach()) {
         writeStartupCwdFallbackNotice(session, result)
+        if (resumeRequired && isColdRestoreResult(result)) {
+          session.showSessionRestoredBanner('resume-required')
+        }
       }
       session.finishReattachLiveDataDeferral(accepted, outputCallbacks.generation)
       const gen = await preSignalPromise

@@ -189,6 +189,8 @@ export type PtyTransport = {
     resumeSpawnIntent?: RestoreSpawnIntent
     /** A restore no user act asked for: main holds a stopped WSL distro's pane instead of starting it. */
     wslPassiveRestore?: true
+    /** false: start a plain shell, never the pane's own launch (a lost agent with no resumable session). */
+    inheritStartupCommand?: false
     command?: string
     commandDelivery?: 'renderer' | 'provider'
     env?: Record<string, string>

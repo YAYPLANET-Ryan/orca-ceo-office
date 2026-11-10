@@ -14,6 +14,7 @@ export function createAgentStatusRecoveryActions(
   | 'captureSleepingAgentSessionsByWorktree'
   | 'captureAllSleepingAgentSessions'
   | 'clearSleepingAgentSession'
+  | 'markSleepingAgentSessionExited'
   | 'rememberSleepingAgentSession'
   | 'clearSleepingAgentSessionsByPaneKey'
   | 'clearSleepingAgentSessionsByWorktree'
@@ -72,6 +73,21 @@ export function createAgentStatusRecoveryActions(
     },
 
     clearSleepingAgentSession: (paneKey) => clearSleepingAgentSessionsByPaneKey([paneKey]),
+
+    markSleepingAgentSessionExited: (paneKey) => {
+      set((s) => {
+        const record = s.sleepingAgentSessionsByPaneKey[paneKey]
+        if (!record || record.requiresManualResume === true) {
+          return s
+        }
+        return {
+          sleepingAgentSessionsByPaneKey: {
+            ...s.sleepingAgentSessionsByPaneKey,
+            [paneKey]: { ...record, requiresManualResume: true }
+          }
+        }
+      })
+    },
 
     rememberSleepingAgentSession: (record, replaces) => {
       set((s) =>

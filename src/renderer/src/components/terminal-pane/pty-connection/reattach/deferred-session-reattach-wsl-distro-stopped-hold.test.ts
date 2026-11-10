@@ -56,6 +56,8 @@ function createSession(opts: { runtimeEnvironmentId?: string } = {}) {
       clearTabPtyId: vi.fn()
     },
     buildColdRestoreAgentResumeStartup: () => null,
+    getSleepingRecordForPane: () => null,
+    resolveExpectedLaunchTuiAgent: () => null,
     captureTransportOutputCallbacks: (reportError: (message: string) => void) => {
       onError = reportError
       return { generation: 1, callbacks: {} }

@@ -31,6 +31,8 @@ function createSession() {
     transportStreamGeneration: 1,
     deps: { paneTransportsRef: { current: new Map([[1, transport]]) } },
     buildColdRestoreAgentResumeStartup: () => startup,
+    getSleepingRecordForPane: () => null,
+    resolveExpectedLaunchTuiAgent: () => null,
     captureTransportOutputCallbacks: () => ({ generation: 1, callbacks: {} }),
     beginReattachLiveDataDeferral: vi.fn(),
     finishReattachLiveDataDeferral: vi.fn(),

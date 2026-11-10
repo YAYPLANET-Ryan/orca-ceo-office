@@ -60,6 +60,12 @@ export function createInitialStoreState(getState: () => StoreState): StoreState 
     clearSleepingAgentSession: vi.fn((paneKey: string) => {
       delete getState().sleepingAgentSessionsByPaneKey[paneKey]
     }),
+    markSleepingAgentSessionExited: vi.fn((paneKey: string) => {
+      const records = getState().sleepingAgentSessionsByPaneKey
+      if (records[paneKey]) {
+        records[paneKey] = { ...records[paneKey], requiresManualResume: true }
+      }
+    }),
     rememberSleepingAgentSession: vi.fn((record, replaces) => {
       const records = getState().sleepingAgentSessionsByPaneKey
       if (records[record.paneKey] === replaces) {

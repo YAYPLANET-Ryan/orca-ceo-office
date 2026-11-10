@@ -254,8 +254,8 @@ export function resumeSleepingAgentSessionsForWorktree(
     if (options?.skipClaimKeys?.has(claimKey)) {
       continue
     }
-    // Host-deferred panes own queued startup without PTYs; retain their records for opening instead of clearing as duplicates.
-    if (isPaneSpawnDeferred(record.paneKey)) {
+    // Host-deferred panes own queued startup; exited conversations wait for a manual resume. Both keep their records.
+    if (isPaneSpawnDeferred(record.paneKey) || record.requiresManualResume === true) {
       continue
     }
     if (isInvalidWorktreeActivationRecord(record)) {

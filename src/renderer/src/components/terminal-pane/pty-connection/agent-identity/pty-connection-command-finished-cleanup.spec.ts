@@ -171,7 +171,7 @@ export function registerPtyConnectionCommandFinishedCleanupTests(): void {
     })
 
     it.each([
-      ['clears stale sleeping identity after a confirmed return to shell', false],
+      ['keeps an exited conversation for manual resume after a confirmed return to shell', false],
       // Hibernation records resume before kill; the exposed shell is Orca’s own stop rather than an independent agent exit.
       ['keeps sleeping identity when the shell surfaces during an intentional stop', true]
     ])('%s', async (_label, stoppingOnPurpose) => {
@@ -223,13 +223,22 @@ export function registerPtyConnectionCommandFinishedCleanupTests(): void {
 
       if (stoppingOnPurpose) {
         expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+        expect(mockStoreState.markSleepingAgentSessionExited).not.toHaveBeenCalled()
         expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
           agent: 'codex'
         })
         expect(deps.onAgentExitedRef.current).not.toHaveBeenCalled()
       } else {
-        expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledExactlyOnceWith(paneKey)
-        expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
+        // The user's exit fences every automatic resume, but the conversation stays saved.
+        expect(mockStoreState.clearSleepingAgentSession).not.toHaveBeenCalled()
+        expect(mockStoreState.markSleepingAgentSessionExited).toHaveBeenCalledExactlyOnceWith(
+          paneKey
+        )
+        expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toMatchObject({
+          agent: 'codex',
+          providerSession: { key: 'session_id', id: 'sess-1' },
+          requiresManualResume: true
+        })
         expect(deps.onAgentExitedRef.current).toHaveBeenCalledWith(LEAF_1)
       }
       expect(mockStoreState.paneForegroundAgentByPaneKey[paneKey]).toEqual({
