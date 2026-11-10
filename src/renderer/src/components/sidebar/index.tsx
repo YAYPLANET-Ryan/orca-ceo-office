@@ -24,6 +24,7 @@ import { SeveredTerminalDaemonBanner } from './SeveredTerminalDaemonBanner'
 import { StalledTerminalDaemonBanner } from './StalledTerminalDaemonBanner'
 import { ContextIntegrityBanner } from './ContextIntegrityBanner'
 import { StartupWorktreeRefreshStatus } from './StartupWorktreeRefreshStatus'
+import CeoOfficeSidebar from '../ceo-office/CeoOfficeSidebar'
 
 // Load the shared Activity badge/list pipeline after the sidebar shell.
 const SidebarAgentsList = lazyWithRetry(() => import('./SidebarAgentsList'))
@@ -211,6 +212,7 @@ function Sidebar({
               </React.Suspense>
               {sidebarBody !== 'agents' && (
                 <>
+                  <CeoOfficeSidebar />
                   <LocalGitToolchainScanBanner />
                   <StartupWorktreeRefreshStatus />
                   <WorktreeList
