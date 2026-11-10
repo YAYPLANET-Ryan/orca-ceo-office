@@ -1,3 +1,4 @@
+import { withoutLaunchToken } from '../launch-token-env'
 import type { TerminalOutputCadence } from '../../../../../../shared/terminal/stream/terminal-multiplex-flow-control'
 import { lastVerifiedRuntimeStatus } from '../../../../../../shared/remote-runtime/host-status/runtime-host-status'
 import { webTerminalPlacementParentTabId } from '@/runtime/hosted-terminals/placement/web-session-terminal-placement'
@@ -3631,11 +3632,12 @@ export function createRemoteRuntimePtyTransport(
       const commandToSend = options.command ?? (inheritsLaunch ? command : undefined)
       const startupCommandDeliveryToSend =
         options.startupCommandDelivery ?? (inheritsLaunch ? startupCommandDelivery : undefined)
-      const envToSend = options.env ?? env
+      const envToSend = options.env ?? (inheritsLaunch ? env : withoutLaunchToken(env))
       const envToDeleteToSend = options.envToDelete ?? envToDelete
       const launchConfigToSend = options.launchConfig ?? (inheritsLaunch ? launchConfig : undefined)
-      const resumeProviderSessionToSend = options.resumeProviderSession ?? resumeProviderSession
-      const launchTokenToSend = options.launchToken ?? launchToken
+      const resumeProviderSessionToSend =
+        options.resumeProviderSession ?? (inheritsLaunch ? resumeProviderSession : undefined)
+      const launchTokenToSend = options.launchToken ?? (inheritsLaunch ? launchToken : undefined)
       const launchAgentToSend = options.launchAgent ?? (inheritsLaunch ? launchAgent : undefined)
       const restoreSpawnIntent = resumeProviderSessionToSend ? options.resumeSpawnIntent : undefined
       // Why only for a restore: an extra await would reorder every plain create against destroy.
@@ -3646,7 +3648,7 @@ export function createRemoteRuntimePtyTransport(
         return
       }
       const originOptions =
-        (options.resumeOrigin ?? resumeOrigin) === 'saved'
+        (options.resumeOrigin ?? (inheritsLaunch ? resumeOrigin : undefined)) === 'saved'
           ? await (savedOriginOptions ??= (async () => {
               try {
                 const supported = await runtimeEnvironmentSupportsCapability(

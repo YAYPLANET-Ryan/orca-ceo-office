@@ -16,6 +16,7 @@ import {
   sleepingRecordsEquivalentIgnoringCaptureTime
 } from './agent-resume-record-equivalence'
 import { isCompletedPiCompatibleAgentWithLiveRecoveryRecord } from './live-resume-anchor-record'
+import { exitFenceHolds } from './agent-resume-exit-fence'
 
 export type ResumeRecordStatus = Pick<
   AgentStatusEntry,
@@ -167,9 +168,10 @@ export function liveResumeRecordChange(
 }
 
 /**
- * A conversation the user exited stays saved for a manual resume, never an automatic one: a late
- * completion of the same session keeps the fence, a missing status keeps the record, and only the
- * same session running again (or another session taking the pane) replaces it.
+ * A conversation the user exited stays saved for a manual resume, never an automatic one: a
+ * completion of the same session or a row from before the exit keeps the fence, a missing status
+ * keeps the record, and only the same session running after the exit (or another session taking
+ * the pane) replaces it.
  */
 function manuallyResumedRecordChange(
   existing: SleepingAgentSessionRecord,
@@ -181,7 +183,19 @@ function manuallyResumedRecordChange(
   if (live.state === 'done' && recoveryRecordTargetsSameSession(existing, live)) {
     return recoveryRecordMatches(existing, live)
       ? null
-      : { set: { ...live, requiresManualResume: true } }
+      : {
+          set: {
+            ...live,
+            capturedAt: Math.max(existing.capturedAt, live.capturedAt),
+            requiresManualResume: true
+          }
+        }
+  }
+  if (
+    recoveryRecordTargetsSameSession(existing, live) &&
+    exitFenceHolds(existing, { agentType: live.agent, updatedAt: live.updatedAt })
+  ) {
+    return null
   }
   return { set: live }
 }
@@ -209,7 +223,8 @@ export function capturedResumeRecord(args: {
     return sleepingRecordsEquivalentIgnoringCaptureTime(existing, record) ? null : record
   }
   const worktreeId = args.worktreeIdOf()
-  if (!worktreeId) {
+  // A stale running row from before the user's exit must not unfence the saved conversation.
+  if (!worktreeId || exitFenceHolds(existing, entry)) {
     return null
   }
   const record = resumeRecordFromStatus({

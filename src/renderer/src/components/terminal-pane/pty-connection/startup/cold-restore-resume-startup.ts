@@ -24,6 +24,7 @@ import {
   normalizeAgentProviderSession
 } from '../../../../../../shared/agent-session/lifecycle/agent-session-resume'
 
+import { exitFenceHolds } from '../../../../../../shared/agent-session/lifecycle/agent-resume-exit-fence'
 import type { HeldPaneReopenOutcome } from '../../session-restore/newer-daemon/newer-daemon-hold-state'
 import type { ColdRestoreAgentResumeStartup } from './fresh-spawn-types'
 
@@ -41,7 +42,10 @@ export function findColdRestoreResumeSource(session: ConnectPanePtySession, stat
   // A completed turn still names a resumable conversation when no durable record was captured.
   const liveEntry = entry && (entry.state !== 'done' || !sleepingRecord) ? entry : null
   // The user exited this conversation: keep it for a manual resume unless a turn is running again.
-  if (sleepingRecord?.requiresManualResume === true && (!liveEntry || liveEntry.state === 'done')) {
+  if (
+    sleepingRecord?.requiresManualResume === true &&
+    (!liveEntry || liveEntry.state === 'done' || exitFenceHolds(sleepingRecord, liveEntry))
+  ) {
     return null
   }
   const agent = liveEntry ? liveEntry.agentType : sleepingRecord?.agent

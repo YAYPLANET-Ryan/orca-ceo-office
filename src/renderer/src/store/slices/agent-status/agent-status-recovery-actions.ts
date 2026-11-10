@@ -1,9 +1,13 @@
 import type { SleepingAgentSessionRecord } from '../../../../../shared/agent-session/lifecycle/agent-session-resume'
 import type { AgentStatusSlice } from './agent-status-slice-contract'
 import type { AgentStatusRuntime } from './agent-status-runtime'
+import type { AppState } from '../../types'
 import { collectSleepingAgentSessionRecordsForWorktree } from './agent-status-recovery-collection'
 import { removeSleepingRecordsReplacedByManualWorktreeSleep } from './agent-status-sleeping-records'
-import { capturedResumeRecord } from '../../../../../shared/agent-session/lifecycle/agent-resume-record-from-status'
+import {
+  capturedResumeRecord,
+  resumeRecordFromStatus
+} from '../../../../../shared/agent-session/lifecycle/agent-resume-record-from-status'
 import { getLaunchConfigForEntry } from './agent-status-launch-config'
 import { findAgentPaneWorktreeId, findTabForAgentEntry } from './agent-status-pane-key-tab-binding'
 
@@ -76,14 +80,20 @@ export function createAgentStatusRecoveryActions(
 
     markSleepingAgentSessionExited: (paneKey) => {
       set((s) => {
-        const record = s.sleepingAgentSessionsByPaneKey[paneKey]
+        // capturedAt becomes the exit time: only a status received after it lifts the fence.
+        const exitedAt = Date.now()
+        const record = s.sleepingAgentSessionsByPaneKey[paneKey] ?? exitedStatusRecord(s, paneKey)
         if (!record || record.requiresManualResume === true) {
           return s
         }
         return {
           sleepingAgentSessionsByPaneKey: {
             ...s.sleepingAgentSessionsByPaneKey,
-            [paneKey]: { ...record, requiresManualResume: true }
+            [paneKey]: {
+              ...record,
+              capturedAt: Math.max(record.capturedAt, exitedAt),
+              requiresManualResume: true
+            }
           }
         }
       })
@@ -163,4 +173,20 @@ export function createAgentStatusRecoveryActions(
       })
     }
   }
+}
+
+/** A pane with no record yet keeps its exited conversation from the status row that still names it. */
+function exitedStatusRecord(s: AppState, paneKey: string): SleepingAgentSessionRecord | null {
+  const entry = s.agentStatusByPaneKey[paneKey]
+  const worktreeId = entry ? (entry.worktreeId ?? findAgentPaneWorktreeId(s, paneKey)) : null
+  return entry && worktreeId
+    ? resumeRecordFromStatus({
+        entry,
+        worktreeId,
+        tabOf: () => findTabForAgentEntry(s, worktreeId, entry),
+        capturedAt: entry.updatedAt,
+        launchConfig: getLaunchConfigForEntry(s, entry),
+        origin: 'live'
+      })
+    : null
 }

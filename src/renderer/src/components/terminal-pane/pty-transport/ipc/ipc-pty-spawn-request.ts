@@ -1,3 +1,4 @@
+import { withoutLaunchToken } from '../launch-token-env'
 import type { IpcPtyTransportOptions, PtyConnectResult, PtyTransport } from '../pty-transport-types'
 import type { RuntimeCreateAgentSessionResult } from '../../../../../../shared/agent-session/agent-session-host-authority'
 import {
@@ -158,10 +159,18 @@ export async function spawnIpcPty(
 }
 
 /** A lost agent with no resumable session restarts as a shell: replaying its launch would open a new conversation. */
-function withoutPaneLaunch<T extends object>(transportOptions: T, dropLaunch: boolean): T {
+function withoutPaneLaunch<T extends { env?: Record<string, string> }>(
+  transportOptions: T,
+  dropLaunch: boolean
+): T {
   return dropLaunch
     ? {
         ...transportOptions,
+        // Pane identity env stays for hooks; the dropped launch's token must not vouch for a later agent.
+        env: withoutLaunchToken(transportOptions.env),
+        launchToken: undefined,
+        resumeProviderSession: undefined,
+        resumeOrigin: undefined,
         command: undefined,
         commandDelivery: undefined,
         launchConfig: undefined,

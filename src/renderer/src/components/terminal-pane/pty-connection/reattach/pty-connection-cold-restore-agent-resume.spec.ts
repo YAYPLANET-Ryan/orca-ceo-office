@@ -786,5 +786,36 @@ export function registerPtyConnectionColdRestoreAgentResumeTests(): void {
       )
       expect(seen.deps?.onShowSessionRestoredBanner).toHaveBeenCalledWith(1, 'resume-required')
     })
+
+    it('does not resume an exited conversation from a running row left before the exit', async () => {
+      const { transport } = await coldRestoreLostPane((key) => {
+        mockStoreState.sleepingAgentSessionsByPaneKey[key] = {
+          paneKey: key,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          agent: 'codex',
+          providerSession: { key: 'session_id', id: 'codex-exited' },
+          prompt: '',
+          state: 'working',
+          capturedAt: 50,
+          updatedAt: 5,
+          origin: 'live',
+          requiresManualResume: true
+        }
+        mockStoreState.agentStatusByPaneKey[key] = {
+          state: 'working',
+          prompt: 'build it',
+          agentType: 'codex',
+          paneKey: key,
+          updatedAt: 5,
+          stateStartedAt: 5,
+          stateHistory: [],
+          providerSession: { key: 'session_id', id: 'codex-exited' }
+        }
+      })
+      expect(transport.connect).not.toHaveBeenCalledWith(
+        expect.objectContaining({ command: expect.stringContaining('resume') })
+      )
+    })
   })
 }
