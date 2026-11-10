@@ -8,8 +8,8 @@ import {
   SESSION
 } from '../native-chat/agent-session-timeline/provider-timeline-assembler-test-support'
 import { GROK_ACP_DIALECT } from './acp-dialects/grok-dialect'
-import { AcpStructuredLane } from './acp-structured-lane'
-import { AcpItemOwnership } from './acp-item-ownership'
+import { AcpStructuredLane } from './journal/acp-structured-lane'
+import { AcpItemOwnership } from './timeline/acp-item-ownership'
 import { retainedCollectionEntries } from './acp-ownership-test-support'
 import { parseAgentJournalItemKey } from '../../shared/agent-session/journal/agent-session-journal-item-key'
 import { agentJournalTurnBody } from '../../shared/agent-session/lifecycle/agent-session-turn-record'

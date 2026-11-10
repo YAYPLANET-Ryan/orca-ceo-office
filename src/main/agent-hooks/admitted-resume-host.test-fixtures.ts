@@ -1,46 +1,18 @@
 import '../daemon/pty-subprocess/testing/mock-descendant-sweep'
 import { realpath } from 'node:fs/promises'
 import { normalize } from 'node:path'
-import { request } from 'node:http'
-import type { AgentHookServer } from './server'
-import type { Body } from './server.test-fixtures'
+import type { AgentHookServer } from './server/agent-hook-server'
+import type { Body } from './server/testing/server.test-fixtures'
 import { TerminalHost } from '../daemon/terminal-host/terminal-host'
 import { createMockSubprocess } from '../daemon/providers/adapter/testing/daemon-pty-adapter-test-harness'
 import type { HookContextSnapshotReader } from './server/hook-context-snapshot'
 import type { HookProviderObservation } from '../../shared/agent-hook-listener/state/hook-provider-observation'
 import type { ProviderObservationWriter } from './server/provider-observation-queue'
-import { PANE } from './server.test-fixtures'
+import { PANE, postHookEvent } from './server/testing/server.test-fixtures'
 import { composeWorktreeId } from '../../shared/worktree/id'
 
-export function postAdmittedFixtureHook(server: AgentHookServer, body: Body, path: string) {
-  const env = server.buildPtyEnv()
-  const port = Number(env.ORCA_AGENT_HOOK_PORT)
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error('Own hook fixture listener is unavailable')
-  }
-  return new Promise<number>((resolveStatus, reject) => {
-    const req = request(
-      {
-        host: '127.0.0.1',
-        port,
-        path,
-        method: 'POST',
-        signal: AbortSignal.timeout(2000),
-        headers: {
-          'Content-Type': 'application/json',
-          Connection: 'close',
-          'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
-        }
-      },
-      (res) => {
-        res.on('error', reject)
-        res.on('end', () => resolveStatus(res.statusCode ?? 0))
-        res.resume()
-      }
-    )
-    req.on('error', reject)
-    req.end(JSON.stringify(body))
-  })
+export async function postAdmittedFixtureHook(server: AgentHookServer, body: Body, path: string) {
+  return (await postHookEvent(server, body, path)).status
 }
 
 export async function createAdmittedResumeHost(root: string, agentType: 'claude' | 'codex') {

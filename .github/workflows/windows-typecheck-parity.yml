@@ -83,8 +83,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: >-
           pnpm test
-          src/main/agent-hooks/server-launch-resume-identity.test.ts
-          src/main/agent-hooks/server-claude-session-continuation.test.ts
+          src/main/agent-hooks/server/testing/identity/server-launch-resume-identity.test.ts
+          src/main/agent-hooks/server/testing/identity/server-claude-session-continuation.test.ts
           --maxWorkers=2
   parity:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true

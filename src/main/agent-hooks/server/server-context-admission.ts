@@ -65,11 +65,23 @@ export abstract class AgentHookServerContextAdmission extends AgentHookServerReq
       return false
     }
     const paneKey = this.resolvePaneKeyAlias(rawPaneKey.trim())
-    return (
-      this.getProviderSessionIdentities().some((row) => row.paneKey === paneKey) ||
-      this.getStatusSnapshotForPane(paneKey).some(
-        (row) => row.agentType === 'claude' || row.agentType === 'codex'
+    const rows = this.getStatusSnapshotForPane(paneKey)
+    if (rows.some((row) => row.agentType === 'claude' || row.agentType === 'codex')) {
+      return true
+    }
+    // Identity rows carry no agent type; a pane whose every live row names another agent is not a Claude/Codex context.
+    const ownedByAnotherAgent =
+      rows.length > 0 &&
+      rows.every(
+        (row) =>
+          typeof row.agentType === 'string' &&
+          row.agentType !== 'unknown' &&
+          row.agentType !== 'claude' &&
+          row.agentType !== 'codex'
       )
+    return (
+      !ownedByAnotherAgent &&
+      this.getProviderSessionIdentities().some((row) => row.paneKey === paneKey)
     )
   }
 

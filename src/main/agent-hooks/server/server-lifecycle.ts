@@ -19,7 +19,7 @@ import { trackEmptyPaneKeyHook } from './server-transport-rules'
 import { AgentHookServerStatusHookLifecycle } from './server-status-hook-lifecycle'
 import { OPENCODE_STARTUP_PROMPT_CLAIM_PATH } from '../../../shared/agent-launch/startup/opencode-startup-prompt'
 import { CLAUDE_AGENT_VIEW_PATH } from '../../../shared/claude-agent-view'
-import { respondAfterAgentToolPluginHooks } from '../agent-tool-plugin-hooks'
+import { respondAfterAgentToolPluginHooks } from '../tool-events/agent-tool-plugin-hooks'
 
 import type { HookServerStartOptions, NormalizedLocalHook } from './server-types'
 
@@ -217,6 +217,7 @@ export abstract class AgentHookServerLifecycle extends AgentHookServerStatusHook
     this.port = 0
     this.token = ''
     this.endpointFileWritten = false
+    this.ownerStateInitialized = false
   }
 
   /** Quit retains status until chat teardown reads resumable child and background work. */

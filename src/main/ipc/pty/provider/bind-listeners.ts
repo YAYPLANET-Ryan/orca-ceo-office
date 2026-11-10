@@ -1,6 +1,6 @@
 import { isCurrentPtyExit, ptyOwnership } from './ownership-state'
-import { agentHookServer } from '../../../agent-hooks/server'
-import { wslBridgePtyPresence } from '../../../agent-hooks/wsl-bridge-pty-presence'
+import { agentHookServer } from '../../../agent-hooks/server/agent-hook-server'
+import { wslBridgePtyPresence } from '../../../agent-hooks/wsl-relay/wsl-bridge-pty-presence'
 import {
   localBackgroundStreamUnsub,
   localDataUnsub,

@@ -1,5 +1,5 @@
 import { defineMethod } from '../../core'
-import { agentHookServer } from '../../../../agent-hooks/server'
+import { agentHookServer } from '../../../../agent-hooks/server/agent-hook-server'
 
 export const DIAGNOSTICS_METHODS = [
   defineMethod({

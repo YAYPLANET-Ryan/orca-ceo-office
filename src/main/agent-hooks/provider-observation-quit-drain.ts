@@ -1,4 +1,4 @@
-import type { AgentHookServer } from './server'
+import type { AgentHookServer } from './server/agent-hook-server'
 import { settleWithinMs } from '../startup/quit/quit-teardown-deadline'
 
 type QuitObservationServer = Pick<

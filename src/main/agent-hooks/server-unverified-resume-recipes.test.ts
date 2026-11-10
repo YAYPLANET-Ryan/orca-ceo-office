@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { AgentHookServer } from './server'
+import { AgentHookServer } from './server/agent-hook-server'
 import { ResumeLaunchRecipeJournal } from './server/resume-launch-recipe-journal'
-import { PANE } from './server.test-fixtures'
+import { PANE } from './server/testing/server.test-fixtures'
 
 vi.mock('../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../telemetry/cohort-classifier', () => ({ getCohortAtEmit: () => ({}) }))

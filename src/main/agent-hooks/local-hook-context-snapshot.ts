@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises'
 import { isAbsolute, normalize } from 'node:path'
-import type { LocalPtyInventoryReader } from './local-tmux-managed-pty'
+import type { LocalPtyInventoryReader } from './observations/local-tmux-managed-pty'
 import type { HookContextSnapshotReader } from './server/hook-context-snapshot'
 import { readHookResumeIntent } from '../../shared/agent-hook-listener/state/hook-resume-intent'
 import { readHookProviderObservation } from '../../shared/agent-hook-listener/state/hook-provider-observation'

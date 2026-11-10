@@ -1,10 +1,10 @@
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createLocalHookContextSnapshotReader } from './local-hook-context-snapshot'
-import { createLocalPtyInventoryReader } from './local-tmux-managed-pty'
+import { createLocalPtyInventoryReader } from './observations/local-tmux-managed-pty'
 import type { PtyProcessInfo } from '../providers/pty-process-info'
 import type { ParsedHookEnvelope } from '../../shared/agent-hook-listener/hook-envelope'
-import { PANE } from './server.test-fixtures'
+import { PANE } from './server/testing/server.test-fixtures'
 
 const cwd = resolve('synthetic-workspace-b')
 const row: PtyProcessInfo = {

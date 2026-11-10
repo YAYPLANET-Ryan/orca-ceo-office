@@ -8,9 +8,12 @@ import { DaemonPtyAdapter } from '../daemon-pty-adapter'
 import { createMockSubprocess, startDaemonAdapterHarness } from './daemon-pty-adapter-test-harness'
 import { composeWorktreeId } from '../../../../../shared/worktree/id'
 import type { HookProviderObservationUpdate } from '../../../../../shared/agent-hook-listener/state/hook-provider-observation'
-import { AgentHookServer } from '../../../../agent-hooks/server'
-import { buildBody, postHookEvent } from '../../../../agent-hooks/server.test-fixtures'
-import { createLocalPtyInventoryReader } from '../../../../agent-hooks/local-tmux-managed-pty'
+import { AgentHookServer } from '../../../../agent-hooks/server/agent-hook-server'
+import {
+  buildBody,
+  postHookEvent
+} from '../../../../agent-hooks/server/testing/server.test-fixtures'
+import { createLocalPtyInventoryReader } from '../../../../agent-hooks/observations/local-tmux-managed-pty'
 import { createLocalHookContextSnapshotReader } from '../../../../agent-hooks/local-hook-context-snapshot'
 import { createLocalProviderObservationWriter } from '../../../../agent-hooks/local-provider-observation-writer'
 import { createLegacyDaemonAdapters } from '../../routing/daemon-legacy-adapters'

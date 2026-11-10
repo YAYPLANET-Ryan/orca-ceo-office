@@ -57,6 +57,7 @@ import type {
 import { RevisionedMap } from './revisioned-map'
 import { forgetAgentExit, type AgentExitEvidence } from './agent-exit-evidence'
 import { HookContextQuarantine } from '../hook-context-quarantine'
+import type { LastStatusStore } from './last-status-store'
 
 export abstract class AgentHookServerState {
   protected readonly contextQuarantine = new HookContextQuarantine()
@@ -311,10 +312,9 @@ export abstract class AgentHookServerState {
     payload: AgentHookEventPayload | EnrichedAgentHookEventPayload,
     launchTokenHashOverride?: string
   ): AgentHookAuthorityEvidence | null
-  protected abstract serializeStatusFile(): string
   protected abstract scheduleStatusPersist(): void
-  protected abstract runStatusPersist(): void
-  protected abstract primeStatusPersistBaseline(onDiskJson: string): void
+  protected abstract runStatusPersist(): boolean
+  protected abstract getStatusStore(): LastStatusStore | null
 
   abstract _getStateForTests(): HookListenerState
   abstract _resetPromptSentDedupeForTests(): void

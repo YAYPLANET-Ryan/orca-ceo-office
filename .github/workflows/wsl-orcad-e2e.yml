@@ -28,6 +28,7 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'src/main/ssh/**'
+      - 'src/main/ssh/migration-source/**'
       - 'src/main/persistence/migrating-orcad-catalog/**'
       - 'src/main/managed-server/**'
       - 'src/packages/process-host/**'

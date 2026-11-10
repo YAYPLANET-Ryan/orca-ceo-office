@@ -1,5 +1,6 @@
 import { ContextIntegrityNotice } from './ContextIntegrityNotice'
 import { useEffect, useState } from 'react'
+import { installWindowVisibilityInterval } from '@/lib/window-visibility-interval'
 import { useAppStore } from '@/store'
 import { callRuntimeRpc } from '@/runtime/rpc/calls/runtime-rpc-call'
 import { useWorktreeRuntimeTarget } from '@/runtime/rpc/targets/use-worktree-runtime-target'
@@ -72,15 +73,12 @@ export function ContextIntegrityBanner(): React.JSX.Element | null {
     const onVisible = (): void => {
       void refresh()
     }
-    void refresh()
+    const stopInterval = installWindowVisibilityInterval({ run: onVisible, intervalMs: 30_000 })
     window.addEventListener('focus', onVisible)
-    document.addEventListener('visibilitychange', onVisible)
-    const timer = window.setInterval(onVisible, 30_000)
     return () => {
       disposed = true
-      window.clearInterval(timer)
+      stopInterval()
       window.removeEventListener('focus', onVisible)
-      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [key, target, worktreeId])
 

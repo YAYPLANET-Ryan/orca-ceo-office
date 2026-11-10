@@ -20,6 +20,9 @@ import {
 
 export const RECIPE_JOURNAL_APPLICATION_ID = 0x4f52524a
 export const RECIPE_JOURNAL_MAX_FILE_BYTES = 64 * 1024 * 1024
+// Markers this process already validated and fsynced; later saves still re-validate content but skip the
+// file and directory fsync that each per-launch save would otherwise repeat (main-sync-fs hot path).
+const durableMarkers = new Set<string>()
 
 export function validateRecipeJournalCreationTarget(file: string): void {
   const target = lstatSync(file, { throwIfNoEntry: false })
@@ -75,7 +78,9 @@ function prepareMarker(
   kind: string,
   allowCreate: boolean
 ): void {
+  const durableKey = JSON.stringify([marker, profileId, kind])
   if (!existsSync(marker)) {
+    durableMarkers.delete(durableKey)
     if (!allowCreate) {
       throw new Error('Resume recipe journal owner is missing')
     }
@@ -103,8 +108,12 @@ function prepareMarker(
     }
   }
   validateMarker(marker, profileId, kind)
+  if (durableMarkers.has(durableKey)) {
+    return
+  }
   fsyncFileSync(marker)
   bestEffortFsyncDirectorySync(dirname(marker))
+  durableMarkers.add(durableKey)
 }
 
 export function validateRecipeJournalOwner(file: string, profileId: string): void {

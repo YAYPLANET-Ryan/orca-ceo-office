@@ -2,8 +2,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { expect, it, vi } from 'vitest'
-import { AgentHookServer } from './server'
-import { PANE } from './server.test-fixtures'
+import { AgentHookServer } from './server/agent-hook-server'
+import { PANE } from './server/testing/server.test-fixtures'
 
 vi.mock('../telemetry/client', () => ({ track: vi.fn() }))
 

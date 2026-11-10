@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises'
 import { normalize } from 'node:path'
-import type { LocalPtyInventoryReader } from './local-tmux-managed-pty'
+import type { LocalPtyInventoryReader } from './observations/local-tmux-managed-pty'
 import type { IPtyProvider } from '../providers/pty-provider-contract'
 import type { ProviderObservationWriter } from './server/provider-observation-queue'
 import { matchesProviderObservationScope } from './server/provider-observation-scope'

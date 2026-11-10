@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentHookServer } from './server'
-import { buildBody, postHookEvent, PANE, GOOD_PANE } from './server.test-fixtures'
+import { AgentHookServer } from './server/agent-hook-server'
+import { buildBody, postHookEvent, PANE, GOOD_PANE } from './server/testing/server.test-fixtures'
 import type { HookContextSnapshot } from './server/hook-context-snapshot'
 import type { SpoolRecord } from '../../shared/agent-hook-listener/transport/agent-hook-spool'
 import { makeStructuredAgentStatusSubject } from '../../shared/agent-status/contracts/agent-status-subject'
 import { setPluginHookRunner } from '../plugins/hooks/plugin-hook-dispatch'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { readSavedStatus } from './server/testing/persistence/last-status.test-fixtures'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import type * as AgentPresenceProbe from '../../shared/agent-status/process/agent-process-presence-probe'
@@ -181,7 +182,7 @@ describe('hook context integrity before attributed state', () => {
       if (!root) {
         throw new Error('Missing owned persistence fixture')
       }
-      const saved = JSON.parse(readFileSync(join(root, 'agent-hooks', 'last-status.json'), 'utf8'))
+      const saved = JSON.parse(readSavedStatus(join(root, 'agent-hooks', 'last-status.json')))
       expect(saved.entries[PANE]?.providerSession?.id).toBe(expected)
     }
   )
