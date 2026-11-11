@@ -96,7 +96,31 @@ try {
   ) {
     throw new Error('Reference must match its pinned installer bytes, source and version')
   }
-  const physicalProtocol = legacyUpgrade ? 36 : 55
+  const fallbackProtocol = 55
+  const candidateProtocol = Number(
+    /export const PROTOCOL_VERSION = (\d+)/.exec(
+      readFileSync('src/main/daemon/protocol/daemon-protocol-version.ts', 'utf8')
+    )?.[1]
+  )
+  if (!Number.isInteger(candidateProtocol)) {
+    throw new Error('Candidate daemon protocol is unreadable from its source')
+  }
+  if (!legacyUpgrade && candidateProtocol !== fallbackProtocol) {
+    // Why: the pinned fallback cannot reattach a newer candidate daemon, so a same-protocol
+    // rollback does not exist; record that instead of passing or relaxing the oracle.
+    // Rollback is a reinstall plus cold restore, which this probe does not qualify (Q-CP0130-1).
+    checkpoint('NOT_APPLICABLE', {
+      result: 'NOT_APPLICABLE_CANDIDATE_PROTOCOL_CHANGED',
+      candidateSource: candidate.source,
+      candidateVersion: candidate.version,
+      candidateProtocol,
+      fallbackVersion: fallback.version,
+      fallbackProtocol,
+      rollbackQualification: 'NOT_ESTABLISHED_REINSTALL_THEN_COLD_RESTORE'
+    })
+    process.exit(0)
+  }
+  const physicalProtocol = legacyUpgrade ? 36 : fallbackProtocol
   const replacementManifest = legacyUpgrade ? candidate : fallback
   const replacementInstaller = legacyUpgrade
     ? path.resolve(candidate.installer.path)

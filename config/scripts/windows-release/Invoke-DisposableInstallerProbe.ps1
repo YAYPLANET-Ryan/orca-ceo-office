@@ -123,7 +123,12 @@ try {
     Set-ProbePhase 'PROTOCOL55_FALLBACK'
     & node .github/scripts/check-installed-protocol55-fallback.mjs $install $root
     if($LASTEXITCODE -ne 0){throw 'Disposable protocol55 program fallback failed'}
-    $evidence.protocolRollback='PASS_SYNTHETIC_PROTOCOL55_FALLBACK_ONLY'
+    $fallbackResult=(Get-Content -Raw dist/ceo-protocol55-fallback-proof.json|ConvertFrom-Json).result
+    if($fallbackResult -eq 'NOT_APPLICABLE_CANDIDATE_PROTOCOL_CHANGED'){
+        $evidence.protocolRollback='NOT_APPLICABLE_CANDIDATE_PROTOCOL_CHANGED'
+    } elseif($fallbackResult -eq 'PASS_SYNTHETIC_PROTOCOL55_PROGRAM_FALLBACK'){
+        $evidence.protocolRollback='PASS_SYNTHETIC_PROTOCOL55_FALLBACK_ONLY'
+    } else {throw "Disposable protocol55 program fallback returned $fallbackResult"}
     Set-ProbePhase 'LEGACY36_UPGRADE'
     & node .github/scripts/check-installed-protocol55-fallback.mjs $install $root --legacy36-upgrade
     if($LASTEXITCODE -ne 0){throw 'Disposable legacy36 to candidate55 qualification failed'}
