@@ -47,6 +47,8 @@ function git(root, args, options = {}) {
     cwd: root,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
+    // Why: a branch based several releases back lists more changed paths than the 1 MiB default.
+    maxBuffer: 64 * 1024 * 1024,
     ...options
   })
 }
