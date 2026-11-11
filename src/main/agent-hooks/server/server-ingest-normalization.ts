@@ -294,10 +294,18 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
       }
       this.recordCurrentAuthorityObservation(event)
       toolCallOwner = event
-      const enriched = this.applyObservedLocalHook(event, normalized.onAccepted)
-      this.checkpointAdmittedProvider(source, admitted, enriched)
+      const enriched = this.checkpointAdmittedProvider(
+        source,
+        admitted,
+        this.applyObservedLocalHook(event, normalized.onAccepted)
+      )
       if (enriched && admitted === true) {
+        // An attested hook's process was proved during admission; only unattested ones need it.
         this.checkAgentPresenceAfterHook(event, enriched)
+      }
+      if (enriched) {
+        // Why: attested Claude/Codex hooks are the ones whose turn end and final reply live in
+        // the transcript; gating these on `admitted === true` skipped every attested hook.
         this.scheduleAssistantMessageRetry(source, aliasedBody, enriched)
         this.scheduleTranscriptPoll(source, aliasedBody, enriched)
       }

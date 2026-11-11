@@ -9,11 +9,13 @@ import type { AgentHookEventPayload } from '../../../shared/agent-hook-listener/
 import { AgentHookServerContextAdmission } from './server-context-admission'
 
 export abstract class AgentHookServerResumeCheckpoints extends AgentHookServerContextAdmission {
+  /** Returns the row that is current after the checkpoint, so follow-up work keyed on row
+   *  identity (transcript polls, reply retries) does not hold the replaced object. */
   protected checkpointAdmittedProvider(
     source: AgentHookSource,
     context: true | AdmittedHookContext | undefined,
     event: EnrichedAgentHookEventPayload | undefined
-  ): void {
+  ): EnrichedAgentHookEventPayload | undefined {
     const checkpoint = admittedResumeCheckpoint(
       source,
       context,
@@ -25,8 +27,10 @@ export abstract class AgentHookServerResumeCheckpoints extends AgentHookServerCo
       if (this.writeLegacyStatusRow(checkpoint)) {
         this.commitStatusRowMutation(event, checkpoint, false)
         this.scheduleStatusPersist()
+        return checkpoint
       }
     }
+    return event
   }
 }
 
