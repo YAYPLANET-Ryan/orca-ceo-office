@@ -3,6 +3,7 @@ import { AgentHookServer } from '../../agent-hook-server'
 import { buildBody, postHookEvent } from '../server.test-fixtures'
 import type { probeAgentProcessPresence } from '../../../../../shared/agent-status/process/agent-process-presence-probe'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({ getCohortAtEmit: () => ({}) }))
 const probe = vi.hoisted(() => vi.fn<typeof probeAgentProcessPresence>(async () => 'live'))
@@ -18,16 +19,23 @@ afterEach(() => {
   probe.mockReset().mockResolvedValue('live')
 })
 
-async function idleClaude(server: AgentHookServer, session = 'claude-parent'): Promise<void> {
-  for (const hook_event_name of ['UserPromptSubmit', 'Stop']) {
+// Fork 6d65165647: Claude/Codex hooks are admitted by root evidence and skip the HTTP owner probe,
+// so this suite drives the probe with unprotected agents: an idle Antigravity owner and Grok
+// challengers. No assertion depends on Claude/Codex behaviour.
+async function idleOwner(server: AgentHookServer, session = 'agy-parent'): Promise<void> {
+  for (const [hook_event_name, extra] of [
+    ['PreInvocation', {}],
+    ['Stop', { fullyIdle: true, terminationReason: 'NO_TOOL_CALL', error: '' }]
+  ] as const) {
     await postHookEvent(
       server,
       buildBody(
-        { hook_event_name, session_id: session, prompt: session },
+        { hook_event_name, conversationId: session, prompt: session, ...extra },
         {
           agentProcess: JSON.stringify({ pid: 4001, platform: 'linux', startTime: 'birth' })
         }
-      )
+      ),
+      '/hook/antigravity'
     )
   }
 }
@@ -35,10 +43,10 @@ async function idleClaude(server: AgentHookServer, session = 'claude-parent'): P
 it.each(['stop', 'restart', 'disable', 're-enable'] as const)(
   'discards an old hook when %s interrupts its owner probe',
   async (action) => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     servers.push(server)
     await server.start({ env: 'production' })
-    await idleClaude(server)
+    await idleOwner(server)
     let release: (() => void) | undefined
     probe.mockImplementationOnce(
       () =>
@@ -50,17 +58,17 @@ it.each(['stop', 'restart', 'disable', 're-enable'] as const)(
       server,
       buildBody({
         hook_event_name: 'UserPromptSubmit',
-        session_id: 'obsolete-codex',
+        session_id: 'obsolete-grok',
         prompt: 'Obsolete turn'
       }),
-      '/hook/codex'
+      '/hook/grok'
     )
     await vi.waitFor(() => expect(probe).toHaveBeenCalledOnce())
     if (action === 'stop' || action === 'restart') {
       server.stop()
       if (action === 'restart') {
         await server.start({ env: 'production' })
-        await idleClaude(server, 'replacement-claude')
+        await idleOwner(server, 'replacement-agy')
       }
     } else {
       server.setStatusHooksEnabled(false)
@@ -85,24 +93,24 @@ it.each(['stop', 'restart', 'disable', 're-enable'] as const)(
         server,
         buildBody({
           hook_event_name: 'UserPromptSubmit',
-          session_id: 'current-codex',
+          session_id: 'current-grok',
           prompt: 'Current turn'
         }),
-        '/hook/codex'
+        '/hook/grok'
       )
       expect(server.getStatusSnapshot()[0]).toMatchObject({
-        agentType: 'codex',
-        providerSession: { id: 'current-codex' }
+        agentType: 'grok',
+        providerSession: { id: 'current-grok' }
       })
     }
   }
 )
 
 it('starts a new owner check after re-enabling without waiting on the discarded generation', async () => {
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   servers.push(server)
   await server.start({ env: 'production' })
-  await idleClaude(server)
+  await idleOwner(server)
   let release: (() => void) | undefined
   probe.mockImplementationOnce(
     () =>
@@ -110,25 +118,25 @@ it('starts a new owner check after re-enabling without waiting on the discarded 
         release = () => resolve('live')
       })
   )
-  const postCodex = (session: string) =>
+  const postGrok = (session: string) =>
     postHookEvent(
       server,
       buildBody({ hook_event_name: 'UserPromptSubmit', session_id: session, prompt: session }),
-      '/hook/codex'
+      '/hook/grok'
     )
-  const obsolete = postCodex('obsolete-codex')
+  const obsolete = postGrok('obsolete-grok')
   await vi.waitFor(() => expect(probe).toHaveBeenCalledOnce())
   server.setStatusHooksEnabled(false)
   server.setStatusHooksEnabled(true)
   probe.mockResolvedValue('exited')
-  const current = postCodex('current-codex')
+  const current = postGrok('current-grok')
   try {
     await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(2))
     expect((await current).status).toBe(204)
-    expect(server.getStatusSnapshot()[0].providerSession?.id).toBe('current-codex')
+    expect(server.getStatusSnapshot()[0].providerSession?.id).toBe('current-grok')
   } finally {
     release?.()
     await Promise.all([obsolete, current])
   }
-  expect(server.getStatusSnapshot()[0].providerSession?.id).toBe('current-codex')
+  expect(server.getStatusSnapshot()[0].providerSession?.id).toBe('current-grok')
 })

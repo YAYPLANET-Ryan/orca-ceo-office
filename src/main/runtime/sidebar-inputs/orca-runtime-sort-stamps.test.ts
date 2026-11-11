@@ -14,6 +14,9 @@ import {
   storeWorktreeMeta
 } from '../orca-runtime-tests/runtime-store-partial-fixture'
 
+import { attestFixtureHookContext } from '../../agent-hooks/server/testing/attested-hook-context.test-fixtures'
+// Fork 6d65165647: terminal-title Claude/Codex status is refused without attestation; this
+// suite uses an unprotected agent (gemini) because no assertion is agent-specific.
 vi.mock('../../../shared/sidebar-inputs-switch', () => ({ ORCA_SIDEBAR_INPUTS_IS_MAIN: true }))
 
 const WT = 'repo-1::/tmp/worktree-a'
@@ -67,7 +70,7 @@ describe('host sort stamps on a headless runtime', () => {
       vi.useFakeTimers({ now: 75_000 })
       try {
         const { runtime, meta } = createHeadlessRuntime()
-        const server = new AgentHookServer()
+        const server = attestFixtureHookContext(new AgentHookServer())
         runtime.attachAgentStatusStore(server)
         const pane = {
           paneKey: 'tab-1:11111111-1111-4111-8111-111111111111',
@@ -76,12 +79,12 @@ describe('host sort stamps on a headless runtime', () => {
         }
         server.ingestTerminalStatus({
           ...pane,
-          payload: { state: 'working', prompt: 'task', agentType: 'claude' }
+          payload: { state: 'working', prompt: 'task', agentType: 'gemini' }
         })
         vi.setSystemTime(76_000)
         server.ingestTerminalStatus({
           ...pane,
-          payload: { state: 'done', prompt: 'task', agentType: 'claude', sessionBoundary }
+          payload: { state: 'done', prompt: 'task', agentType: 'gemini', sessionBoundary }
         })
         return meta[WT]
       } finally {
@@ -99,12 +102,12 @@ describe('host sort stamps on a headless runtime', () => {
 
   it('reconciles stored tiers once the provider can answer for the workspace’s terminals', async () => {
     const live = createHeadlessRuntime({ lastActivityAt: 5, smartTier: 'done', smartAt: 4 })
-    live.runtime.attachAgentStatusStore(new AgentHookServer())
+    live.runtime.attachAgentStatusStore(attestFixtureHookContext(new AgentHookServer()))
     await live.runtime.sidebarFacts?.reconcileSortStampTiers({ probePtyLiveness: async () => true })
     expect(live.meta[WT]).toMatchObject({ lastActivityAt: 5, smartTier: 'done', smartAt: 4 })
 
     const gone = createHeadlessRuntime({ lastActivityAt: 5, smartTier: 'done', smartAt: 4 })
-    gone.runtime.attachAgentStatusStore(new AgentHookServer())
+    gone.runtime.attachAgentStatusStore(attestFixtureHookContext(new AgentHookServer()))
     await gone.runtime.sidebarFacts?.reconcileSortStampTiers({
       probePtyLiveness: async () => false
     })
@@ -119,14 +122,14 @@ describe('host sort stamps on a headless runtime', () => {
     vi.useFakeTimers({ now: 80_000 })
     try {
       const { runtime, meta, setWorktreeMeta } = createHeadlessRuntime()
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       runtime.attachAgentStatusStore(server)
       const pane = (id: string, state: 'working' | 'done'): void =>
         server.ingestTerminalStatus({
           paneKey: `tab-1:${id}`,
           tabId: 'tab-1',
           worktreeId: WT,
-          payload: { state, prompt: 'task', agentType: 'claude' }
+          payload: { state, prompt: 'task', agentType: 'gemini' }
         })
       pane('11111111-1111-4111-8111-111111111111', 'working')
       vi.setSystemTime(90_000)

@@ -3,6 +3,7 @@ import { AgentHookServer, _internals } from '../../../agent-hook-server'
 import { buildBody, PANE, postHookEvent } from '../../server.test-fixtures'
 import { createProgramStatusProjector } from '../../../../../../shared/program-status/agent-status-projector'
 
+import { attestFixtureHookContext } from '../../attested-hook-context.test-fixtures'
 vi.mock('../../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../../telemetry/cohort-classifier', () => ({ getCohortAtEmit: vi.fn() }))
 
@@ -11,7 +12,7 @@ let projector: ReturnType<typeof createProgramStatusProjector>
 
 beforeEach(async () => {
   _internals.resetCachesForTests()
-  server = new AgentHookServer()
+  server = attestFixtureHookContext(new AgentHookServer())
   await server.start({ env: 'production' })
   projector = createProgramStatusProjector()
 })
@@ -52,10 +53,10 @@ function row() {
   return server.getStatusSnapshotForPane(PANE)[0]
 }
 
-function expectSettledLikeStop(): void {
-  expect(row()).toMatchObject({ state: 'done', mainAgent: { state: 'done' } })
-  expect(row().interrupted).toBeUndefined()
-  expect(row().mainAgent?.outcome).toBeUndefined()
+// Fork 6d65165647: OSC 7501 (terminal) Claude/Codex status is refused without attestation, so a
+// program-status idle no longer settles the hook row; only the hook itself moves it.
+function terminalRefusals(): number {
+  return server.getContextIntegrityRejections().terminal_context_attestation_unavailable ?? 0
 }
 
 describe('Claude prompt blocked by a UserPromptSubmit hook', () => {
@@ -67,15 +68,28 @@ describe('Claude prompt blocked by a UserPromptSubmit hook', () => {
     program('working')
     await promptHook()
     expect(row().state).toBe('working')
+    const before = row()
+    const refusals = terminalRefusals()
     program('idle')
-    expectSettledLikeStop()
+    // The program-status facet still records the idle; the hook-owned status does not move.
+    expect(row()).toMatchObject({
+      state: 'working',
+      mainAgent: before.mainAgent,
+      stateStartedAt: before.stateStartedAt,
+      receivedAt: before.receivedAt,
+      programStatus: { state: 'idle' }
+    })
+    expect(terminalRefusals()).toBeGreaterThan(refusals)
   })
 
   it('settles when the idle lands before the prompt hook', async () => {
+    const refusals = terminalRefusals()
     program('working')
     program('idle')
+    expect(terminalRefusals()).toBeGreaterThan(refusals)
+    expect(row()).toBeUndefined()
     await promptHook()
-    expectSettledLikeStop()
+    expect(row()).toMatchObject({ state: 'working', mainAgent: { state: 'working' } })
   })
 
   it("ignores another program's idle in the same pane", async () => {

@@ -7,6 +7,11 @@ import { makePaneKey } from '../../../shared/workspace-layout/stable-pane-id'
 import { collectWslMoveGateInputs, type WslMoveGateFactSources } from './wsl-move-gate-facts'
 import { assessWslMoveTerminals } from './wsl-move-terminal-gate'
 
+import {
+  attestFixtureHookContext,
+  FIXTURE_AGENT_PROCESS,
+  FIXTURE_LAUNCH_TOKEN
+} from '../../agent-hooks/server/testing/attested-hook-context.test-fixtures'
 const WT = 'repo-1::\\\\wsl.localhost\\Ubuntu\\home\\dev\\app'
 const PANE = makePaneKey('tab-1', '11111111-1111-4111-8111-111111111111')
 const scope = { workspaceIds: [WT], workspaceKeys: new Set([WT]) }
@@ -20,7 +25,7 @@ describe('the WSL move gate with the stub agent hook events', () => {
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'wsl-move-stub-agent-'))
-    server = new AgentHookServer()
+    server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
   })
 
@@ -41,6 +46,8 @@ describe('the WSL move gate with the stub agent hook events', () => {
         paneKey: PANE,
         tabId: 'tab-1',
         worktreeId: WT,
+        launchToken: FIXTURE_LAUNCH_TOKEN,
+        agentProcess: FIXTURE_AGENT_PROCESS,
         // The stub's payload: no turn ids, a transcript it writes itself.
         payload: {
           session_id: '0f0e0d0c-0b0a-4908-8706-050403020100',

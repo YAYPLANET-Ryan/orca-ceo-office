@@ -3,6 +3,7 @@ import { AgentHookServer } from '../server/agent-hook-server'
 import { AgentTransitionDetector, type AgentPaneChange } from './agent-transition-detector'
 import type { AgentTransitionStep } from '../../../shared/agent-status/lifecycle/agent-transitions.test-fixture'
 
+import { attestFixtureHookContext } from '../server/testing/attested-hook-context.test-fixtures'
 vi.mock('../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../telemetry/cohort-classifier', () => ({ getCohortAtEmit: vi.fn(() => ({})) }))
 
@@ -25,7 +26,13 @@ function createHarness() {
     now: () => NOW
   })
   detector.subscribe((change) => (change.kind === 'observed' ? observations : changes).push(change))
-  return { detector, changes, observations, exits, server: new AgentHookServer() }
+  return {
+    detector,
+    changes,
+    observations,
+    exits,
+    server: attestFixtureHookContext(new AgentHookServer())
+  }
 }
 
 function noteTitle(detector: AgentTransitionDetector, rawTitle: string, ptyId = 'pty-1'): void {
@@ -43,12 +50,14 @@ function ingest(
   row: AgentTransitionStep['row'],
   workspace: { worktreeId?: string; connectionId?: string } = {}
 ): void {
+  // Fork 6d65165647: terminal-title Claude/Codex status is refused without attestation. These
+  // cases are about the detector's workspace and turn naming, so the row comes from gemini.
   server.ingestTerminalStatus({
     paneKey: PANE,
     tabId: 'tab-a',
     worktreeId: workspace.worktreeId ?? WT,
     ...(workspace.connectionId ? { connectionId: workspace.connectionId } : {}),
-    payload: { ...row, prompt: 'task', agentType: 'codex' }
+    payload: { ...row, prompt: 'task', agentType: 'gemini' }
   })
 }
 
@@ -92,7 +101,7 @@ describe('AgentTransitionDetector', () => {
 
   it('seeds rows hydrated without a mutation once asked, and only those', () => {
     const h = createHarness()
-    const source = new AgentHookServer()
+    const source = attestFixtureHookContext(new AgentHookServer())
     ingest(source, { state: 'working' })
     let hydrated = false
     h.detector.attach({

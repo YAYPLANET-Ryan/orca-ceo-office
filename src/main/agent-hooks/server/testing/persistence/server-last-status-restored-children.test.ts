@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, postHookEvent } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -41,7 +42,7 @@ describe('Last-status persistence', () => {
   })
 
   it('waits for a lead boundary after a post-restart stop matches a restored child', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     await postHookEvent(
       firstServer,
@@ -54,7 +55,7 @@ describe('Last-status persistence', () => {
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       const statusListener = vi.fn()
@@ -94,7 +95,7 @@ describe('Last-status persistence', () => {
   })
 
   it('does not resurrect a matched restored child across a second restart', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     await postHookEvent(
       firstServer,
@@ -107,7 +108,7 @@ describe('Last-status persistence', () => {
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const secondServer = new AgentHookServer()
+    const secondServer = attestFixtureHookContext(new AgentHookServer())
     await secondServer.start({ env: 'production', userDataPath })
     await postHookEvent(
       secondServer,
@@ -121,7 +122,7 @@ describe('Last-status persistence', () => {
     secondServer.flushStatusPersistSync()
     secondServer.stop()
 
-    const thirdServer = new AgentHookServer()
+    const thirdServer = attestFixtureHookContext(new AgentHookServer())
     await thirdServer.start({ env: 'production', userDataPath })
     try {
       expect(thirdServer._getStateForTests().claudeSubagentRosterByPaneKey.size).toBe(0)
@@ -136,7 +137,7 @@ describe('Last-status persistence', () => {
   })
 
   it('keeps a legacy Stop unconfirmed when only a restored child gates it', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     await postHookEvent(
       firstServer,
@@ -149,7 +150,7 @@ describe('Last-status persistence', () => {
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       await postHookEvent(server, buildBody({ hook_event_name: 'Stop' }))
@@ -166,7 +167,7 @@ describe('Last-status persistence', () => {
   })
 
   it('keeps an unmatched restored child unconfirmed after current-runtime work drains', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     await postHookEvent(
       firstServer,
@@ -179,7 +180,7 @@ describe('Last-status persistence', () => {
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       await postHookEvent(
@@ -225,7 +226,7 @@ describe('Last-status persistence', () => {
   })
 
   it('waits for a lead boundary after a post-restart idle matches a restored teammate', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     await postHookEvent(
       firstServer,
@@ -238,7 +239,7 @@ describe('Last-status persistence', () => {
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       const restored = server.getStatusSnapshot()[0]

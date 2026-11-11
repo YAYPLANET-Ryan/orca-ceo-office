@@ -6,6 +6,10 @@ import { makePaneKey } from '../../../../../shared/workspace-layout/stable-pane-
 import { AgentHookServer } from '../../agent-hook-server'
 import { buildBody, postHookEvent } from '../server.test-fixtures'
 
+import {
+  attestFixtureHookContext,
+  FIXTURE_LAUNCH_TOKEN
+} from '../attested-hook-context.test-fixtures'
 const LEAF = '11111111-1111-4111-8111-111111111111'
 const PANE = makePaneKey('tab-1', LEAF)
 
@@ -25,36 +29,40 @@ afterEach(() => {
 })
 
 async function startServer(): Promise<AgentHookServer> {
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   servers.add(server)
   await server.start({ env: 'production', userDataPath: dir })
   return server
 }
 
-function claudeRow(server: AgentHookServer, state: 'working' | 'waiting' | 'done'): void {
-  server.ingestTerminalStatus({
-    paneKey: PANE,
-    tabId: 'tab-1',
-    worktreeId: 'wt-1',
-    connectionId: null,
-    payload: { state, prompt: 'review the PR', agentType: 'claude' }
-  })
+// Fork 6d65165647: terminal and relayed Claude status is refused without attestation, so these
+// rows come from attested local hooks.
+async function claudeRow(server: AgentHookServer, state: 'working' | 'done'): Promise<void> {
+  const events = [
+    { hook_event_name: 'UserPromptSubmit', prompt: 'review the PR' },
+    ...(state === 'done' ? [{ hook_event_name: 'Stop' }] : [])
+  ]
+  for (const payload of events) {
+    expect((await postHookEvent(server, buildBody(payload))).status).toBe(204)
+  }
+  expect(paneState(server)).toBe(state)
 }
 
-function resumableClaudeRow(server: AgentHookServer): void {
-  server.ingestRemote(
-    {
-      paneKey: PANE,
-      tabId: 'tab-1',
-      worktreeId: 'wt-1',
-      source: 'claude',
-      hookEventName: 'UserPromptSubmit',
-      launchToken: 'dead-launch-token',
-      providerSession: { key: 'session_id', id: 'resume-me' },
-      payload: { state: 'working', prompt: 'review the PR', agentType: 'claude' }
-    },
-    'conn-a'
+// Its fixture launch token stands in for the dead launch the relay used to carry.
+async function resumableClaudeRow(server: AgentHookServer): Promise<void> {
+  const response = await postHookEvent(
+    server,
+    buildBody({
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'resume-me',
+      prompt: 'review the PR'
+    })
   )
+  expect(response.status).toBe(204)
+  expect(server.getStatusSnapshotForPane(PANE)[0]).toMatchObject({
+    providerSession: { id: 'resume-me' },
+    launchToken: FIXTURE_LAUNCH_TOKEN
+  })
 }
 
 function paneState(server: AgentHookServer): string {
@@ -67,7 +75,7 @@ describe('reconcileEndedProcessForPaneKeys', () => {
     // Stale latches can re-gate a done row on the next event.
     const server = await startServer()
     try {
-      claudeRow(server, 'done')
+      await claudeRow(server, 'done')
       server._getStateForTests().claudeRunningNonAgentTaskPaneKeys.add(PANE)
       server._getStateForTests().claudeActiveSessionCronPaneKeys.add(PANE)
 
@@ -87,7 +95,7 @@ describe('reconcileEndedProcessForPaneKeys', () => {
     // Paired dismissal preserves resume identity; retire live claims without discarding that remnant.
     const server = await startServer()
     try {
-      resumableClaudeRow(server)
+      await resumableClaudeRow(server)
       server.dropStatusEntry(PANE)
       const afterDrop = server.getStatusSnapshotForPane(PANE)[0]
       expect(afterDrop?.providerSessionOnly).toBe(true)
@@ -118,7 +126,7 @@ describe('reconcileEndedProcessForPaneKeys', () => {
   it('drops the session owner so a rebound pane is not read as a session replacement', async () => {
     const server = await startServer()
     try {
-      claudeRow(server, 'working')
+      await claudeRow(server, 'working')
       server._getStateForTests().claudeSessionOwnerByPaneKey.set(PANE, 'session-a')
 
       server.reconcileEndedProcessForPaneKeys([PANE])

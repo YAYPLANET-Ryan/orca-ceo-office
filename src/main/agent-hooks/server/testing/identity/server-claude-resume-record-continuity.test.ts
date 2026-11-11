@@ -6,6 +6,7 @@ import { AgentHookServer } from '../../agent-hook-server'
 import { HOOK_SILENCE_BEFORE_PROGRAM_STATUS_FALLBACK_MS } from '../../program-status/hook-precedence'
 import { buildBody, PANE, postHookEvent } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const SESSION = '70efcb3f-ae17-4863-9318-649f5469408b'
 
 let dir: string
@@ -13,7 +14,7 @@ let server: AgentHookServer
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'orca-claude-continuation-'))
-  server = new AgentHookServer()
+  server = attestFixtureHookContext(new AgentHookServer())
   await server.start({ env: 'production', userDataPath: dir })
 })
 

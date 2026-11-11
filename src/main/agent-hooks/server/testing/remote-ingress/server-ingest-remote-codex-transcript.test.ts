@@ -11,6 +11,7 @@ import { buildRelayHookEnvelope } from '../../../../../wsl-guest/agent-hook-enve
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { PANE, buildBody } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({
   getCohortAtEmit: () => ({ nth_repo_added: 2 })
@@ -22,6 +23,14 @@ const line = (type: string): string =>
   `${JSON.stringify({ type: 'event_msg', payload: { type } })}\n`
 
 let directory: string
+
+// Fork 6d65165647: relayed Claude/Codex status is refused without attestation. The host-side
+// transcript polling below is still exercised; the desktop refuses every relayed Codex row.
+const REMOTE_REFUSAL = 'remote_context_attestation_unavailable'
+function expectRefused(server: AgentHookServer, count: number): void {
+  expect(server.getStatusSnapshot()).toEqual([])
+  expect(server.getContextIntegrityRejections()).toEqual({ [REMOTE_REFUSAL]: count })
+}
 
 beforeEach(() => {
   _internals.resetCachesForTests()
@@ -42,7 +51,7 @@ describe('remote Codex transcript completion', () => {
     writeFileSync(childPath, line('task_started'))
     writeFileSync(secondChildPath, line('task_started'))
     const hostState = createHookListenerState()
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const root = normalizeHookPayload(
       hostState,
       'codex',
@@ -69,19 +78,7 @@ describe('remote Codex transcript completion', () => {
       throw new Error('Child hook was rejected')
     }
     server.ingestRemote(buildRelayHookEnvelope(started, 'codex'), 'wsl:Ubuntu')
-    expect(server.getStatusSnapshot()).toEqual([
-      expect.objectContaining({
-        paneKey: PANE,
-        state: 'working',
-        subagents: [
-          {
-            id: CHILD,
-            state: 'working',
-            startedAt: expect.any(Number)
-          }
-        ]
-      })
-    ])
+    expectRefused(server, 2)
 
     const secondChildBody = buildBody({
       hook_event_name: 'SubagentStart',
@@ -94,12 +91,7 @@ describe('remote Codex transcript completion', () => {
       throw new Error('Second child hook was rejected')
     }
     server.ingestRemote(buildRelayHookEnvelope(secondStarted, 'codex'), 'wsl:Ubuntu')
-    expect(
-      server
-        .getStatusSnapshot()[0]
-        .subagents?.map((child) => child.id)
-        .sort()
-    ).toEqual([CHILD, SECOND_CHILD])
+    expectRefused(server, 3)
 
     appendFileSync(childPath, line('task_complete'))
     const oneRemaining = pollCodexTranscriptStatus(
@@ -125,11 +117,7 @@ describe('remote Codex transcript completion', () => {
     })
     expect(partialUpdate.hookEventName).toBeUndefined()
     server.ingestRemote(buildRelayHookEnvelope(partialUpdate, 'codex'), 'wsl:Ubuntu')
-    expect(server.getStatusSnapshot()[0]).toMatchObject({
-      state: 'working',
-      mainAgent: { state: 'done' },
-      subagents: [expect.objectContaining({ id: SECOND_CHILD, state: 'working' })]
-    })
+    expectRefused(server, 4)
 
     appendFileSync(secondChildPath, line('task_complete'))
     const polled = pollCodexTranscriptStatus(
@@ -151,20 +139,13 @@ describe('remote Codex transcript completion', () => {
 
     server.ingestRemote(buildRelayHookEnvelope(update, 'codex'), 'wsl:Ubuntu')
 
-    expect(server.getStatusSnapshot()).toEqual([
-      expect.objectContaining({
-        paneKey: PANE,
-        state: 'done',
-        mainAgent: expect.objectContaining({ state: 'done' })
-      })
-    ])
-    expect(server.getStatusSnapshot()[0].subagents).toBeUndefined()
+    expectRefused(server, 5)
   })
 })
 
 describe('remote Codex truncated transcript snapshots', () => {
   it('keeps live work when a changed roster was shed to fit the relay frame', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const children = [
       { id: CHILD, state: 'working' as const, startedAt: 1 },
       { id: SECOND_CHILD, state: 'working' as const, startedAt: 2 }
@@ -200,8 +181,7 @@ describe('remote Codex truncated transcript snapshots', () => {
       },
       'wsl:Ubuntu'
     )
-    expect(server.getStatusSnapshotForPane(PANE)[0]).toMatchObject({ state: 'working' })
-    expect(server.getStatusSnapshotForPane(PANE)[0]?.subagents).toHaveLength(2)
+    expectRefused(server, 2)
   })
 })
 
@@ -232,19 +212,15 @@ describe('remote Codex unlabelled roster removals', () => {
   })
 
   it('keeps children a restarted relay never listed', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.beginRemoteRelaySession('wsl:Ubuntu')
     server.ingestRemote(childStart(CHILD, 1), 'wsl:Ubuntu')
     server.beginRemoteRelaySession('wsl:Ubuntu')
     server.ingestRemote(emptyPoll('done'), 'wsl:Ubuntu')
-    expect(server.getStatusSnapshotForPane(PANE)[0]).toMatchObject({
-      state: 'working',
-      subagents: [expect.objectContaining({ id: CHILD })]
-    })
+    expectRefused(server, 2)
 
     server.ingestRemote(childStart(CHILD, 1), 'wsl:Ubuntu')
     server.ingestRemote(emptyPoll('done'), 'wsl:Ubuntu')
-    expect(server.getStatusSnapshotForPane(PANE)[0]).toMatchObject({ state: 'done' })
-    expect(server.getStatusSnapshotForPane(PANE)[0]?.subagents).toBeUndefined()
+    expectRefused(server, 4)
   })
 })

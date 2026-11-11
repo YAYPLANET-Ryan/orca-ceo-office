@@ -3,6 +3,7 @@ import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { PANE } from '../server.test-fixtures'
 import { AGENT_STATUS_RUNS_RUNTIME_CAPABILITY } from '../../../../../shared/agent-status/contracts/agent-status-run-capability'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -27,9 +28,10 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+// Fork 6d65165647: relayed Claude/Codex status is refused without attestation.
 describe('AgentHookServer ingestRemote', () => {
   it('never falls back to the legacy writer for a run-capable peer', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestRemote(
       {
         paneKey: PANE,
@@ -40,7 +42,7 @@ describe('AgentHookServer ingestRemote', () => {
       },
       'conn-1'
     )
-    const olderPeerRow = server.getStatusSnapshot()[0]
+    expect(server.getStatusSnapshot()).toEqual([])
 
     server.ingestRemote(
       {
@@ -53,6 +55,9 @@ describe('AgentHookServer ingestRemote', () => {
       'conn-1'
     )
 
-    expect(server.getStatusSnapshot()).toEqual([olderPeerRow])
+    expect(server.getStatusSnapshot()).toEqual([])
+    expect(server.getContextIntegrityRejections()).toEqual({
+      remote_context_attestation_unavailable: 2
+    })
   })
 })

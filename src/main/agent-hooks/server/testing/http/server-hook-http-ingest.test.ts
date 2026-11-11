@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, PANE } from '../server.test-fixtures'
 
+import {
+  attestFixtureHookContext,
+  FIXTURE_AGENT_PROCESS,
+  FIXTURE_LAUNCH_TOKEN
+} from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -28,7 +33,7 @@ afterEach(() => {
 
 describe('AgentHookServer listener replay', () => {
   it('accepts raw JSON hook bodies with base64 metadata headers', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -39,8 +44,9 @@ describe('AgentHookServer listener replay', () => {
           'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN,
           'X-Orca-Agent-Hook-Meta-Encoding': 'base64',
           'X-Orca-Agent-Hook-Meta': Buffer.from(
-            [PANE, 'tab-1', '', 'wt-1', 'production', ''].join('\x1f')
-          ).toString('base64')
+            [PANE, 'tab-1', FIXTURE_LAUNCH_TOKEN, 'wt-1', 'production', ''].join('\x1f')
+          ).toString('base64'),
+          'X-Orca-Agent-Process': FIXTURE_AGENT_PROCESS
         },
         body: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'raw JSON' })
       })
@@ -60,7 +66,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('ignores local nested Claude Stop while a parent Codex hook status is active', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -119,7 +125,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('does not apply Claude background evidence from a rejected local status', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -161,13 +167,15 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('accepts form-encoded hook posts from Unix managed scripts', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
       const params = new URLSearchParams({
         paneKey: PANE,
         tabId: 'tab-1',
+        launchToken: FIXTURE_LAUNCH_TOKEN,
+        agentProcess: FIXTURE_AGENT_PROCESS,
         worktreeId: 'repo::/tmp/worktree with "quotes"',
         env: 'production',
         version: env.ORCA_AGENT_HOOK_VERSION ?? '',

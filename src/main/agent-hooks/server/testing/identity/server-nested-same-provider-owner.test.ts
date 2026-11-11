@@ -3,6 +3,7 @@ import { AgentHookServer } from '../../agent-hook-server'
 import { buildBody, PANE, postHookEvent } from '../server.test-fixtures'
 import type { probeAgentProcessPresence } from '../../../../../shared/agent-status/process/agent-process-presence-probe'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({ getCohortAtEmit: () => ({}) }))
 const probe = vi.hoisted(() => vi.fn<typeof probeAgentProcessPresence>(async () => 'live'))
@@ -29,7 +30,7 @@ async function claudeHook(
 }
 
 async function parentWorking(): Promise<AgentHookServer> {
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   servers.push(server)
   await server.start({ env: 'production' })
   await claudeHook(server, parent, {

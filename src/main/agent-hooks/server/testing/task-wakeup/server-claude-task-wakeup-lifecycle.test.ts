@@ -9,7 +9,10 @@ import {
   createTranscriptPane,
   TRANSCRIPT_PANE_PTY_ID
 } from '../../../../runtime/orca-runtime-tests/agent-transcript-pane-test-harness'
+import { launchTokenHash } from '../../../../../shared/agent-hook-listener/transport/agent-hook-spool'
+import type { HookContextSnapshotReader } from '../../hook-context-snapshot'
 import { buildBody, PANE, postHookEvent } from '../server.test-fixtures'
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 
 vi.mock('electron', () => ({
   BrowserWindow: { fromId: vi.fn(() => null) },
@@ -39,8 +42,22 @@ beforeEach(() => {
 })
 afterEach(() => vi.useRealTimers())
 
+// Fork 6d65165647: relayed Claude/Codex status is refused without attestation, so every
+// remote=true variant below asserts the refusal instead of the relayed lifecycle.
+const REMOTE_REFUSAL = 'remote_context_attestation_unavailable'
+
 async function host(remote: boolean, launchToken?: string) {
-  const desktop = new AgentHookServer()
+  const desktop = attestFixtureHookContext(new AgentHookServer())
+  if (launchToken !== undefined) {
+    // The transcript pane binds its own launch token; attest the hook's PTY with that token.
+    const internals = desktop as unknown as { readHookContextSnapshot: HookContextSnapshotReader }
+    const fixtureReader = internals.readHookContextSnapshot
+    const tokenHash = launchTokenHash(launchToken)
+    desktop.setHookContextSnapshotReader(async (envelope) => {
+      const snapshot = await fixtureReader(envelope)
+      return snapshot && tokenHash ? { ...snapshot, launchTokenHash: tokenHash } : snapshot
+    })
+  }
   const dir = mkdtempSync(join(tmpdir(), 'orca-task-wakeup-'))
   const relay = remote
     ? new RelayAgentHookServer({
@@ -54,7 +71,10 @@ async function host(remote: boolean, launchToken?: string) {
   await desktop.start({ env: 'production' })
   await relay?.start({ publishEndpoint: false })
   const post = async (payload: Record<string, unknown>) => {
-    const body = buildBody({ session_id: SESSION, ...payload }, { launchToken })
+    const body = buildBody(
+      { session_id: SESSION, ...payload },
+      launchToken === undefined ? {} : { launchToken }
+    )
     const response = relay
       ? await fetch(`http://127.0.0.1:${relay.getCoordinates().port}/hook/claude`, {
           method: 'POST',
@@ -76,7 +96,17 @@ async function host(remote: boolean, launchToken?: string) {
     desktop.stop()
     rmSync(dir, { recursive: true, force: true })
   }
-  return { desktop, post, row, stop }
+  // Relayed hooks are accepted by the relay listener, then refused by the desktop.
+  const expectRefused = async (payloads: Record<string, unknown>[]) => {
+    for (const payload of payloads) {
+      await post(payload)
+    }
+    await vi.waitFor(() =>
+      expect(desktop.getContextIntegrityRejections()[REMOTE_REFUSAL] ?? 0).toBeGreaterThan(0)
+    )
+    expect(desktop.getStatusSnapshotForPane(PANE)).toEqual([])
+  }
+  return { desktop, post, row, stop, expectRefused }
 }
 
 describe.each([false, true])('Claude wake-up production ingress remote=%s', (remote) => {
@@ -95,6 +125,14 @@ describe.each([false, true])('Claude wake-up production ingress remote=%s', (rem
         String(record.payload.prompt).startsWith('<task-notification>')
     )
     expect(finalWakeup).toBeGreaterThan(0)
+    if (remote) {
+      try {
+        await server.expectRefused(records.map((record) => record.payload!))
+      } finally {
+        server.stop()
+      }
+      return
+    }
     const prematureCompletion: number[] = []
     try {
       for (const [index, record] of records.entries()) {
@@ -105,10 +143,7 @@ describe.each([false, true])('Claude wake-up production ingress remote=%s', (rem
         }
       }
       expect(prematureCompletion).toEqual([])
-      expect(server.row()).toMatchObject({
-        state: 'done',
-        connectionId: remote ? 'ssh-owner' : null
-      })
+      expect(server.row()).toMatchObject({ state: 'done', connectionId: null })
     } finally {
       server.stop()
     }
@@ -125,14 +160,35 @@ describe.each([false, true])('Claude cancellation with an owed wake-up remote=%s
       })
       const server = await host(remote)
       try {
-        await server.post({ hook_event_name: 'UserPromptSubmit', prompt: 'delegate' })
-        await server.post({ hook_event_name: 'SubagentStart', agent_id: 'a1' })
-        await server.post({
-          hook_event_name: 'PostToolUse',
-          tool_name: 'Agent',
-          tool_response: { isAsync: true, agentId: 'a1' }
-        })
-        await server.post({ hook_event_name: 'SubagentStop', agent_id: 'a1' })
+        const delegation = [
+          { hook_event_name: 'UserPromptSubmit', prompt: 'delegate' },
+          { hook_event_name: 'SubagentStart', agent_id: 'a1' },
+          {
+            hook_event_name: 'PostToolUse',
+            tool_name: 'Agent',
+            tool_response: { isAsync: true, agentId: 'a1' }
+          },
+          { hook_event_name: 'SubagentStop', agent_id: 'a1' }
+        ]
+        if (remote) {
+          await server.expectRefused(delegation)
+          // No refused relay status can be adjudicated as a cancellation.
+          expect(
+            server.desktop.inferInterrupt({
+              paneKey: PANE,
+              baselineUpdatedAt: 0,
+              baselineStateStartedAt: 0,
+              baselinePrompt: 'delegate',
+              baselineAgentType: 'claude',
+              intent: 'ctrl-c'
+            })
+          ).toBe(false)
+          expect(server.row()).toBeUndefined()
+          return
+        }
+        for (const payload of delegation) {
+          await server.post(payload)
+        }
         const baseline = server.row()!
         expect(
           server.desktop.inferInterrupt({
@@ -220,6 +276,17 @@ describe.each([false, true])('real automation Claude wake-up oracle remote=%s', 
         ]
       })
       try {
+        if (remote) {
+          const watching = observer.observeCompletion(pane.handle, { signal: controller.signal })
+          void watching.then(settled, () => {})
+          await server.expectRefused([
+            { hook_event_name: 'UserPromptSubmit', prompt: 'delegate then finish' },
+            { hook_event_name: 'SubagentStart', agent_id: 'a1' },
+            { hook_event_name: 'Stop', background_tasks: [] }
+          ])
+          expect(server.desktop.getStatusSnapshot()).toEqual([])
+          return
+        }
         await server.post({ hook_event_name: 'UserPromptSubmit', prompt: 'delegate then finish' })
         const earlyDelivery = ending.startsWith('notification-before-')
         const watch = () => {

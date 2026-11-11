@@ -6,6 +6,7 @@ import { AgentHookServer, _internals } from '../../../agent-hook-server'
 import { AgentSessionTransitionRecorder } from '../../../../../stats/agent-session-transition-recorder'
 import { buildBody, PANE } from '../../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -58,7 +59,7 @@ describe('Grok background status ownership', () => {
   ])(
     'counts agent time after the main agent stops only for $label',
     async ({ task, workingMode, countsAfterMainAgentStops }) => {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       const sink = { onAgentStart: vi.fn(), onAgentStop: vi.fn() }
       const recorder = new AgentSessionTransitionRecorder(sink)
       await server.start({ env: 'production' })
@@ -109,7 +110,7 @@ describe('Grok background status ownership', () => {
   )
 
   it('rejects a delayed remote cancellation from the turn replaced by a newer prompt', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestRemote(
       {
         paneKey: PANE,
@@ -142,16 +143,18 @@ describe('Grok background status ownership', () => {
       'conn-1'
     )
 
-    expect(server._getStateForTests().lastStatusByPaneKey.get(PANE)).toMatchObject({
-      providerPromptId: 'prompt-new',
-      payload: { state: 'working', prompt: 'new turn' }
+    // Fork 6d65165647: a relayed envelope claiming a provider session is refused without attestation.
+    expect(server._getStateForTests().lastStatusByPaneKey.get(PANE)).toBeUndefined()
+    expect(server.getProviderSessionIdentities()).toEqual([])
+    expect(server.getContextIntegrityRejections()).toEqual({
+      remote_context_attestation_unavailable: 2
     })
   })
 
   it('retains an id-less Grok turn fence across status hydration', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-grok-status-'))
-    const firstServer = new AgentHookServer()
-    const restoredServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
+    const restoredServer = attestFixtureHookContext(new AgentHookServer())
     try {
       await firstServer.start({ env: 'production', userDataPath })
       firstServer.ingestRemote(
@@ -168,6 +171,12 @@ describe('Grok background status ownership', () => {
         'conn-1'
       )
       firstServer.flushStatusPersistSync()
+      // Fork 6d65165647: relayed envelopes claiming a provider session are refused without
+      // attestation, so nothing is persisted and the restored server binds nothing either.
+      expect(firstServer.getStatusSnapshot()).toEqual([])
+      expect(firstServer.getContextIntegrityRejections()).toEqual({
+        remote_context_attestation_unavailable: 1
+      })
       firstServer.stop()
 
       await restoredServer.start({ env: 'production', userDataPath })
@@ -190,10 +199,7 @@ describe('Grok background status ownership', () => {
         'conn-1'
       )
 
-      expect(restoredServer._getStateForTests().lastStatusByPaneKey.get(PANE)).toMatchObject({
-        grokPromptBoundary: true,
-        payload: { state: 'working', prompt: 'new turn' }
-      })
+      expect(restoredServer._getStateForTests().lastStatusByPaneKey.get(PANE)).toBeUndefined()
 
       restoredServer.ingestRemote(
         {
@@ -208,9 +214,11 @@ describe('Grok background status ownership', () => {
         },
         'conn-1'
       )
-      expect(restoredServer.getStatusSnapshot()).toEqual([
-        expect.objectContaining({ state: 'done', prompt: 'new turn', agentType: 'grok' })
-      ])
+      expect(restoredServer.getStatusSnapshot()).toEqual([])
+      expect(restoredServer.getProviderSessionIdentities()).toEqual([])
+      expect(restoredServer.getContextIntegrityRejections()).toEqual({
+        remote_context_attestation_unavailable: 2
+      })
     } finally {
       firstServer.stop()
       restoredServer.stop()

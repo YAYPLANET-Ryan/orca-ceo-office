@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, postHookEvent, recentTs, PANE, GOOD_PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -44,13 +45,17 @@ describe('Last-status persistence', () => {
     return join(userDataPath, 'agent-hooks', 'last-status.json')
   }
 
+  // Fork 6d65165647: remote-relay and terminal-title Claude/Codex status is refused without
+  // attestation. Provider-neutral cases report an unprotected agent; the Claude relays assert
+  // the refusal.
+
   it('lets an identical live OSC observation confirm a hydrated row', async () => {
     const payload = {
       state: 'working' as const,
       prompt: 'still running',
-      agentType: 'claude' as const
+      agentType: 'gemini' as const
     }
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     firstServer.ingestTerminalStatus({
       paneKey: PANE,
@@ -62,7 +67,7 @@ describe('Last-status persistence', () => {
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       const restored = server.getStatusSnapshot()[0]
@@ -87,7 +92,7 @@ describe('Last-status persistence', () => {
   })
 
   it('does not let a hydrated Claude permission suppress the first live working event', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     firstServer.ingestRemote(
       {
@@ -105,12 +110,16 @@ describe('Last-status persistence', () => {
       },
       'conn-1'
     )
+    expect(firstServer.getContextIntegrityRejections()).toEqual({
+      remote_context_attestation_unavailable: 1
+    })
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
+      expect(server.getStatusSnapshot()).toEqual([])
       server.ingestRemote(
         {
           paneKey: PANE,
@@ -127,18 +136,17 @@ describe('Last-status persistence', () => {
         },
         'conn-1'
       )
-      expect(server.getStatusSnapshot()[0]).toMatchObject({
-        state: 'working',
-        toolName: 'Read'
+      expect(server.getStatusSnapshot()).toEqual([])
+      expect(server.getContextIntegrityRejections()).toEqual({
+        remote_context_attestation_unavailable: 1
       })
-      expect(server.getStatusSnapshot()[0]?.restoredUnconfirmed).toBeUndefined()
     } finally {
       server.stop()
     }
   })
 
   it('does not inherit a stale tool id from hydrated Claude progress', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     firstServer.ingestRemote(
       {
@@ -158,10 +166,13 @@ describe('Last-status persistence', () => {
       },
       'conn-1'
     )
+    expect(firstServer.getContextIntegrityRejections()).toEqual({
+      remote_context_attestation_unavailable: 1
+    })
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       server.ingestRemote(
@@ -199,7 +210,10 @@ describe('Last-status persistence', () => {
         },
         'conn-1'
       )
-      expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+      expect(server.getStatusSnapshot()).toEqual([])
+      expect(server.getContextIntegrityRejections()).toEqual({
+        remote_context_attestation_unavailable: 2
+      })
     } finally {
       server.stop()
     }
@@ -222,20 +236,20 @@ describe('Last-status persistence', () => {
             connectionId: 'ssh-a',
             receivedAt,
             stateStartedAt: receivedAt,
-            payload: { state: 'working', prompt: 'before restart', agentType: 'claude' }
+            payload: { state: 'working', prompt: 'before restart', agentType: 'gemini' }
           }
         }
       }),
       'utf8'
     )
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       const clearListener = vi.fn()
       server.setPaneStatusClearListener(clearListener)
       server.ingestRemote(
-        { paneKey: PANE, payload: { state: 'working', agentType: 'codex' } },
+        { paneKey: PANE, payload: { state: 'working', agentType: 'gemini' } },
         'ssh-a'
       )
 
@@ -251,7 +265,7 @@ describe('Last-status persistence', () => {
         {
           paneKey: GOOD_PANE,
           isReplay: true,
-          payload: { state: 'working', agentType: 'claude' }
+          payload: { state: 'working', agentType: 'gemini' }
         },
         'ssh-a'
       )
@@ -302,7 +316,7 @@ describe('Last-status persistence', () => {
       'utf8'
     )
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       expect(server.getStatusSnapshot()).toEqual([

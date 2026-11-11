@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, postHookEvent, PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({ getCohortAtEmit: () => ({}) }))
 
@@ -16,7 +17,7 @@ describe('the host-stamped turn end', () => {
   beforeEach(async () => {
     _internals.resetCachesForTests()
     directory = mkdtempSync(join(tmpdir(), 'orca-turn-ended-at-'))
-    server = new AgentHookServer()
+    server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath: directory })
   })
 
@@ -153,7 +154,7 @@ describe('the host-stamped turn end', () => {
     server.flushStatusPersistSync()
     server.stop()
 
-    server = new AgentHookServer()
+    server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath: directory })
     expect(row()).toMatchObject({ turnEndedAt: ended, turnEndDisposition: 'identified' })
     await post(

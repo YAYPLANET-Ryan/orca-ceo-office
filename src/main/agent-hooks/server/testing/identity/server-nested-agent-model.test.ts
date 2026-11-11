@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, postHookEvent } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({
   track: vi.fn()
 }))
@@ -24,7 +25,7 @@ describe('AgentHookServer nested agent model fence', () => {
   // Readers retain sparse model labels, so a transient child label could remain on the parent.
   it('never pushes a nested codex model to the renderer from real hook bodies', async () => {
     vi.useRealTimers()
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     const pushed: { agentType?: string; model?: string }[] = []
     server.setListener((event) => pushed.push(event.payload))

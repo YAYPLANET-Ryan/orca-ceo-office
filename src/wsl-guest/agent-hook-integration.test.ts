@@ -15,8 +15,11 @@ import {
 import { AgentHookServer } from '../main/agent-hooks/server/agent-hook-server'
 import { publishAgentHookEnvelope } from './agent-hook-envelope-publication'
 
+import { attestFixtureHookContext } from '../main/agent-hooks/server/testing/attested-hook-context.test-fixtures'
 const LEAF_7 = '77777777-7777-4777-8777-777777777777'
 const LEAF_9 = '99999999-9999-4999-8999-999999999999'
+// Fork 6d65165647: relay Claude/Codex status is refused without attestation.
+const REMOTE_REFUSAL = 'remote_context_attestation_unavailable'
 
 describe('Integration: relay hook server → mux → AgentHookServer.ingestRemote', () => {
   let tmpDir: string
@@ -24,6 +27,7 @@ describe('Integration: relay hook server → mux → AgentHookServer.ingestRemot
   let dispatcher: RelayDispatcher
   let hookServer: RelayAgentHookServer
   let orcaServer: AgentHookServer
+  const refusals = (): number => orcaServer.getContextIntegrityRejections()[REMOTE_REFUSAL] ?? 0
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'agent-hook-e2e-'))
@@ -72,7 +76,7 @@ describe('Integration: relay hook server → mux → AgentHookServer.ingestRemot
 
     mux = new SshChannelMultiplexer(clientTransport)
 
-    orcaServer = new AgentHookServer()
+    orcaServer = attestFixtureHookContext(new AgentHookServer())
     // Main receives through ingestRemote; only the relay starts an HTTP listener.
     mux.onNotification((method, params) => {
       if (method === AGENT_HOOK_NOTIFICATION_METHOD) {
@@ -113,30 +117,23 @@ describe('Integration: relay hook server → mux → AgentHookServer.ingestRemot
       })
     })
     expect(response.status).toBe(204)
-    await expect.poll(() => orcaServer.getStatusSnapshotForPane(paneKey)[0]?.state).toBe('working')
+    await expect.poll(refusals).toBe(1)
+    expect(orcaServer.getStatusSnapshotForPane(paneKey)).toEqual([])
     const native = hookServer.claudeTerminalInterrupts
     native.observe(paneKey, { kind: 'title', title: '◐ Long table' })
     native.observe(paneKey, { kind: 'input', data: '\x1b' })
     native.observe(paneKey, { kind: 'title', title: '◑ Long table' })
-    expect(orcaServer.getStatusSnapshotForPane(paneKey)[0].state).toBe('working')
     native.observe(paneKey, { kind: 'input', data: '\x1b' })
     native.observe(paneKey, { kind: 'title', title: '✳ Long table' })
-    await expect
-      .poll(() => orcaServer.getStatusSnapshotForPane(paneKey)[0])
-      .toMatchObject({
-        state: 'done',
-        interrupted: true,
-        connectionId: 'conn-test',
-        mainAgent: { state: 'done', outcome: 'cancellation' }
-      })
-    const replayOutcomes: (string | undefined)[] = []
-    orcaServer.setListener((event) => replayOutcomes.push(event.payload.mainAgent?.outcome))
-    replayOutcomes.length = 0
+    // The execution host still publishes the confirmed cancellation; main refuses it as well.
+    await expect.poll(refusals).toBe(2)
+    expect(orcaServer.getStatusSnapshotForPane(paneKey)).toEqual([])
+    const replayedPanes: string[] = []
+    orcaServer.setListener((event) => replayedPanes.push(event.paneKey))
     expect(hookServer.replayCachedPayloadsForPanes()).toBe(1)
-    await expect.poll(() => replayOutcomes).toEqual(['cancellation'])
-    await expect
-      .poll(() => orcaServer.getStatusSnapshotForPane(paneKey)[0]?.mainAgent?.outcome)
-      .toBe('cancellation')
+    await expect.poll(refusals).toBe(3)
+    expect(replayedPanes).toEqual([])
+    expect(orcaServer.getStatusSnapshotForPane(paneKey)).toEqual([])
   })
 
   it.each([0, 1, 2, 3])(
@@ -238,7 +235,8 @@ describe('Integration: relay hook server → mux → AgentHookServer.ingestRemot
         tool_input: { command: 'pnpm test' }
       })
     ).resolves.toMatchObject({ status: 204 })
-    await expect.poll(() => orcaServer.getStatusSnapshot()[0]?.state).toBe('waiting')
+    await expect.poll(refusals).toBe(1)
+    expect(orcaServer.getStatusSnapshot()).toEqual([])
     await expect(
       postClaude({
         hook_event_name: 'PreToolUse',
@@ -250,20 +248,8 @@ describe('Integration: relay hook server → mux → AgentHookServer.ingestRemot
       })
     ).resolves.toMatchObject({ status: 204 })
 
-    const start = Date.now()
-    while (orcaServer.getStatusSnapshot()[0]?.state !== 'working' && Date.now() - start < 1500) {
-      await new Promise((r) => setImmediate(r))
-    }
-    expect(orcaServer.getStatusSnapshot()).toEqual([
-      expect.objectContaining({
-        paneKey: `tab-7:${LEAF_7}`,
-        connectionId: 'conn-test',
-        state: 'working',
-        agentType: 'claude',
-        toolName: 'Bash',
-        toolInput: 'pnpm test'
-      })
-    ])
+    await expect.poll(refusals).toBe(2)
+    expect(orcaServer.getStatusSnapshot()).toEqual([])
   })
 
   it('clears remote Claude permission when its teammate idles', async () => {
@@ -292,21 +278,12 @@ describe('Integration: relay hook server → mux → AgentHookServer.ingestRemot
       tool_name: 'Bash',
       tool_input: { command: 'false' }
     })
-    await expect.poll(() => orcaServer.getStatusSnapshot()[0]?.state).toBe('waiting')
+    await expect.poll(refusals).toBe(1)
+    expect(orcaServer.getStatusSnapshot()).toEqual([])
     await postClaude({ hook_event_name: 'TeammateIdle', teammate_name: 'reviewer' })
 
-    const start = Date.now()
-    while (orcaServer.getStatusSnapshot()[0]?.state !== 'working' && Date.now() - start < 1500) {
-      await new Promise((resolve) => setImmediate(resolve))
-    }
-    expect(orcaServer.getStatusSnapshot()[0]).toMatchObject({
-      paneKey: `tab-9:${LEAF_9}`,
-      connectionId: 'conn-test',
-      state: 'working',
-      agentType: 'claude',
-      subagents: [expect.objectContaining({ id: 'areviewer-6d3cb5b5', state: 'idle' })]
-    })
-    expect(orcaServer.getStatusSnapshot()[0]?.toolName).toBeUndefined()
+    await expect.poll(refusals).toBe(2)
+    expect(orcaServer.getStatusSnapshot()).toEqual([])
   })
 
   it('clears remote Claude permission when approved PostToolUse matches the preceding tool use id', async () => {
@@ -343,7 +320,8 @@ describe('Integration: relay hook server → mux → AgentHookServer.ingestRemot
         tool_input: { command: 'rm -rf /tmp/orca-2824-permission-target' }
       })
     ).resolves.toMatchObject({ status: 204 })
-    await expect.poll(() => orcaServer.getStatusSnapshot()[0]?.state).toBe('waiting')
+    await expect.poll(refusals).toBe(2)
+    expect(orcaServer.getStatusSnapshot()).toEqual([])
     await expect(
       postClaude({
         hook_event_name: 'PostToolUse',
@@ -353,20 +331,8 @@ describe('Integration: relay hook server → mux → AgentHookServer.ingestRemot
       })
     ).resolves.toMatchObject({ status: 204 })
 
-    const start = Date.now()
-    while (orcaServer.getStatusSnapshot()[0]?.state !== 'working' && Date.now() - start < 1500) {
-      await new Promise((r) => setImmediate(r))
-    }
-    expect(orcaServer.getStatusSnapshot()).toEqual([
-      expect.objectContaining({
-        paneKey: `tab-7:${LEAF_7}`,
-        connectionId: 'conn-test',
-        state: 'working',
-        agentType: 'claude',
-        toolName: 'Bash',
-        toolInput: 'rm -rf /tmp/orca-2824-permission-target'
-      })
-    ])
+    await expect.poll(refusals).toBe(3)
+    expect(orcaServer.getStatusSnapshot()).toEqual([])
   })
 
   it('replays the cached last-status on agent_hook.requestReplay', async () => {
@@ -389,24 +355,18 @@ describe('Integration: relay hook server → mux → AgentHookServer.ingestRemot
       })
     })
 
-    // Await live delivery before requesting replay so the next event proves a second notification.
-    const liveStart = Date.now()
-    while (events.length === 0 && Date.now() - liveStart < 1500) {
-      await new Promise((r) => setImmediate(r))
-    }
-    expect(events).toHaveLength(1)
+    // Await the live refusal before requesting replay so the next refusal proves a second notification.
+    await expect.poll(refusals).toBe(1)
+    expect(events).toEqual([])
 
     const result = (await mux.request(AGENT_HOOK_REQUEST_REPLAY_METHOD)) as {
       replayed: number
     }
     expect(result.replayed).toBe(1)
 
-    // Await the replayed event at the listener, proving it crossed SSH rather than only incrementing relay state.
-    const replayStart = Date.now()
-    while (events.length < 2 && Date.now() - replayStart < 1500) {
-      await new Promise((r) => setImmediate(r))
-    }
-    expect(events).toHaveLength(2)
-    expect(events[1].paneKey).toBe(`tab-9:${LEAF_9}`)
+    // The replayed envelope crosses SSH and is refused again, rather than only incrementing relay state.
+    await expect.poll(refusals).toBe(2)
+    expect(events).toEqual([])
+    expect(orcaServer.getStatusSnapshot()).toEqual([])
   })
 })

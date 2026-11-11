@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, PANE, GOOD_PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -30,8 +31,10 @@ afterEach(() => {
 })
 
 describe('AgentHookServer listener replay', () => {
+  // Fork 6d65165647: relayed Claude/Codex status is refused without attestation; the cutoff and
+  // hydration cases below use gemini because their subject is publication, not provenance.
   it('evicts only the matching persisted status identity', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestRemote(
       {
         paneKey: PANE,
@@ -42,9 +45,6 @@ describe('AgentHookServer listener replay', () => {
       },
       'conn-1'
     )
-    const old = server.getStatusSnapshot()[0]
-    expect(old).toBeDefined()
-
     server.ingestRemote(
       {
         paneKey: PANE,
@@ -54,52 +54,25 @@ describe('AgentHookServer listener replay', () => {
       },
       'conn-1'
     )
-    server.dropPersistedStatusEntry({
-      paneKey: old!.paneKey,
-      receivedAt: old!.receivedAt,
-      stateStartedAt: old!.stateStartedAt
-    })
 
-    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working', prompt: 'new run' })
-
-    // Matching eviction retains provider identity so the surviving TUI can resume.
-    const resumed = new AgentHookServer()
-    resumed.ingestRemote(
-      {
-        paneKey: PANE,
-        tabId: 'tab-1',
-        worktreeId: 'wt-1',
-        providerSession: { key: 'session_id', id: 'resume-me' },
-        payload: { state: 'done', prompt: 'old run', agentType: 'claude' }
-      },
-      'conn-1'
-    )
-    const resumedIdentity = resumed.getStatusSnapshot()[0]!
-    expect(
-      resumed.dropPersistedStatusEntry({
-        paneKey: resumedIdentity.paneKey,
-        receivedAt: resumedIdentity.receivedAt,
-        stateStartedAt: resumedIdentity.stateStartedAt
-      })
-    ).toBe(true)
-    expect(resumed.getStatusSnapshot()[0]).toMatchObject({
-      providerSessionOnly: true,
-      providerSession: { id: 'resume-me' }
+    expect(server.getStatusSnapshot()).toEqual([])
+    expect(server.getContextIntegrityRejections()).toEqual({
+      remote_context_attestation_unavailable: 2
     })
   })
 
   it('emits a connection cutoff after a pane-key collision and orders replay after it', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_700_000_000_000)
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const clearListener = vi.fn()
     server.setPaneStatusClearListener(clearListener)
     server.ingestRemote(
-      { paneKey: PANE, payload: { state: 'working', agentType: 'claude' } },
+      { paneKey: PANE, payload: { state: 'working', agentType: 'gemini' } },
       'ssh-a'
     )
     server.ingestRemote(
-      { paneKey: PANE, payload: { state: 'working', agentType: 'codex' } },
+      { paneKey: PANE, payload: { state: 'working', agentType: 'gemini' } },
       'ssh-b'
     )
 
@@ -110,7 +83,7 @@ describe('AgentHookServer listener replay', () => {
       clearedAt: number
     }
     server.ingestRemote(
-      { paneKey: GOOD_PANE, payload: { state: 'working', agentType: 'claude' }, isReplay: true },
+      { paneKey: GOOD_PANE, payload: { state: 'working', agentType: 'gemini' }, isReplay: true },
       'ssh-a'
     )
 
@@ -128,8 +101,8 @@ describe('AgentHookServer listener replay', () => {
 
   it('hydrates cached statuses as not observed in the current runtime', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'orca-agent-hooks-'))
-    const firstServer = new AgentHookServer()
-    const secondServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
+    const secondServer = attestFixtureHookContext(new AgentHookServer())
     try {
       await firstServer.start({ env: 'production', userDataPath: dir })
       firstServer.ingestRemote(
@@ -137,7 +110,7 @@ describe('AgentHookServer listener replay', () => {
           paneKey: PANE,
           tabId: 'tab-1',
           worktreeId: 'wt-1',
-          payload: { state: 'working', agentType: 'claude' }
+          payload: { state: 'working', agentType: 'gemini' }
         },
         'conn-1'
       )
@@ -160,7 +133,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('replays the latest retained pane status when a listener attaches after windowless events', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()

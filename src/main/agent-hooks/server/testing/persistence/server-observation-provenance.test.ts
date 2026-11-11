@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { makePaneKey } from '../../../../../shared/workspace-layout/stable-pane-id'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -35,13 +36,15 @@ describe('agent status observation provenance', () => {
   })
 
   function newServer(): AgentHookServer {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     servers.push(server)
     return server
   }
 
   // Reuse provider boundary classification; raw event-name lists miss providers with different spellings.
 
+  // Fork 6d65165647: remote Claude/Codex status is refused without attestation; the persisted
+  // observation is not provider-specific, so an unprotected agent reports it.
   it('never persists the observation to last-status.json', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-observation-'))
     try {
@@ -52,9 +55,9 @@ describe('agent status observation provenance', () => {
           paneKey: PANE,
           tabId: 'tab-1',
           worktreeId: 'wt-1',
-          source: 'claude',
-          hookEventName: 'UserPromptSubmit',
-          payload: { state: 'working', prompt: 'persist me', agentType: 'claude' }
+          source: 'gemini',
+          hookEventName: 'BeforeAgent',
+          payload: { state: 'working', prompt: 'persist me', agentType: 'gemini' }
         },
         CONNECTION
       )

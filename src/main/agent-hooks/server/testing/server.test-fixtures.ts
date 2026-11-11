@@ -1,6 +1,11 @@
 import { makePaneKey } from '../../../../shared/workspace-layout/stable-pane-id'
 import { request } from 'node:http'
 import type { AgentHookServer } from '../agent-hook-server'
+import {
+  FIXTURE_AGENT_PROCESS,
+  FIXTURE_LAUNCH_TOKEN,
+  withFixtureLaunchToken
+} from './attested-hook-context.test-fixtures'
 
 export const LEAF_1 = '11111111-1111-4111-8111-111111111111'
 export const LEAF_2 = '22222222-2222-4222-8222-222222222222'
@@ -34,15 +39,25 @@ export type AgentHookServerCacheInternals = {
   scheduleStatusPersist: () => void
 }
 
+// Hooks from a pane's own PTY carry its launch token and a process claim; an attested fixture
+// server admits exactly these. Pass `launchToken: undefined` or `agentProcess: undefined` to omit.
 export function buildBody(payload: Record<string, unknown>, overrides: Partial<Body> = {}): Body {
-  return {
+  const body: Body = {
     paneKey: PANE,
     tabId: 'tab-1',
     worktreeId: 'wt-1',
     env: 'production',
+    launchToken: FIXTURE_LAUNCH_TOKEN,
+    agentProcess: FIXTURE_AGENT_PROCESS,
     payload,
     ...overrides
   }
+  for (const key of ['launchToken', 'agentProcess'] as const) {
+    if (body[key] === undefined) {
+      delete body[key]
+    }
+  }
+  return body
 }
 
 // Stay within the seven-day hydration limit without racing now.
@@ -98,6 +113,6 @@ export async function postHookEvent(
       }
     )
     req.on('error', reject)
-    req.end(JSON.stringify(body))
+    req.end(JSON.stringify(withFixtureLaunchToken(server, body)))
   })
 }

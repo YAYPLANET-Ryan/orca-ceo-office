@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { GOOD_PANE as REMOTE_PANE, PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 describe('restored agent status', () => {
   let userDataPath: string
 
@@ -17,15 +18,17 @@ describe('restored agent status', () => {
     rmSync(userDataPath, { recursive: true, force: true })
   })
 
+  // Fork 6d65165647: terminal-title Claude/Codex status is refused without attestation; restoring
+  // a pane's last report is not provider-specific, so an unprotected agent reports it.
   it("returns the last report a pane's agent sent before the app restarted", async () => {
-    const before = new AgentHookServer()
+    const before = attestFixtureHookContext(new AgentHookServer())
     await before.start({ env: 'production', userDataPath })
     before.ingestTerminalStatus({
       paneKey: PANE,
       tabId: 'tab-1',
       worktreeId: 'wt-1',
       connectionId: null,
-      payload: { state: 'done', prompt: 'review', agentType: 'codex' }
+      payload: { state: 'done', prompt: 'review', agentType: 'gemini' }
     })
     // A remote host's row cannot be checked against a local process.
     before.ingestTerminalStatus({
@@ -33,12 +36,12 @@ describe('restored agent status', () => {
       tabId: 'tab-good',
       worktreeId: 'wt-1',
       connectionId: 'ssh-1',
-      payload: { state: 'done', prompt: 'review', agentType: 'codex' }
+      payload: { state: 'done', prompt: 'review', agentType: 'gemini' }
     })
     before.flushStatusPersistSync()
     before.stop()
 
-    const after = new AgentHookServer()
+    const after = attestFixtureHookContext(new AgentHookServer())
     await after.start({ env: 'production', userDataPath })
     try {
       expect(await after.readRestoredAgentStatus(PANE)).toMatchObject({ state: 'done' })

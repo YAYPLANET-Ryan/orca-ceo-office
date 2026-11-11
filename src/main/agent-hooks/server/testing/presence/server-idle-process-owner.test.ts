@@ -8,6 +8,13 @@ import { buildRuntimeMobileAgentStatus } from '../../../../runtime/session-lifec
 import { getAgentResumeArgv } from '../../../../../shared/agent-launch/startup/agent-resume-argv'
 import type { probeAgentProcessPresence } from '../../../../../shared/agent-status/process/agent-process-presence-probe'
 
+import {
+  attestFixtureHookContext,
+  FIXTURE_AGENT_PROCESS,
+  FIXTURE_INCARNATION,
+  FIXTURE_LAUNCH_TOKEN
+} from '../attested-hook-context.test-fixtures'
+import type { HookRootEvidenceReader } from '../../../../../shared/agent-hook-listener/presence/hook-process-root-evidence'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({ getCohortAtEmit: () => ({}) }))
 const probe = vi.hoisted(() => vi.fn<typeof probeAgentProcessPresence>(async () => 'live'))
@@ -29,12 +36,28 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function start(userDataPath?: string): Promise<AgentHookServer> {
-  const server = new AgentHookServer()
+// Fork 6d65165647: Claude/Codex hooks need root evidence and relayed Claude/Codex status is refused
+// without attestation. A Codex started under the live Claude owner reads as nested, not the root.
+const nestedCodex: HookRootEvidenceReader = async (request) =>
+  request.agent === 'codex'
+    ? { verdict: 'nested' }
+    : { verdict: 'root', binding: FIXTURE_INCARNATION, process: request.process }
+
+async function start(
+  userDataPath?: string,
+  reader?: HookRootEvidenceReader
+): Promise<AgentHookServer> {
+  const server = attestFixtureHookContext(new AgentHookServer())
+  if (reader) {
+    server.setHookRootEvidenceReader(reader)
+  }
   servers.push(server)
   await server.start({ env: 'production', userDataPath })
   return server
 }
+
+const refusals = (server: AgentHookServer, reason: string): number =>
+  server.getContextIntegrityRejections()[reason] ?? 0
 
 async function idleClaude(server: AgentHookServer): Promise<void> {
   for (const hook_event_name of ['UserPromptSubmit', 'Stop']) {
@@ -98,7 +121,7 @@ describe('idle foreground process owns its provider session', () => {
   it.each(['live', 'unverifiable'] as const)(
     'rechecks prior suspension before a nested provider when the owner is now %s',
     async (verdict) => {
-      const server = await start()
+      const server = await start(undefined, nestedCodex)
       await idleClaude(server)
       const emitted = vi.fn()
       server.setListener(emitted)
@@ -109,6 +132,7 @@ describe('idle foreground process owns its provider session', () => {
       })
       await server.checkAgentPresence(PANE)
       expect(emitted.mock.lastCall?.[0].agentPresence?.suspended).toBe(true)
+      const emits = emitted.mock.calls.length
       probe.mockImplementation(async (_identity, _read, _platform, observe) => {
         if (verdict === 'live') {
           observe?.(false)
@@ -124,9 +148,11 @@ describe('idle foreground process owns its provider session', () => {
         }),
         '/hook/codex'
       )
-      expect(probe).toHaveBeenCalledTimes(2)
+      // The nested provider is refused at admission, before any owner recheck or emit.
+      expect(refusals(server, 'process_generation_unconfirmed')).toBe(1)
+      expect(probe).toHaveBeenCalledTimes(1)
       assertClaudeSession(server)
-      expect(emitted.mock.lastCall?.[0].agentPresence?.suspended).toBeUndefined()
+      expect(emitted).toHaveBeenCalledTimes(emits)
     }
   )
 
@@ -149,26 +175,31 @@ describe('idle foreground process owns its provider session', () => {
           worktreeId: 'wt-1',
           source: 'codex',
           receivedAt: Date.now(),
+          launchToken: FIXTURE_LAUNCH_TOKEN,
+          agentProcess: FIXTURE_AGENT_PROCESS,
           payload: { hook_event_name: 'UserPromptSubmit', session_id: 'replacement' }
         })}\n`
         writeFileSync(path, contents)
-        server = new AgentHookServer()
+        server = attestFixtureHookContext(new AgentHookServer())
         servers.push(server)
         await server.start({
           env: 'production',
           userDataPath: directory,
           statusHooksEnabled: false
         })
+        // The replayed record's admission now waits on its root evidence, not an owner probe.
         let release: (() => void) | undefined
-        probe.mockImplementationOnce(
-          () =>
+        const read = vi.fn<HookRootEvidenceReader>(
+          (request) =>
             new Promise((resolve) => {
-              release = () => resolve('live')
+              release = () =>
+                resolve({ verdict: 'root', binding: FIXTURE_INCARNATION, process: request.process })
             })
         )
+        server.setHookRootEvidenceReader(read)
         const log = vi.spyOn(console, 'error').mockImplementation(() => {})
         server.setStatusHooksEnabled(true)
-        expect(probe).toHaveBeenCalledTimes(1)
+        await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
         server.setStatusHooksEnabled(false)
         if (reEnable) {
           server.setStatusHooksEnabled(true)
@@ -208,6 +239,8 @@ describe('idle foreground process owns its provider session', () => {
                   worktreeId: 'wt-1',
                   source: 'codex',
                   receivedAt: Date.now(),
+                  launchToken: FIXTURE_LAUNCH_TOKEN,
+                  agentProcess: FIXTURE_AGENT_PROCESS,
                   hookEventName,
                   payload: {
                     hook_event_name: hookEventName,
@@ -219,7 +252,11 @@ describe('idle foreground process owns its provider session', () => {
             )
             .join('')
         )
-        restarted = await start(directory)
+        // A live owner keeps the foreground, so the spooled Codex is not the pane's root.
+        restarted = await start(directory, verdict === 'live' ? nestedCodex : undefined)
+        expect(refusals(restarted, 'process_generation_unconfirmed')).toBe(
+          verdict === 'live' ? 2 : 0
+        )
         expect(restarted.getStatusSnapshot()[0]).toMatchObject({
           agentType: verdict === 'live' ? 'claude' : 'codex',
           providerSession: { id: verdict === 'live' ? 'claude-parent' : 'spooled-codex' }
@@ -235,8 +272,23 @@ describe('idle foreground process owns its provider session', () => {
   )
 
   it('accepts the first foreground replacement after positive suspension without claiming exit', async () => {
+    // Fork 6d65165647: Claude/Codex hooks skip this owner probe, so unprotected agents drive it;
+    // no assertion depends on Claude/Codex behaviour.
     const server = await start()
-    await idleClaude(server)
+    const agyProcess = JSON.stringify({ pid: 5001, platform: 'linux', startTime: 'birth-5001' })
+    for (const [hook_event_name, extra] of [
+      ['PreInvocation', {}],
+      ['Stop', { fullyIdle: true, terminationReason: 'NO_TOOL_CALL', error: '' }]
+    ] as const) {
+      await postHookEvent(
+        server,
+        buildBody(
+          { hook_event_name, conversationId: 'agy-parent', prompt: 'Foreground task', ...extra },
+          { agentProcess: agyProcess }
+        ),
+        '/hook/antigravity'
+      )
+    }
     probe.mockImplementation(async (_identity, _read, _platform, observe) => {
       observe?.(true)
       return 'unverifiable'
@@ -248,26 +300,26 @@ describe('idle foreground process owns its provider session', () => {
       server,
       buildBody({
         hook_event_name: 'UserPromptSubmit',
-        session_id: 'foreground-codex',
+        session_id: 'foreground-grok',
         prompt: 'New foreground task'
       }),
-      '/hook/codex'
+      '/hook/grok'
     )
     expect(emitted.mock.calls[0]?.[0].agentPresence).toMatchObject({
-      agent: 'claude',
+      agent: 'antigravity',
       suspended: true
     })
     expect(emitted.mock.calls[0]?.[0].agentPresence.ended).toBeUndefined()
     expect(server.getStatusSnapshot()[0]).toMatchObject({
-      agentType: 'codex',
-      providerSession: { id: 'foreground-codex' }
+      agentType: 'grok',
+      providerSession: { id: 'foreground-grok' }
     })
   })
 
   it.each(['live', 'unverifiable'] as const)(
     'retains mobile and resume selection after turn completion when owner is %s',
     async (verdict) => {
-      const server = await start()
+      const server = await start(undefined, nestedCodex)
       probe.mockResolvedValue(verdict)
       await idleClaude(server)
       const before = server.getStatusSnapshot()
@@ -294,7 +346,9 @@ describe('idle foreground process owns its provider session', () => {
         assertClaudeSession(server)
         expect(server.getStatusSnapshot()).toEqual(before)
       }
-      expect(probe).toHaveBeenCalledTimes(5)
+      // Each nested hook is refused at admission, before any owner probe.
+      expect(refusals(server, 'process_generation_unconfirmed')).toBe(5)
+      expect(probe).not.toHaveBeenCalled()
       expect(emit).not.toHaveBeenCalled()
       await postHookEvent(
         server,
@@ -328,7 +382,9 @@ describe('idle foreground process owns its provider session', () => {
       payload: { agentType: 'codex', state: 'working', prompt: 'Background review' }
     }
     server.ingestRemote(nested, 'ssh-a')
-    assertClaudeSession(server)
+    // Relayed Claude/Codex status is refused, so no remote owner is recorded or probed.
+    expect(refusals(server, 'remote_context_attestation_unavailable')).toBe(2)
+    expect(server.getStatusSnapshot()).toEqual([])
     expect(probe).not.toHaveBeenCalled()
     server.ingestRemote(
       {
@@ -340,10 +396,8 @@ describe('idle foreground process owns its provider session', () => {
       'ssh-a'
     )
     server.ingestRemote({ ...nested, agentPresence: undefined }, 'ssh-a')
-    expect(server.getStatusSnapshot()[0]).toMatchObject({
-      agentType: 'codex',
-      providerSession: { id: 'nested-codex' }
-    })
+    expect(refusals(server, 'remote_context_attestation_unavailable')).toBe(4)
+    expect(server.getStatusSnapshot()).toEqual([])
   })
 
   it('does not carry a process owner into a different execution host', async () => {
@@ -360,11 +414,12 @@ describe('idle foreground process owns its provider session', () => {
       },
       'ssh-other'
     )
+    // The relayed Codex is refused; the local owner's row is left as it was.
+    expect(refusals(server, 'remote_context_attestation_unavailable')).toBe(1)
     expect(server.getStatusSnapshot()[0]).toMatchObject({
-      agentType: 'codex',
-      providerSession: { id: 'remote-codex' }
+      agentType: 'claude',
+      providerSession: { id: 'claude-parent' }
     })
-    expect(await server.checkAgentPresence(PANE)).toBeNull()
     expect(probe).not.toHaveBeenCalled()
   })
 

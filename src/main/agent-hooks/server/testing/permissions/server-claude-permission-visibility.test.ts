@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -28,7 +29,7 @@ afterEach(() => {
 
 describe('AgentHookServer listener replay', () => {
   it('keeps Claude permission visible when matching tool activity has no execution id', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -68,7 +69,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('keeps Claude permission visible when approved tool execution has no identity', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -109,7 +110,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('lets Claude permission clear when approved PostToolUse matches the preceding tool use id', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -156,7 +157,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('lets Claude permission clear by tool use id when tool input is not previewable', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -202,7 +203,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('keeps Claude permission visible when another tool use completes after permission', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -249,7 +250,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('lets Claude permission clear when same explicit agent type starts the approved tool', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -292,7 +293,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('lets Claude subagent permission clear when the same agent starts the approved tool', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -337,7 +338,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('lets same Claude subagent clear an unknown approved tool without an input preview', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -382,7 +383,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('keeps Claude permission visible when another same-type subagent reports the same tool execution', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -427,7 +428,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('lets Claude permission clear when a new explicit prompt starts', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -467,7 +468,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('does not replay cleared pane state to a newly attached listener', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()

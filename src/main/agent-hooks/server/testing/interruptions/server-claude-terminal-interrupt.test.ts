@@ -4,6 +4,7 @@ import { buildBody, PANE, postHookEvent, RUNNING_SHELL } from '../server.test-fi
 import { loadClaudeInterruptCapture } from './claude-terminal-interrupt-capture.test-fixture'
 import { createTerminalTitleTracker } from '../../../../../shared/terminal/output/terminal-output-side-effects'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({ getCohortAtEmit: vi.fn() }))
 
@@ -11,7 +12,7 @@ let server: AgentHookServer
 
 beforeEach(async () => {
   _internals.resetCachesForTests()
-  server = new AgentHookServer()
+  server = attestFixtureHookContext(new AgentHookServer())
   await server.start({ env: 'production' })
 })
 
@@ -173,6 +174,8 @@ describe('Claude native title confirms an Escape interruption', () => {
     }
   )
 
+  // Fork 6d65165647: relayed Claude/Codex status is refused without attestation, so a relayed
+  // pane has no row for client-observed input or title to adjudicate.
   it('never adjudicates a relayed pane from client-observed input or title', () => {
     server.ingestRemote(
       {
@@ -185,6 +188,9 @@ describe('Claude native title confirms an Escape interruption', () => {
     title('◐ Remote')
     escape()
     title('✳ Remote')
-    expect(row().state).toBe('working')
+    expect(row()).toBeUndefined()
+    expect(server.getContextIntegrityRejections()).toMatchObject({
+      remote_context_attestation_unavailable: 1
+    })
   })
 })

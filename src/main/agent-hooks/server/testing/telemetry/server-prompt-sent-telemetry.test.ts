@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, PANE, GOOD_PANE, FRESH_PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -28,7 +29,7 @@ afterEach(() => {
 
 describe('AgentHookServer prompt-sent telemetry', () => {
   it('dedupes duplicate Command Code stop hooks but tracks same-prompt reruns', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
 
     server.ingestRemote(
       {
@@ -68,7 +69,7 @@ describe('AgentHookServer prompt-sent telemetry', () => {
   })
 
   it('does not let a reused interaction key suppress different prompt text', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
 
     server.ingestRemote(
       {
@@ -97,7 +98,7 @@ describe('AgentHookServer prompt-sent telemetry', () => {
   })
 
   it('does not track replays, empty prompts, or inherited prompt snapshots', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
 
     server.ingestRemote(
       {
@@ -134,7 +135,7 @@ describe('AgentHookServer prompt-sent telemetry', () => {
   })
 
   it('tracks OpenCode user MessagePart hooks once per message id', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -192,7 +193,7 @@ describe('AgentHookServer prompt-sent telemetry', () => {
   })
 
   it('does not block status cache mutation or listener fanout when telemetry throws', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const listener = vi.fn()
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     trackMock.mockImplementationOnce(() => {
@@ -200,13 +201,15 @@ describe('AgentHookServer prompt-sent telemetry', () => {
     })
     server.setListener(listener)
 
+    // Fork 6d65165647: relayed Claude/Codex status is refused without attestation; this case is
+    // about telemetry failure isolation, so the relayed row comes from gemini.
     server.ingestRemote(
       {
         paneKey: PANE,
         tabId: 'tab-1',
         worktreeId: 'wt-1',
         hasExplicitPrompt: true,
-        payload: { state: 'working', prompt: 'keep status moving', agentType: 'codex' }
+        payload: { state: 'working', prompt: 'keep status moving', agentType: 'gemini' }
       },
       'conn-1'
     )
@@ -216,7 +219,7 @@ describe('AgentHookServer prompt-sent telemetry', () => {
         paneKey: PANE,
         state: 'working',
         prompt: 'keep status moving',
-        agentType: 'codex'
+        agentType: 'gemini'
       })
     ])
     expect(listener).toHaveBeenCalledWith(
@@ -225,6 +228,7 @@ describe('AgentHookServer prompt-sent telemetry', () => {
         payload: expect.objectContaining({ prompt: 'keep status moving' })
       })
     )
+    expect(trackMock).toHaveBeenCalledWith('agent_prompt_sent', expect.anything())
     errorSpy.mockRestore()
   })
 })

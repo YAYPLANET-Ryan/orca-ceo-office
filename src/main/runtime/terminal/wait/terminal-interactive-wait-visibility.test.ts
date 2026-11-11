@@ -41,8 +41,10 @@ describe('Interactive wait visibility and terminal admission', () => {
     '  2. No, exit\n'
   ].join('')
 
+  // Fork 6d65165647: terminal OSC Claude/Codex status is refused without attestation; the OSC
+  // row uses an unprotected agent (gemini) because these tests are about wait/probe handling.
   function agentStatusOsc(state: string): string {
-    return `]9999;${JSON.stringify({ state, prompt: 'ship it', agentType: 'claude' })}`
+    return `]9999;${JSON.stringify({ state, prompt: 'ship it', agentType: 'gemini' })}`
   }
 
   async function createPane(

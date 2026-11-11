@@ -4,12 +4,11 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { normalizeHookPayload } from '../../../../../../shared/agent-hook-listener/normalization/normalize-hook-payload'
 import { createHookListenerState } from '../../../../../../shared/agent-hook-listener/listener-state'
-import { resumeRecordFromStatus } from '../../../../../../shared/agent-session/lifecycle/agent-resume-record-from-status'
-import { getAgentResumeArgv } from '../../../../../../shared/agent-launch/startup/agent-resume-argv'
 import { TRANSCRIPT_MAX_SCAN_BYTES } from '../../../../../../shared/agent-hook-listener/transcript-reader'
 import { AgentHookServer } from '../../../agent-hook-server'
 import { buildBody, PANE } from '../../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../../attested-hook-context.test-fixtures'
 // Exact origin metadata and hook shape captured from agy 1.4.11; paths/IDs are test-local.
 const ROOT = '6bba92d4-47e1-440a-9571-b12bb2d474bc'
 const CHILD = '2e290489-f9b1-432b-807d-f5f2acdf9421'
@@ -55,26 +54,15 @@ function hook(transcriptPath: string, conversationId = ROOT, extra: Record<strin
   }
 }
 
-function expectResume(server: AgentHookServer, id = ROOT) {
-  const status = server.getStatusSnapshot()[0]
-  if (!status) {
-    throw new Error('Missing status')
-  }
-  expect(status).not.toHaveProperty('statusAdmissionSession')
-  const record = resumeRecordFromStatus({
-    entry: { ...status, updatedAt: status.receivedAt },
-    worktreeId: 'wt-1',
-    capturedAt: status.receivedAt
-  })
-  expect(record?.providerSession.id).toBe(id)
-  if (!record) {
-    throw new Error('Missing resume record')
-  }
-  expect(getAgentResumeArgv('antigravity', record.providerSession)).toEqual([
-    'agy',
-    '--conversation',
-    id
-  ])
+// Fork 6d65165647: a relayed envelope that claims a provider session is refused without
+// attestation, whatever its agent, so no relayed root binds a resume identity; relayed hooks
+// without a provider claim still apply and must not mint one.
+function remoteRefusals(server: AgentHookServer): number {
+  return server.getContextIntegrityRejections().remote_context_attestation_unavailable ?? 0
+}
+
+function expectNoResume(server: AgentHookServer) {
+  expect(server.getStatusSnapshot().every((row) => row.providerSession === undefined)).toBe(true)
 }
 
 it.each(CHILD_HOOKS.map((_, index) => index))(
@@ -85,25 +73,30 @@ it.each(CHILD_HOOKS.map((_, index) => index))(
     const childPath = join(dir, 'child.jsonl')
     writeFileSync(rootPath, jsonl(ROOT_ORIGIN))
     writeFileSync(childPath, jsonl(CHILD_ORIGIN, ROOT_ORIGIN))
-    let server = new AgentHookServer()
+    let server = attestFixtureHookContext(new AgentHookServer())
     try {
       await server.start({ env: 'production', userDataPath: dir })
-      server.ingestRemote(normalized(hook(rootPath)), 'host-1')
+      const root = normalized(hook(rootPath))
+      expect(root.providerSession?.id).toBe(ROOT)
+      server.ingestRemote(root, 'host-1')
+      expect(remoteRefusals(server)).toBe(1)
+      expect(server.getStatusSnapshot()).toEqual([])
       server.stop()
-      server = new AgentHookServer()
+      server = attestFixtureHookContext(new AgentHookServer())
       await server.start({ env: 'production', userDataPath: dir })
       for (const suffix of CHILD_HOOKS.slice(start)) {
         const event = normalized(hook(childPath, CHILD, { lastUserInput: '', ...suffix }))
         expect(event.providerSession).toBeUndefined()
         server.ingestRemote(event, 'host-1')
-        expectResume(server)
+        expectNoResume(server)
       }
       server.stop()
-      server = new AgentHookServer()
+      server = attestFixtureHookContext(new AgentHookServer())
       await server.start({ env: 'production', userDataPath: dir })
-      expectResume(server)
+      expectNoResume(server)
       server.ingestRemote(normalized(hook(rootPath, 'later-root')), 'host-1')
-      expectResume(server, 'later-root')
+      expect(remoteRefusals(server)).toBe(1)
+      expectNoResume(server)
       server.ingestRemote(
         { ...normalized(hook(childPath, CHILD)), worktreeId: 'other-worktree' },
         'host-1'
@@ -123,7 +116,7 @@ it.each(CHILD_HOOKS.map((_, index) => index))(
 it('derives root identity from bounded first-record provenance, independently of latest input', () => {
   const dir = mkdtempSync(join(tmpdir(), 'agy-origin-'))
   const transcriptPath = join(dir, 'transcript.jsonl')
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   try {
     const accepts = (first: unknown, lastUserInput?: unknown) => {
       writeFileSync(transcriptPath, jsonl(first, ROOT_ORIGIN))
@@ -153,14 +146,16 @@ it('derives root identity from bounded first-record provenance, independently of
     writeFileSync(transcriptPath, jsonl(ROOT_ORIGIN))
     expect(normalized(hook(dir), state).providerSession).toBeUndefined()
     const root = normalized(hook(transcriptPath), state)
+    expect(root.providerSession?.id).toBe(ROOT)
     server.ingestRemote(root, null)
-    expectResume(server)
+    expect(remoteRefusals(server)).toBe(1)
+    expectNoResume(server)
     rmSync(transcriptPath)
     server.ingestRemote(
       normalized(hook(transcriptPath, ROOT, { hook_event_name: 'Stop', fullyIdle: true }), state),
       null
     )
-    expectResume(server)
+    expectNoResume(server)
     server.ingestTerminalStatus({
       paneKey: PANE,
       worktreeId: 'wt-1',

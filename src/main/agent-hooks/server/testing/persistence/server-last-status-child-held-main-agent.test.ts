@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, postHookEvent, PANE, RUNNING_SHELL } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -44,7 +45,7 @@ describe('Claude rows held open by child agents', () => {
   })
 
   async function startServer(): Promise<AgentHookServer> {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     return server
   }
@@ -90,6 +91,10 @@ describe('Claude rows held open by child agents', () => {
         state: 'waiting',
         toolName: 'Bash',
         mainAgent: { state: 'done' }
+      })
+      // Fork 6d65165647: the OSC report itself is refused without attestation.
+      expect(server.getContextIntegrityRejections()).toEqual({
+        terminal_context_attestation_unavailable: 1
       })
     } finally {
       server.stop()
@@ -234,16 +239,23 @@ describe('Claude rows held open by child agents', () => {
     }
   }
 
+  // Fork 6d65165647: terminal-title Claude/Codex status is refused without attestation, so the
+  // OSC repaint leaves the shell-held hook row untouched.
   it('keeps the shell fact when OSC repaints a shell-held row', async () => {
     const server = await startServer()
     await post(server, { hook_event_name: 'UserPromptSubmit', prompt: 'build in background' })
     await post(server, { hook_event_name: 'Stop', background_tasks: [RUNNING_SHELL] })
+    const held = row(server)
     server.ingestTerminalStatus({
       paneKey: PANE,
       connectionId: null,
       payload: { state: 'working', prompt: 'title text', agentType: 'claude' }
     })
-    expect(row(server)).toMatchObject({ state: 'working', prompt: 'title text' })
+    expect(row(server)).toEqual(held)
+    expect(row(server)).toMatchObject({ state: 'working', prompt: 'build in background' })
+    expect(server.getContextIntegrityRejections()).toEqual({
+      terminal_context_attestation_unavailable: 1
+    })
 
     await expectShellHeldRowStaysOpenAfterRestart(server, [
       { hook_event_name: 'SubagentStart', agent_id: 'achild-b' },

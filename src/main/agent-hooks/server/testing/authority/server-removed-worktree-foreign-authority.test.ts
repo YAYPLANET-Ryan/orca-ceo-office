@@ -8,12 +8,15 @@ import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { makePaneKey } from '../../../../../shared/workspace-layout/stable-pane-id'
 import { LEAF_1 } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const REMOVED = 'repo::/removed'
 const KEPT = 'repo::/kept'
 const PANE = makePaneKey('tab-foreign', LEAF_1)
 const TOKEN = 'foreign-launch'
 const HASH = createHash('sha256').update(TOKEN).digest('hex')
-const working = { state: 'working', prompt: 'live', agentType: 'codex' } as const
+// Fork 6d65165647: remote-relay and terminal-title Claude/Codex status is refused without
+// attestation; foreign authority is not provider-specific, so an unprotected agent reports it.
+const working = { state: 'working', prompt: 'live', agentType: 'gemini' } as const
 
 describe('removed-worktree foreign authority', () => {
   let userDataPath: string
@@ -24,7 +27,7 @@ describe('removed-worktree foreign authority', () => {
   afterEach(() => rmSync(userDataPath, { recursive: true, force: true }))
 
   it('keeps foreign hydrated evidence when a removed commitment outlives its row', async () => {
-    const seed = new AgentHookServer()
+    const seed = attestFixtureHookContext(new AgentHookServer())
     await seed.start({ env: 'production', userDataPath })
     seed.ingestRemote(
       {
@@ -38,7 +41,7 @@ describe('removed-worktree foreign authority', () => {
     )
     seed.flushStatusPersistSync()
     seed.stop()
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       server.ingestRemote(
@@ -90,7 +93,7 @@ describe('removed-worktree foreign authority', () => {
     async ({ owner, connectionId }) => {
       const token = connectionId === null ? 'removed-launch' : TOKEN
       const hash = createHash('sha256').update(token).digest('hex')
-      const seed = new AgentHookServer()
+      const seed = attestFixtureHookContext(new AgentHookServer())
       await seed.start({ env: 'production', userDataPath })
       seed.ingestRemote(
         {
@@ -105,7 +108,7 @@ describe('removed-worktree foreign authority', () => {
       seed.flushStatusPersistSync()
       seed.stop()
 
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       await server.start({ env: 'production', userDataPath })
       const attest = () =>
         server.attestCompatibilityAuthority({
@@ -176,7 +179,7 @@ describe('removed-worktree foreign authority', () => {
   it.each([false, true])(
     'keeps a foreign claim after removed OSC with disconnect=%s',
     async (disconnect) => {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       await server.start({ env: 'production', userDataPath })
       const remote = (state: 'working' | 'done') =>
         server.ingestRemote(

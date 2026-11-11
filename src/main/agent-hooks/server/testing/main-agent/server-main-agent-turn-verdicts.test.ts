@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, postHookEvent, PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -32,7 +33,7 @@ describe('main agent turn verdicts and clocks', () => {
   let server: AgentHookServer
 
   beforeEach(async () => {
-    server = new AgentHookServer()
+    server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
   })
 
@@ -106,6 +107,8 @@ describe('main agent turn verdicts and clocks', () => {
     expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working', mainAgent: cancelled })
   })
 
+  // Fork 6d65165647: relayed Claude/Codex status is refused without attestation, so neither the
+  // relayed turn nor its host-confirmed cancellation can create or change a row.
   it('keeps a host-confirmed Codex cancellation across a late relayed root Stop', () => {
     const relayed = (
       hookEventName: string,
@@ -140,12 +143,10 @@ describe('main agent turn verdicts and clocks', () => {
       },
       'conn-1'
     )
-    const cancelled = server.getStatusSnapshot()[0]?.mainAgent
-    expect(cancelled).toMatchObject({ state: 'done', outcome: 'cancellation' })
+    expect(server.getStatusSnapshot()).toEqual([])
 
     vi.setSystemTime(1_002_000)
     relayed('Stop', { state: 'done' })
-    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'done', interrupted: true })
     vi.setSystemTime(1_060_000)
     relayed(
       'SubagentStart',
@@ -156,6 +157,9 @@ describe('main agent turn verdicts and clocks', () => {
       { toolAgentId: 'child-1' }
     )
 
-    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working', mainAgent: cancelled })
+    expect(server.getStatusSnapshot()).toEqual([])
+    expect(server.getContextIntegrityRejections()).toMatchObject({
+      remote_context_attestation_unavailable: 4
+    })
   })
 })

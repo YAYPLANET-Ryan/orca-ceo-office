@@ -23,6 +23,8 @@ export function spawnedPtyEnv(call: unknown): Record<string, string> {
   })
   stampPtySpawnPaneEnv(env, {
     pane,
+    // Mirrors spawn-env.ts: a launch config keeps its token; a bare shell gets a fresh one.
+    hasLaunchConfig: Boolean(values.launchConfig),
     jcodeRuntimeDir: pane
       ? buildJcodeRuntimeDirEnv(pane.paneKey)?.[JCODE_RUNTIME_DIR_ENV_KEY]
       : undefined

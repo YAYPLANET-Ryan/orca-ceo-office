@@ -3,6 +3,7 @@ import type { AgentHookSource } from '../../../../../shared/agent-hook-listener/
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { trackMock, getCohortAtEmitMock } = vi.hoisted(() => ({
   trackMock: vi.fn(),
   getCohortAtEmitMock: vi.fn()
@@ -50,8 +51,12 @@ const NEW_TURN_EVENT: Record<AgentHookSource, string | null> = {
   kiro: 'agentSpawn'
 }
 
-function reviveRetiredPane(source: unknown, hookEventName: string): boolean {
-  const server = new AgentHookServer()
+// Fork 6d65165647: remote-relay Claude/Codex status is refused without attestation, so a
+// source-less legacy relay reports an unprotected agent and Claude/Codex assert the refusal.
+const REFUSED_REMOTE_SOURCES = ['claude', 'codex'] as const satisfies readonly AgentHookSource[]
+
+function relayToRetiredPane(source: unknown, hookEventName: string): AgentHookServer {
+  const server = attestFixtureHookContext(new AgentHookServer())
   server.retirePaneAuthority(PANE)
   server.ingestRemote(
     {
@@ -63,12 +68,18 @@ function reviveRetiredPane(source: unknown, hookEventName: string): boolean {
       payload: {
         state: 'working',
         prompt: 'after reuse',
-        agentType: typeof source === 'string' ? source : 'claude'
+        agentType: typeof source === 'string' ? source : 'gemini'
       }
     },
     'conn-1'
   )
-  return server.getStatusSnapshot().some((entry) => entry.paneKey === PANE)
+  return server
+}
+
+function reviveRetiredPane(source: unknown, hookEventName: string): boolean {
+  return relayToRetiredPane(source, hookEventName)
+    .getStatusSnapshot()
+    .some((entry) => entry.paneKey === PANE)
 }
 
 describe("retired pane un-retires on each provider's own new-turn event", () => {
@@ -76,14 +87,23 @@ describe("retired pane un-retires on each provider's own new-turn event", () => 
   // boundary UserPromptSubmit/SessionStart could ever revive — the rest stayed rowless forever.
   // Why: keys of a Record<AgentHookSource, …> — a new source fails typecheck here rather than
   // silently skipping coverage, which is the same guarantee the runtime list would give.
+  const refused: readonly AgentHookSource[] = REFUSED_REMOTE_SOURCES
   const revivable = (Object.keys(NEW_TURN_EVENT) as AgentHookSource[]).filter(
-    (source) => NEW_TURN_EVENT[source] !== null
+    (source) => NEW_TURN_EVENT[source] !== null && !refused.includes(source)
   )
 
   it.each(revivable)('%s', (source) => {
     const hookEventName = NEW_TURN_EVENT[source]
     expect(hookEventName).not.toBeNull()
     expect(reviveRetiredPane(source, hookEventName as string)).toBe(true)
+  })
+
+  it.each(REFUSED_REMOTE_SOURCES)('%s', (source) => {
+    const server = relayToRetiredPane(source, NEW_TURN_EVENT[source] as string)
+    expect(server.getStatusSnapshot().some((entry) => entry.paneKey === PANE)).toBe(false)
+    expect(server.getContextIntegrityRejections()).toMatchObject({
+      remote_context_attestation_unavailable: 1
+    })
   })
 
   it('revives on a literal boundary when an older relay omits source', () => {

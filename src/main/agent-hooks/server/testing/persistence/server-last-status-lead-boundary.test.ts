@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, postHookEvent, PANE, RUNNING_SHELL } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -36,7 +37,7 @@ describe('Persisted Claude lead boundaries', () => {
   })
 
   it('restores a persisted lead boundary before its last child stops', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     await postHookEvent(
       firstServer,
@@ -64,7 +65,7 @@ describe('Persisted Claude lead boundaries', () => {
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       await postHookEvent(
@@ -87,7 +88,7 @@ describe('Persisted Claude lead boundaries', () => {
   })
 
   it('keeps a persisted child boundary across an OSC repaint and restart', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     await postHookEvent(
       firstServer,
@@ -101,17 +102,21 @@ describe('Persisted Claude lead boundaries', () => {
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const secondServer = new AgentHookServer()
+    const secondServer = attestFixtureHookContext(new AgentHookServer())
     await secondServer.start({ env: 'production', userDataPath })
     secondServer.ingestTerminalStatus({
       paneKey: PANE,
       connectionId: null,
       payload: { state: 'working', prompt: '', agentType: 'claude' }
     })
+    // Fork 6d65165647: terminal-title Claude/Codex status is refused without attestation.
+    expect(secondServer.getContextIntegrityRejections()).toEqual({
+      terminal_context_attestation_unavailable: 1
+    })
     secondServer.flushStatusPersistSync()
     secondServer.stop()
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       await postHookEvent(
@@ -131,7 +136,7 @@ describe('Persisted Claude lead boundaries', () => {
   })
 
   it('keeps a restored lead boundary unconfirmed when background work was running', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     await postHookEvent(
       firstServer,
@@ -154,7 +159,7 @@ describe('Persisted Claude lead boundaries', () => {
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       await postHookEvent(

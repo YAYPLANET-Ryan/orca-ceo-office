@@ -10,6 +10,9 @@ import { buildBody, PANE, postHookEvent } from '../server.test-fixtures'
 import { ClaudeHelperKillPoller } from '../../../../../shared/agent-hook-listener/providers/claude-helper-kill-poller'
 import '../../../../../shared/agent-hook-listener/providers/claude-transcript-decoder'
 import * as cursor from '../../../../../shared/agent-hook-listener/providers/claude-transcript-cursor'
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
+import { launchTokenHash } from '../../../../../shared/agent-hook-listener/transport/agent-hook-spool'
+import type { HookContextSnapshotReader } from '../../hook-context-snapshot'
 import '../../../../../shared/agent-hook-listener/transcripts/agent-transcript-poll-scheduler'
 
 // Complete captured lifecycle records, with runtime replay seeded by real persisted HTTP state.
@@ -74,6 +77,30 @@ const hooks = [
   }
 ]
 
+// These hooks come from a PTY launched with the 'same-owner' token; attest that PTY.
+function attestSameOwner(server: AgentHookServer): AgentHookServer {
+  attestFixtureHookContext(server)
+  const internals = server as unknown as { readHookContextSnapshot: HookContextSnapshotReader }
+  const fixtureReader = internals.readHookContextSnapshot
+  const tokenHash = launchTokenHash('same-owner')
+  server.setHookContextSnapshotReader(async (envelope) => {
+    const snapshot = await fixtureReader(envelope)
+    return snapshot && tokenHash ? { ...snapshot, launchTokenHash: tokenHash } : snapshot
+  })
+  return server
+}
+
+// Fork 6d65165647: relayed Claude/Codex status is refused without attestation. The relay-http and
+// relay-spool variants below assert that the desktop refuses the relayed hooks and holds no row.
+async function expectRelayRefused(desktop: AgentHookServer): Promise<void> {
+  await vi.waitFor(() =>
+    expect(
+      desktop.getContextIntegrityRejections().remote_context_attestation_unavailable ?? 0
+    ).toBeGreaterThan(0)
+  )
+  expect(desktop.getStatusSnapshotForPane(PANE)).toEqual([])
+}
+
 async function setup(
   kind: string,
   when: string,
@@ -110,7 +137,7 @@ async function setup(
   const startOptions = { env: 'production', userDataPath: folder, endpointNamespace: 'c5-bounded' }
   // Desktop restart is seeded by actual HTTP admission/persistence, not injected snapshot roster.
   if (kind === 'desktop-spool') {
-    const previous = new AgentHookServer()
+    const previous = attestSameOwner(new AgentHookServer())
     servers.push(previous)
     await previous.start(startOptions)
     for (const h of inputHooks) {
@@ -145,7 +172,7 @@ async function setup(
     await pause(20)
   }
   options.beforeStart?.(transcript)
-  const desktop = new AgentHookServer()
+  const desktop = attestSameOwner(new AgentHookServer())
   servers.push(desktop)
   if (options.retired) {
     desktop.dropStatusEntriesByTabPrefix('tab-1')
@@ -272,6 +299,12 @@ it.each([
   const p = await setup(kind, when, {
     advanceBeforeBind: () => clock?.mockReturnValue(acceptedAt + 10)
   })
+  if (kind.startsWith('relay')) {
+    await expectRelayRefused(p.desktop)
+    await p.post(hooks[1])
+    await expectRelayRefused(p.desktop)
+    return
+  }
   const before = p.row()!
   await settle(() => expect(p.row()?.subagents ?? []).toEqual([]))
   expect(p.row()?.workingMode).toBe('monitoring')
@@ -294,6 +327,12 @@ it.each(['desktop-http', 'relay-http', 'desktop-spool', 'relay-spool'])(
   'retains accepted observation when %s fanout throws',
   async (kind) => {
     const p = await setup(kind, 'accepted-before-bind', { throwOnce: true })
+    if (kind.startsWith('relay')) {
+      // A refused hook reaches no outward listener, so nothing throws.
+      expect(p.threw).toBe(false)
+      await expectRelayRefused(p.desktop)
+      return
+    }
     expect(p.threw).toBe(true)
     expect(p.entries.size).toBe(1)
     await settle(() => expect(p.row()?.subagents ?? []).toEqual([]))
@@ -306,6 +345,10 @@ it.each(['relay-spool', 'desktop-spool'])(
   async (kind) => {
     const R = Math.floor(Date.now() / 1000) * 1000
     const p = await setup(kind, 'before-start', { cutoff: R, killAt: R - 1001 })
+    if (kind === 'relay-spool') {
+      await expectRelayRefused(p.desktop)
+      return
+    }
     await settle(() => expect(p.entries.get(PANE)?.parent.offset).toBeGreaterThan(0))
     expect(p.entries.get(PANE)?.killedAt).toBeUndefined()
     expect(p.row()?.subagents?.[0]?.state).toBe('working')
@@ -365,8 +408,8 @@ it('caps future spool cutoffs and keeps HTTP cutoff provenance private', async (
 
 it('a real failed bind parks without resources and explicit retry delivers its first fact', async () => {
   const p = await setup('relay-spool', 'before-start', { retryBind: true })
-  await settle(() => expect(p.row()?.subagents ?? []).toEqual([]))
-  expect(p.row()?.workingMode).toBe('monitoring')
+  // The retried relay delivers its first fact; the desktop refuses it.
+  await expectRelayRefused(p.desktop)
 })
 
 it.each(['relay-spool', 'desktop-spool'])(
@@ -435,8 +478,7 @@ it('preferred-port fallback activates the original admitted observation', async 
     }
     const p = await setup('relay-spool', 'before-start', { busyPort: address.port })
     expect(p.relay.usedPortFallback).toBe(true)
-    await settle(() => expect(p.row()?.subagents ?? []).toEqual([]))
-    expect(p.row()?.workingMode).toBe('monitoring')
+    await expectRelayRefused(p.desktop)
   } finally {
     await new Promise<void>((resolve) => busy.close(() => resolve()))
   }
@@ -490,7 +532,12 @@ it('reentrant mirror and OSC writes cannot borrow local hook admission', async (
   await p.post({ hook_event_name: 'UserPromptSubmit', prompt: 'another real turn' })
   expect(reentered).toBe(true)
   expect(p.entries.size).toBe(1)
-  expect(p.desktop.getStatusSnapshotForPane(other)[0]?.state).toBe('working')
+  // Neither reentrant write may borrow the local admission; both are refused outright.
+  expect(p.desktop.getStatusSnapshotForPane(other)).toEqual([])
+  expect(p.desktop.getContextIntegrityRejections()).toMatchObject({
+    remote_context_attestation_unavailable: 1,
+    terminal_context_attestation_unavailable: 1
+  })
   await appendFile(p.transcript, lines([{ ...p.oldKill, timestamp: new Date().toISOString() }]))
   await settle(() => expect(p.row()?.subagents ?? []).toEqual([]))
 })

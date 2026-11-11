@@ -6,11 +6,16 @@ import type { AgentHookRelayEnvelope } from '../shared/agent-hook-listener/trans
 import { RelayAgentHookServer } from './agent-hook-server'
 import { AgentHookServer } from '../main/agent-hooks/server/agent-hook-server'
 
+import { attestFixtureHookContext } from '../main/agent-hooks/server/testing/attested-hook-context.test-fixtures'
 const PANE_KEY = 'tab-1:11111111-1111-4111-8111-111111111111'
+// Fork 6d65165647: relay Claude/Codex status is refused without attestation.
+const REMOTE_REFUSAL = 'remote_context_attestation_unavailable'
+const refusals = (server: AgentHookServer): number =>
+  server.getContextIntegrityRejections()[REMOTE_REFUSAL] ?? 0
 
 it('keeps a remote main Codex turn working through /side chats across relay restarts', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'relay-codex-side-'))
-  const desktop = new AgentHookServer()
+  const desktop = attestFixtureHookContext(new AgentHookServer())
   const forward = (envelope: AgentHookRelayEnvelope): void =>
     void desktop.ingestRemote(envelope, 'ssh-connection')
   let relay = new RelayAgentHookServer({ endpointDir: dir, forward })
@@ -27,12 +32,7 @@ it('keeps a remote main Codex turn working through /side chats across relay rest
       body: JSON.stringify({ paneKey: PANE_KEY, tabId: 'tab-1', worktreeId: 'folder-1', payload })
     })
     expect(response.status).toBe(204)
-    expect(desktop.getStatusSnapshot()[0]).toMatchObject({
-      connectionId: 'ssh-connection',
-      state: 'working',
-      prompt: 'remote main',
-      providerSession: { id: 'main-session' }
-    })
+    expect(desktop.getStatusSnapshot()).toEqual([])
   }
   await relay.start()
   try {
@@ -61,7 +61,8 @@ it('keeps a remote main Codex turn working through /side chats across relay rest
         payload: { ...main, hook_event_name: 'Stop' }
       })
     })
-    expect(desktop.getStatusSnapshot()[0]).toMatchObject({ state: 'done' })
+    expect(desktop.getStatusSnapshot()).toEqual([])
+    expect(refusals(desktop)).toBe(4)
   } finally {
     relay.stop()
     rmSync(dir, { recursive: true, force: true })
@@ -70,7 +71,7 @@ it('keeps a remote main Codex turn working through /side chats across relay rest
 
 it('lets a new remote ephemeral Codex conversation replace a row left working', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'relay-codex-new-'))
-  const desktop = new AgentHookServer()
+  const desktop = attestFixtureHookContext(new AgentHookServer())
   const relay = new RelayAgentHookServer({
     endpointDir: dir,
     forward: (envelope) => void desktop.ingestRemote(envelope, 'ssh-connection')
@@ -94,11 +95,8 @@ it('lets a new remote ephemeral Codex conversation replace a row left working', 
     const next = { session_id: 'new-session', transcript_path: null }
     await post({ ...next, hook_event_name: 'SessionStart', source: 'startup' })
     await post({ ...next, hook_event_name: 'UserPromptSubmit', prompt: 'new task' })
-    expect(desktop.getStatusSnapshot()[0]).toMatchObject({
-      state: 'working',
-      prompt: 'new task',
-      providerSession: { id: 'new-session' }
-    })
+    expect(desktop.getStatusSnapshot()).toEqual([])
+    expect(refusals(desktop)).toBe(2)
   } finally {
     relay.stop()
     rmSync(dir, { recursive: true, force: true })

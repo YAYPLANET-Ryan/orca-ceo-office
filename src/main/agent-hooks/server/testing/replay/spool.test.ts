@@ -19,12 +19,17 @@ import {
   launchTokenHash,
   type SpoolRecord
 } from '../../../../../shared/agent-hook-listener/transport/agent-hook-spool'
-import { AgentHookServer, _internals } from '../../agent-hook-server'
-import { buildBody } from '../server.test-fixtures'
+import { AgentHookServer } from '../../agent-hook-server'
+import { buildBody, postHookEvent } from '../server.test-fixtures'
 import { _internals as codexInternals } from '../../../../codex/hooks/installation/hook-service'
 import { getManagedScript as getClaudeManagedScript } from '../../../../claude/hook-script'
 import { makePaneKey } from '../../../../../shared/workspace-layout/stable-pane-id'
 
+import {
+  attestFixtureHookContext,
+  FIXTURE_AGENT_PROCESS,
+  FIXTURE_LAUNCH_TOKEN
+} from '../attested-hook-context.test-fixtures'
 describe('agent hook spool', () => {
   it('waits for a newline before replaying a complete-looking final record', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'orca-spool-unterminated-'))
@@ -105,23 +110,18 @@ describe('agent hook spool', () => {
   it('replays a spooled Codex SubagentStop through the server after restart', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-spool-e2e-'))
     const paneKey = makePaneKey('tab-spool', '00000000-0000-4000-8000-000000000001')
-    const launchToken = 'generation-token'
-    const first = new AgentHookServer()
+    const launchToken = FIXTURE_LAUNCH_TOKEN
+    const first = attestFixtureHookContext(new AgentHookServer())
     await first.start({ env: 'production', userDataPath })
-    const started = _internals.normalizeHookPayload(
-      'codex',
-      buildBody({ hook_event_name: 'SubagentStart', agent_id: 'child-spooled' }),
-      'production'
-    )!
-    first.ingestRemote(
-      {
-        paneKey,
-        source: 'codex',
-        hookEventName: 'SubagentStart',
-        launchToken,
-        payload: started.payload
-      },
-      'spool-test'
+    // Fork 6d65165647: relayed Codex status is refused without attestation, so the row the spool
+    // replays against comes from an attested local hook instead of a relay.
+    await postHookEvent(
+      first,
+      buildBody(
+        { hook_event_name: 'SubagentStart', agent_id: 'child-spooled' },
+        { paneKey, tabId: 'tab-spool' }
+      ),
+      '/hook/codex'
     )
     expect(first.getStatusSnapshot()).toHaveLength(1)
     first.flushStatusPersistSync()
@@ -130,9 +130,9 @@ describe('agent hook spool', () => {
     mkdirSync(spoolDir, { recursive: true })
     writeFileSync(
       join(spoolDir, 'pane-tab-spooled_0.jsonl'),
-      `\n${JSON.stringify({ paneKey, source: 'codex', hookEventName: 'SubagentStop', launchToken, receivedAt: Date.now(), payload: { hook_event_name: 'SubagentStop', agent_id: 'child-spooled' } })}\n`
+      `\n${JSON.stringify({ paneKey, tabId: 'tab-spool', worktreeId: 'wt-1', source: 'codex', hookEventName: 'SubagentStop', launchToken, agentProcess: FIXTURE_AGENT_PROCESS, receivedAt: Date.now(), payload: { hook_event_name: 'SubagentStop', agent_id: 'child-spooled' } })}\n`
     )
-    const restarted = new AgentHookServer()
+    const restarted = attestFixtureHookContext(new AgentHookServer())
     await restarted.start({ env: 'production', userDataPath })
     try {
       const snapshot = restarted.getStatusSnapshot()
@@ -148,8 +148,8 @@ describe('agent hook spool', () => {
   it('rejects a stale remote replay against the hydrated launch-token fence', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-spool-remote-fence-'))
     const paneKey = makePaneKey('tab-remote-fence', '00000000-0000-4000-8000-000000000003')
-    const first = new AgentHookServer()
-    const second = new AgentHookServer()
+    const first = attestFixtureHookContext(new AgentHookServer())
+    const second = attestFixtureHookContext(new AgentHookServer())
     try {
       await first.start({ env: 'production', userDataPath })
       first.ingestRemote(
@@ -161,6 +161,10 @@ describe('agent hook spool', () => {
         },
         'ssh-1'
       )
+      expect(first.getStatusSnapshot()).toEqual([])
+      expect(first.getContextIntegrityRejections()).toEqual({
+        remote_context_attestation_unavailable: 1
+      })
       first.flushStatusPersistSync()
       first.stop()
 
@@ -175,10 +179,11 @@ describe('agent hook spool', () => {
         },
         'ssh-2'
       )
-      expect(second.getStatusSnapshot()[0]).toMatchObject({
-        paneKey,
-        state: 'working',
-        prompt: 'old'
+      // Fork 6d65165647: relayed Codex status is refused without attestation, on both sides of
+      // the restart, so there is no hydrated row for the stale replay to overwrite.
+      expect(second.getStatusSnapshot()).toEqual([])
+      expect(second.getContextIntegrityRejections()).toEqual({
+        remote_context_attestation_unavailable: 1
       })
     } finally {
       first.stop()
@@ -282,33 +287,29 @@ describe('agent hook spool', () => {
   it('does not mark a non-terminal downtime replay as runtime-observed', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-spool-observed-'))
     const paneKey = makePaneKey('tab-observed', '00000000-0000-4000-8000-000000000002')
-    const launchToken = 'observed-generation'
-    const first = new AgentHookServer()
+    const launchToken = FIXTURE_LAUNCH_TOKEN
+    const first = attestFixtureHookContext(new AgentHookServer())
     await first.start({ env: 'production', userDataPath })
-    const started = _internals.normalizeHookPayload(
-      'codex',
-      buildBody({ hook_event_name: 'SubagentStart', agent_id: 'child-observed' }),
-      'production'
-    )!
-    first.ingestRemote(
-      {
-        paneKey,
-        source: 'codex',
-        hookEventName: 'SubagentStart',
-        launchToken,
-        payload: started.payload
-      },
-      null
+    // Fork 6d65165647: relayed Codex status is refused without attestation, so the row comes
+    // from an attested local hook instead of a relay.
+    await postHookEvent(
+      first,
+      buildBody(
+        { hook_event_name: 'SubagentStart', agent_id: 'child-observed' },
+        { paneKey, tabId: 'tab-observed' }
+      ),
+      '/hook/codex'
     )
+    expect(first.getStatusSnapshot()).toHaveLength(1)
     first.flushStatusPersistSync()
     first.stop()
     const spoolDir = join(userDataPath, 'agent-hooks', 'spool')
     mkdirSync(spoolDir, { recursive: true })
     writeFileSync(
       join(spoolDir, 'pane-observed.jsonl'),
-      `\n${JSON.stringify({ paneKey, source: 'codex', hookEventName: 'SubagentStart', launchToken, receivedAt: Date.now(), payload: started.payload })}\n`
+      `\n${JSON.stringify({ paneKey, tabId: 'tab-observed', worktreeId: 'wt-1', source: 'codex', hookEventName: 'SubagentStart', launchToken, agentProcess: FIXTURE_AGENT_PROCESS, receivedAt: Date.now(), payload: { hook_event_name: 'SubagentStart', agent_id: 'child-observed' } })}\n`
     )
-    const restarted = new AgentHookServer()
+    const restarted = attestFixtureHookContext(new AgentHookServer())
     await restarted.start({ env: 'production', userDataPath })
     try {
       expect(restarted.getStatusChangeSnapshot()[0]?.observedInCurrentRuntime).toBe(false)

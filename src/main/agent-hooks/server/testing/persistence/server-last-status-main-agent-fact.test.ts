@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, postHookEvent, recentTs, PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -52,7 +53,7 @@ describe('The main agent fact across a restart', () => {
 
   // Captured Claude cancellation emits no hook; exercise the inferred Ctrl+C path.
   it('round-trips an inferred cancel held open by a child through disk and back', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     await firstServer.start({ env: 'production', userDataPath })
     await postHookEvent(
       firstServer,
@@ -81,7 +82,7 @@ describe('The main agent fact across a restart', () => {
     firstServer.flushStatusPersistSync()
     firstServer.stop()
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       await postHookEvent(
@@ -112,7 +113,7 @@ describe('The main agent fact across a restart', () => {
         subagents: [{ id: 'arestored-child', state: 'working', startedAt: receivedAt - 4_000 }]
       }
     })
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       expect(server.getStatusSnapshot()[0]).toMatchObject({
@@ -155,7 +156,7 @@ describe('The main agent fact across a restart', () => {
             : {})
         }
       })
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       await server.start({ env: 'production', userDataPath })
       try {
         for (const hookEventName of childEvents) {
@@ -193,7 +194,7 @@ describe('The main agent fact across a restart', () => {
         subagents: [{ id: 'achild', state: 'working', startedAt: receivedAt - 4_000 }]
       }
     })
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       await postHookEvent(
@@ -217,7 +218,7 @@ describe('The main agent fact across a restart', () => {
       stateStartedAt: receivedAt - 5_000,
       payload: { state: 'done', prompt: 'survived', agentType: 'claude', mainAgent: 'done' }
     })
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       const row = server.getStatusSnapshot()[0]

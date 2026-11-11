@@ -18,6 +18,7 @@ import { makeStore } from '../../rpc/server/runtime-rpc-worktree-store-fixtures'
 import { spawnedPtyEnv } from '../../terminal/launch/spawned-pty-env-fixtures'
 import { committingSpawn } from '../../orca-runtime-tests/bind-first-pane.test-fixture'
 
+import { attestFixtureHookContext } from '../../../agent-hooks/server/testing/attested-hook-context.test-fixtures'
 // STA-4557: deferred OpenCode foreground reads retained/revived finished authority (#14866, reverted in #14943).
 
 const WORKTREE_PATH = '/tmp/worktree-a'
@@ -148,7 +149,7 @@ describe('OpenCode finished-session launch authority (STA-4557)', () => {
   })
 
   it('stops attesting the finished session token for the reused pane', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     servers.push(server)
     await server.start({ env: 'production' })
     const pane = await launchOpenCodePane({
@@ -203,7 +204,7 @@ describe('OpenCode finished-session launch authority (STA-4557)', () => {
   })
 
   it('does not let a later OpenCode session satisfy the previous pending retirement', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     servers.push(server)
     await server.start({ env: 'production' })
     let resolveForeground: ((process: string | null) => void) | undefined
@@ -258,7 +259,7 @@ describe('OpenCode finished-session launch authority (STA-4557)', () => {
   it('does not rehydrate a finished session token as restored authority after a restart', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-sta4557-'))
     tempDirs.push(userDataPath)
-    const first = new AgentHookServer()
+    const first = attestFixtureHookContext(new AgentHookServer())
     servers.push(first)
     await first.start({ env: 'production', userDataPath })
     const pane = await launchOpenCodePane({
@@ -288,7 +289,7 @@ describe('OpenCode finished-session launch authority (STA-4557)', () => {
     first.flushStatusPersistSync()
     first.stop()
 
-    const restarted = new AgentHookServer()
+    const restarted = attestFixtureHookContext(new AgentHookServer())
     servers.push(restarted)
     await restarted.start({ env: 'production', userDataPath })
 

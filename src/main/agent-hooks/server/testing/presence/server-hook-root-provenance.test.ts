@@ -28,6 +28,7 @@ import {
   runningPane,
   hook,
   observe,
+  refusals,
   slowRoot,
   settled,
   type RootTestServer,
@@ -42,6 +43,10 @@ vi.mock('../../../../../shared/agent-status/process/agent-process-presence-probe
 }))
 
 registerRootTestHarness()
+
+// Fork 6d65165647: local Claude/Codex hooks without root evidence (fallbacks, tmux sessions the
+// pane does not show, answers past the admission deadline) and terminal reports are refused
+// without attestation, so no fallback or status-only record is ever minted for them.
 
 // Orca's own agent-teams launch sets this synthetic TMUX; its Claudes run in no tmux server.
 const AGENT_TEAMS_HINT = '%1 /tmp/orca-claude-agent-teams/team-x'
@@ -87,24 +92,32 @@ describe('an empty pane whose first hook cannot be proved', () => {
       // A trust prompt is an observation, never ownership: the pane is still empty.
       observe(server, 'waiting')
       await hook(server, 'UserPromptSubmit', { session: 'session-a', prompt: 'Task', tmuxPane })
-      expect(server.row()).toMatchObject({ state: 'working', prompt: 'Task' })
-      expect(server.presence()).toMatchObject({
-        process: capture(49969),
-        session: 'session-a',
-        fallback: true
-      })
-      expect(server.hasVerifiableAgentProcess(PANE)).toBe(true)
-      // Its own hooks and terminal reports never turn it into proof.
-      await hook(server, 'PostToolUse', { session: 'session-a' })
-      observe(server, 'working')
-      expect(server.presence()?.fallback).toBe(true)
-      // It keeps main's protection from another provider's process-less hooks.
+      // The unprovable first hook is refused instead of recorded as a fallback.
+      expect(refusals(server, 'process_generation_unconfirmed')).toBe(1)
+      expect(server.row()).toBeUndefined()
+      expect(server.presence()).toBeUndefined()
+      expect(server.hasVerifiableAgentProcess(PANE)).toBe(false)
+      // Another provider's process-less hooks are refused too.
       await codexTurn(server, 'Codex task')
-      expect(server.row()?.agentType).toBe('claude')
-      expect(server.presence()).toMatchObject({ agent: 'claude', process: capture(49969) })
+      expect(server.row()).toBeUndefined()
+      expect(refusals(server, 'process_generation_unconfirmed')).toBe(2)
+      // Terminal reports never turn it into proof; its own next hook is read again.
+      observe(server, 'working')
+      expect(refusals(server, 'terminal_context_attestation_unavailable')).toBe(2)
+      await hook(server, 'PostToolUse', { session: 'session-a' })
+      const bound = setup === unboundRoot
+      if (bound) {
+        // The PTY owner has named the root by now, so the next hook proves it.
+        expect(server.presence()).toMatchObject({ process: capture(49969), session: 'session-a' })
+        expect(server.presence()?.fallback).toBeUndefined()
+      } else {
+        expect(server.presence()).toBeUndefined()
+      }
       await hook(server, 'SessionEnd', { session: 'session-a', reason: 'prompt_input_exit' })
       await hook(server, 'SessionEnd', { session: 'session-a', reason: 'prompt_input_exit' })
-      expect(server.exits).toBe(1)
+      // Only a proved owner's exit retires it, once.
+      expect(server.exits).toBe(bound ? 1 : 0)
+      expect(refusals(server, 'process_generation_unconfirmed')).toBe(bound ? 2 : 5)
     }
   )
 
@@ -115,11 +128,17 @@ describe('an empty pane whose first hook cannot be proved', () => {
     const started = performance.now()
     await hook(server, 'UserPromptSubmit', { session: 'session-a', prompt: 'Task' })
     expect(performance.now() - started).toBeLessThan(700)
-    expect(server.presence()).toMatchObject({ process: capture(49969), fallback: true })
+    // Evidence past the admission deadline refuses the hook; its late answer records nothing.
+    expect(refusals(server, 'context_evidence_unavailable')).toBe(1)
+    expect(server.presence()).toBeUndefined()
     release()
     await settled()
-    expect(server.presence()?.fallback).toBeUndefined()
+    expect(server.presence()).toBeUndefined()
+    expect(server.row()).toBeUndefined()
+    // The next hook, answered in time, is admitted as the pane's root.
+    await hook(server, 'UserPromptSubmit', { session: 'session-a', prompt: 'Task' })
     expect(server.presence()).toMatchObject({ process: capture(49969), session: 'session-a' })
+    expect(server.presence()?.fallback).toBeUndefined()
     expect(server.row()).toMatchObject({ state: 'working', prompt: 'Task' })
   })
 
@@ -138,12 +157,14 @@ describe('an empty pane whose first hook cannot be proved', () => {
       )
       io.resolveRoot.mockResolvedValueOnce(null)
       await hook(server, 'UserPromptSubmit', { session: 'nested', prompt: 'Nested' })
-      expect(server.presence()).toMatchObject({ process: capture(49969), fallback: true })
+      // The nested run is refused rather than recorded as a fallback, so none is restored.
+      expect(refusals(server, 'process_generation_unconfirmed')).toBe(1)
+      expect(server.presence()).toBeUndefined()
       if (mode === 'restored') {
         server.flushStatusPersistSync()
         server.stop()
         server = await createServer(userDataPath)
-        expect(server.presence()).toMatchObject({ process: capture(49969), fallback: true })
+        expect(server.presence()).toBeUndefined()
       }
       await hook(server, 'PostToolUse', { session: 'session-a', pid: 49970 })
       expect(server.presence()).toMatchObject({ process: capture(49970), session: 'session-a' })
@@ -151,6 +172,8 @@ describe('an empty pane whose first hook cannot be proved', () => {
       // The child's later exit is refused before it can end the pane.
       await hook(server, 'SessionEnd', { session: 'nested', reason: 'prompt_input_exit' })
       expect(server.exits).toBe(0)
+      // A restarted server counts only its own refusals.
+      expect(refusals(server, 'process_generation_unconfirmed')).toBe(mode === 'restored' ? 1 : 2)
     }
   )
 })
@@ -165,13 +188,15 @@ describe('a Claude in a tmux session the pane does not show', () => {
       const server = await createServer()
       runningPane(101, ...TMUX)
       const sender = { session: 'tmux', pid: 4043, tmuxPane }
+      // A sender the pane's root cannot be proved for is refused, status included.
       await hook(server, 'UserPromptSubmit', { ...sender, prompt: 'In tmux' })
-      expect(server.row()).toMatchObject({ state: 'working', prompt: 'In tmux' })
+      expect(server.row()).toBeUndefined()
       await hook(server, 'Stop', sender)
-      expect(server.row()).toMatchObject({ state: 'done', providerSession: { id: 'tmux' } })
-      expect(server.presence()).toEqual({ agent: 'claude', session: 'tmux' })
+      expect(server.row()).toBeUndefined()
+      expect(server.presence()).toBeUndefined()
       await hook(server, 'SessionEnd', { ...sender, reason: 'prompt_input_exit' })
       expect(server.exits).toBe(0)
+      expect(refusals(server, 'process_generation_unconfirmed')).toBe(3)
     }
   )
 
@@ -180,11 +205,13 @@ describe('a Claude in a tmux session the pane does not show', () => {
     runningPane(101, ...TMUX)
     const release = slowRoot()
     await hook(server, 'UserPromptSubmit', { session: 'tmux', pid: 4043, prompt: 'In tmux' })
-    expect(server.presence()).toMatchObject({ process: capture(4043), fallback: true })
+    // Refused at the admission deadline; no fallback is recorded to withdraw.
+    expect(refusals(server, 'context_evidence_unavailable')).toBe(1)
+    expect(server.presence()).toBeUndefined()
     release()
     await settled()
-    expect(server.presence()).toEqual({ agent: 'claude', session: 'tmux' })
-    expect(server.row()).toMatchObject({ state: 'working', prompt: 'In tmux' })
+    expect(server.presence()).toBeUndefined()
+    expect(server.row()).toBeUndefined()
     expect(server.exits).toBe(0)
   })
 })
@@ -209,15 +236,20 @@ describe('a late answer on a slow host', () => {
       const release = slowRoot()
       await hook(server, 'UserPromptSubmit', { session: 'session-a', prompt: 'New task', tmuxPane })
       expect(server.presence()?.process).toBeUndefined()
+      // The hook was refused at its deadline, so the late root heals nothing.
+      expect(refusals(server, 'context_evidence_unavailable')).toBe(1)
       release()
       await settled()
-      expect(server.presence()?.process).toEqual(capture(49969))
-      expect(server.row()).toMatchObject({ state: 'working', prompt: 'New task' })
+      expect(server.presence()).toBeUndefined()
+      expect(server.row()).toBeUndefined()
       vi.clearAllMocks()
       vi.setSystemTime(NOW + 15_000)
+      // The owner's next hooks prove its root, each with its own admission read.
       await hook(server, 'PostToolUse', { session: 'session-a' })
       await hook(server, 'UserPromptSubmit', { session: 'session-a', prompt: 'Next' })
-      expect(attempts()).toBe(0)
+      expect(server.presence()).toMatchObject({ process: capture(49969), session: 'session-a' })
+      expect(server.row()).toMatchObject({ state: 'working', prompt: 'Next' })
+      expect(attempts()).toBe(2)
     }
   )
 
@@ -233,12 +265,13 @@ describe('a late answer on a slow host', () => {
       }
       await hook(server, 'SessionEnd', { session: 'session-a', reason: 'prompt_input_exit' })
       expect(server.exits).toBe(0)
-      // A compatible status update while the answer is pending keeps the exit owed.
+      // The exit is refused at its deadline, so the late proof owes nothing.
+      expect(refusals(server, 'context_evidence_unavailable')).toBe(1)
       observe(server, 'working')
       release()
       await settled()
-      expect(server.exits).toBe(1)
-      expect(server.presence()).toMatchObject({ process: capture(49969), ended: true })
+      expect(server.exits).toBe(0)
+      expect(server.presence()).toBeUndefined()
     }
   )
 
@@ -267,7 +300,12 @@ describe('a late answer on a slow host', () => {
     release()
     await settled()
     expect(server.exits).toBe(0)
-    expect(server.presence()).toEqual({ agent: 'claude', session: 'other' })
+    // Neither the late exit nor the process-less record is admitted.
+    expect(server.getContextIntegrityRejections()).toMatchObject({
+      context_evidence_unavailable: 1,
+      process_generation_unconfirmed: 1
+    })
+    expect(server.presence()).toBeUndefined()
   })
 })
 
@@ -340,17 +378,19 @@ describe('a suspended owner', () => {
     runningPane(49960, ...SHIM)
     await hook(server, 'UserPromptSubmit', { session: 'session-a', prompt: 'Before' })
     await hook(server, 'Stop', { session: 'session-a' })
+    // The shim's hooks are refused, so there is no fallback to suspend.
+    expect(refusals(server, 'process_generation_unconfirmed')).toBe(2)
     suspend()
     await server.checkAgentPresence(PANE)
-    expect(server.presence()).toMatchObject({ fallback: true, suspended: true })
-    // fg: the same process posts its next turn.
+    expect(server.presence()).toBeUndefined()
+    // fg: the same process posts its next turn, still unprovable.
     probe.mockImplementation(async (identity) =>
       identity && live.has(identity.pid) ? 'live' : 'unverifiable'
     )
     await hook(server, 'UserPromptSubmit', { session: 'session-a', prompt: 'After fg' })
-    expect(server.row()).toMatchObject({ state: 'working', prompt: 'After fg' })
-    expect(server.presence()).toMatchObject({ process: capture(49969), fallback: true })
-    expect(server.presence()?.suspended).toBeUndefined()
+    expect(refusals(server, 'process_generation_unconfirmed')).toBe(3)
+    expect(server.row()).toBeUndefined()
+    expect(server.presence()).toBeUndefined()
     runningPane(49969, CLAUDE)
     await hook(server, 'UserPromptSubmit', { session: 'session-a', prompt: 'Proved' })
     expect(server.presence()).toMatchObject({ process: capture(49969), session: 'session-a' })

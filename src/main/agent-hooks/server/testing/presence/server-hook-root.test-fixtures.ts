@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs'
 import { afterEach, beforeEach, expect, vi } from 'vitest'
 import { AgentHookServer } from '../../agent-hook-server'
 import { buildBody, PANE, postHookEvent } from '../server.test-fixtures'
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 import type { AgentProcessIdentity } from '../../../../../shared/agent-status/process/agent-process-presence'
 import { probeAgentProcessPresence } from '../../../../../shared/agent-status/process/agent-process-presence-probe'
 import {
@@ -142,6 +143,7 @@ export function launchServer(
       })
     )
   }
+  attestFixtureHookContext(server, { keepRootEvidence: true })
   const start =
     options.start ??
     ((target) => target.start({ env: 'production', ...(userDataPath ? { userDataPath } : {}) }))
@@ -171,6 +173,11 @@ export function runningPane(foreground: number, ...procs: Proc[]): void {
 }
 
 export const attempts = () => io.resolveRoot.mock.calls.length
+
+// Fork 6d65165647: local Claude/Codex hooks whose root evidence fails are refused at admission.
+/** Admission refusals for `reason` so far (0 when none). */
+export const refusals = (server: AgentHookServer, reason: string): number =>
+  server.getContextIntegrityRejections()[reason] ?? 0
 
 export async function hook(
   server: AgentHookServer,

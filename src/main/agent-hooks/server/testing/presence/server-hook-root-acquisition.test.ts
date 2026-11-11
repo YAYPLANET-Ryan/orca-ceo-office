@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentHookServer } from '../../agent-hook-server'
 import { PANE } from '../server.test-fixtures'
+import { FIXTURE_LAUNCH_TOKEN } from '../attested-hook-context.test-fixtures'
 import { makePaneKey } from '../../../../../shared/workspace-layout/stable-pane-id'
 import {
   NOW,
@@ -19,6 +20,7 @@ import {
   runningPane,
   hook,
   observe,
+  refusals,
   type RootTestServer,
   registerRootTestHarness
 } from './server-hook-root.test-fixtures'
@@ -30,6 +32,9 @@ vi.mock('../../../../../shared/agent-status/process/agent-process-presence-probe
 }))
 
 registerRootTestHarness()
+
+// Fork 6d65165647: local Claude/Codex hooks without root evidence, terminal reports and relayed
+// Claude/Codex status are refused without attestation, so an unproven owner is never recorded.
 
 describe('a pane without a proven owner', () => {
   it.each<[string, (server: RootTestServer) => Promise<void> | void]>([
@@ -69,6 +74,10 @@ describe('a pane without a proven owner', () => {
     const server = await createServer()
     runningPane(49969, CLAUDE, ...NESTED)
     await setup(server)
+    // Setup hooks without a provable process are refused at admission, each after one read.
+    const setupReads = attempts()
+    expect(refusals(server, 'process_generation_unconfirmed')).toBe(setupReads)
+    expect(server.row()).toBeUndefined()
     await hook(server, 'PostToolUse', { session: 'session-a' })
     expect(server.presence()).toMatchObject({
       agent: 'claude',
@@ -79,10 +88,12 @@ describe('a pane without a proven owner', () => {
       agentType: 'claude',
       providerSession: { id: 'session-a' }
     })
-    // Once acquired, the owner's exact process keeps a nested run out of its row.
+    expect(attempts()).toBe(setupReads + 1)
+    // Once acquired, a nested run is refused at admission by its own root read.
     await hook(server, 'UserPromptSubmit', { session: 'nested', pid: 49980, prompt: 'nested task' })
     expect(server.row()?.providerSession?.id).toBe('session-a')
-    expect(attempts()).toBe(1)
+    expect(attempts()).toBe(setupReads + 2)
+    expect(refusals(server, 'process_generation_unconfirmed')).toBe(setupReads + 1)
   })
 
   it('acquires a Claude started through a shell script named claude', async () => {
@@ -116,8 +127,10 @@ describe('a pane without a proven owner', () => {
         pid: 49980,
         reason: 'prompt_input_exit'
       })
-      expect(server.row()).toMatchObject({ state: 'working', prompt: 'Parent task' })
-      expect(server.presence()?.process).toBeUndefined()
+      // The unproven parent and every nested hook are refused; the nested exit ends nothing.
+      expect(refusals(server, 'process_generation_unconfirmed')).toBe(4)
+      expect(server.row()).toBeUndefined()
+      expect(server.presence()).toBeUndefined()
       expect(server.exits).toBe(0)
     }
   )
@@ -135,9 +148,11 @@ describe('a pane without a proven owner', () => {
     const server = await createServer()
     runningPane(49969, CLAUDE, BACKGROUND)
     observe(server, 'waiting')
+    expect(refusals(server, 'terminal_context_attestation_unavailable')).toBe(1)
     await hook(server, 'SessionStart', { session: 'nightly', pid: 49990 })
     await hook(server, 'UserPromptSubmit', { session: 'nightly', pid: 49990, prompt: 'Nightly' })
-    expect(server.row()?.state).toBe('waiting')
+    expect(refusals(server, 'process_generation_unconfirmed')).toBe(2)
+    expect(server.row()).toBeUndefined()
     expect(server.presence()).toBeUndefined()
     await hook(server, 'SessionStart', { session: 'session-a' })
     expect(server.presence()).toMatchObject({ process: capture(49969), session: 'session-a' })
@@ -151,19 +166,28 @@ describe('a pane without a proven owner', () => {
       [60000, 1, 60000, '/Applications/Code.app/Contents/MacOS/Code Helper', 'S', '??'],
       [60001, 60000, 60001, 'claude', 'S+', 'ttys009']
     )
-    await codexTurn(server, 'Codex task')
+    // Codex's hooks carry the pane's foreground process, the root admission requires.
+    const codex = { session: 'cx', pid: 49969, source: 'codex' }
+    await hook(server, 'UserPromptSubmit', { ...codex, prompt: 'Codex task' })
     await hook(server, 'UserPromptSubmit', { session: 'foreign', pid: 60001, prompt: 'Foreign' })
-    await hook(server, 'Stop', { session: 'cx', pid: null, source: 'codex' })
+    expect(refusals(server, 'process_generation_unconfirmed')).toBe(1)
+    await hook(server, 'Stop', codex)
     expect(server.row()).toMatchObject({ agentType: 'codex', state: 'done', prompt: 'Codex task' })
-    expect(server.presence()).toEqual({ agent: 'codex', session: 'cx' })
+    expect(server.presence()).toMatchObject({
+      agent: 'codex',
+      process: capture(49969),
+      session: 'cx'
+    })
   })
 
   it('applies an unreadable acquisition as a hook without a process, then retries next turn', async () => {
     const server = await createServer()
     await hook(server, 'UserPromptSubmit', { session: 'older', pid: null, prompt: 'old' })
     await hook(server, 'UserPromptSubmit', { session: 'older', prompt: 'next' })
-    expect(server.row()).toMatchObject({ state: 'working', prompt: 'next' })
-    expect(server.presence()).toEqual({ agent: 'claude', session: 'older' })
+    // Unreadable evidence admits nothing; the next turn reads again.
+    expect(refusals(server, 'process_generation_unconfirmed')).toBe(2)
+    expect(server.row()).toBeUndefined()
+    expect(server.presence()).toBeUndefined()
     runningPane(49969, CLAUDE)
     await hook(server, 'UserPromptSubmit', { session: 'older', prompt: 'again' })
     expect(server.presence()).toMatchObject({ process: capture(49969), session: 'older' })
@@ -176,14 +200,19 @@ describe('a pane without a proven owner', () => {
       paths.push(userDataPath)
       const first = await createServer(userDataPath)
       await hook(first, 'UserPromptSubmit', { session, pid: null, prompt: 'old' })
+      expect(refusals(first, 'process_generation_unconfirmed')).toBe(1)
       first.flushStatusPersistSync()
       first.stop()
       const spoolDir = join(userDataPath, 'agent-hooks', 'spool')
       mkdirSync(spoolDir, { recursive: true })
+      // A spooled hook from the pane's own PTY carries its workspace and launch token.
       const record = {
         paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
         source: 'claude',
         receivedAt: NOW,
+        launchToken: FIXTURE_LAUNCH_TOKEN,
         agentProcess: JSON.stringify(capture(49969)),
         payload: { hook_event_name: 'PostToolUse', session_id: 'session-a', tool_name: 'Bash' }
       }
@@ -221,18 +250,16 @@ describe('the pane root’s exit', () => {
     const server = await createServer()
     runningPane(49969, CLAUDE)
     await hook(server, 'UserPromptSubmit', { session: 'older', pid: null, prompt: 'old' })
+    // The unproven record is refused, so the root's exit has nothing to retire.
+    expect(refusals(server, 'process_generation_unconfirmed')).toBe(1)
     await hook(server, 'SessionEnd', { session: 'session-a', reason: 'prompt_input_exit' })
-    expect(server.exits).toBe(1)
-    expect(server.presence()).toMatchObject({
-      agent: 'claude',
-      process: capture(49969),
-      session: 'session-a',
-      ended: true
-    })
-    // A replayed or late exit from the retired process changes nothing.
+    expect(server.exits).toBe(0)
+    expect(server.getStatusSnapshot()).toEqual([])
+    // A replayed or late exit from the same process changes nothing.
     await hook(server, 'SessionEnd', { session: 'session-a', reason: 'prompt_input_exit' })
     await hook(server, 'Stop', { session: 'session-a' })
-    expect(server.exits).toBe(1)
+    expect(server.exits).toBe(0)
+    expect(refusals(server, 'process_generation_unconfirmed')).toBe(1)
   })
 })
 
@@ -248,16 +275,27 @@ describe('terminal reports and Orca restatements', () => {
       launchedAt: NOW - 1
     })
     observe(server, 'working', 'codex')
-    await codexTurn(server, 'Codex task')
-    await hook(server, 'Stop', { session: 'cx', pid: null, source: 'codex' })
+    expect(server.getContextIntegrityRejections()).toEqual({
+      launch_context_attestation_unavailable: 1,
+      terminal_context_attestation_unavailable: 1
+    })
+    // Codex's hooks carry the pane's foreground process, the root admission requires.
+    const codex = { session: 'cx', pid: 49969, source: 'codex' }
+    await hook(server, 'UserPromptSubmit', { ...codex, prompt: 'Codex task' })
+    await hook(server, 'Stop', codex)
     await hook(server, 'UserPromptSubmit', {
       session: 'nested',
       pid: 49980,
       prompt: 'Background job'
     })
-    await codexTurn(server, 'Next task')
+    expect(refusals(server, 'process_generation_unconfirmed')).toBe(1)
+    await hook(server, 'UserPromptSubmit', { ...codex, prompt: 'Next task' })
     expect(server.row()).toMatchObject({ agentType: 'codex', prompt: 'Next task' })
-    expect(server.presence()).toEqual({ agent: 'codex', session: 'cx' })
+    expect(server.presence()).toMatchObject({
+      agent: 'codex',
+      process: capture(49969),
+      session: 'cx'
+    })
   })
 
   it('keeps a suspended owner through a terminal report', async () => {
@@ -291,8 +329,10 @@ describe('a retired owner', () => {
       runningPane(49969, CLAUDE)
       await hook(server, 'SessionStart', { session: 'session-a' })
       await hook(server, 'SessionEnd', { session: 'session-a', reason: 'prompt_input_exit' })
+      // The terminal report is refused; only the ended provider session remains.
       observe(server, state, 'claude', origin)
-      expect(server.row()?.state).toBe(state)
+      expect(refusals(server, 'terminal_context_attestation_unavailable')).toBe(1)
+      expect(server.row()).toBeUndefined()
       // Late and replayed hooks from the exited process change nothing.
       await hook(server, 'UserPromptSubmit', { session: 'session-a', prompt: 'stale prompt' })
       // Refused before provider folds, which the successor would otherwise inherit.
@@ -300,7 +340,7 @@ describe('a retired owner', () => {
       await hook(server, 'Stop', { session: 'session-a' })
       await hook(server, 'SessionStart', { session: 'session-a' })
       await hook(server, 'SessionEnd', { session: 'session-a', reason: 'prompt_input_exit' })
-      expect(server.row()?.state).toBe(state)
+      expect(server.row()).toBeUndefined()
       expect(server.hasVerifiableAgentProcess(PANE)).toBe(false)
       // The user resumes the same conversation in a new process.
       runningPane(49970, [49970, 101, 49970, 'claude', 'S+'])
@@ -340,8 +380,10 @@ describe('relayed panes', () => {
       },
       RELAY
     )
-    expect(server.presence()).toMatchObject({ process: child, session: 'parent' })
-    expect(server.presence()).not.toHaveProperty('paneRoot')
+    // Relayed Claude status is refused even with this link's stamp; nothing is probed.
+    expect(refusals(server, 'remote_context_attestation_unavailable')).toBe(2)
+    expect(server.presence()).toBeUndefined()
+    expect(server.row()).toBeUndefined()
     expect(probe).not.toHaveBeenCalled()
     expect(attempts()).toBe(0)
   })
@@ -388,8 +430,10 @@ describe('relayed panes', () => {
       },
       RELAY
     )
-    expect(server.presence()).toEqual({ agent: 'claude', session: 'parent' })
-    expect(server.row()).toMatchObject({ state: 'working' })
+    // The relayed parent, nested run and exit are all refused; nothing owns or ends the pane.
+    expect(refusals(server, 'remote_context_attestation_unavailable')).toBe(3)
+    expect(server.presence()).toBeUndefined()
+    expect(server.row()).toBeUndefined()
     expect(server.exits).toBe(0)
   })
 
@@ -398,10 +442,11 @@ describe('relayed panes', () => {
     const fallback = { ...nested, fallback: true }
     server.ingestRemote(envelope, RELAY)
     server.ingestRemote({ ...envelope, agentPresence: fallback }, RELAY)
-    expect(server.presence()).toEqual({ agent: 'claude', session: 'parent' })
+    expect(server.presence()).toBeUndefined()
     server.clearPaneState(PANE, { forgetAgentExit: true })
+    // Even an empty pane takes no relayed Claude fallback or stamped root.
     server.ingestRemote({ ...envelope, agentPresence: fallback }, RELAY)
-    expect(server.presence()).toMatchObject({ process: child, fallback: true })
+    expect(server.presence()).toBeUndefined()
     const root = { pid: 4001, platform: 'linux' as const, startTime: 'boot:4001' }
     server.ingestRemote(
       {
@@ -415,7 +460,8 @@ describe('relayed panes', () => {
       },
       RELAY
     )
-    expect(server.presence()).toMatchObject({ process: root, session: 'parent' })
-    expect(server.presence()?.fallback).toBeUndefined()
+    expect(refusals(server, 'remote_context_attestation_unavailable')).toBe(4)
+    expect(server.presence()).toBeUndefined()
+    expect(server.row()).toBeUndefined()
   })
 })

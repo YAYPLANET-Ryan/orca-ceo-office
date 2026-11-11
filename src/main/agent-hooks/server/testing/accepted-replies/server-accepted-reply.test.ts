@@ -9,6 +9,7 @@ import { mainAgentDoneAt } from '../../../../../shared/agent-status/lifecycle/ma
 import type { AutomationRun } from '../../../../../shared/automations/history/automation-run'
 import { createRuntimeAutomationRunTerminalObserver } from '../../../../automations/runtime-terminal-run-observer'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({
   getCohortAtEmit: () => ({ nth_repo_added: 2 })
@@ -23,7 +24,7 @@ let server: AgentHookServer
 beforeEach(async () => {
   _internals.resetCachesForTests()
   userDataPath = mkdtempSync(join(tmpdir(), 'orca-accepted-reply-'))
-  server = new AgentHookServer()
+  server = attestFixtureHookContext(new AgentHookServer())
   await server.start({ env: 'production', userDataPath })
 })
 

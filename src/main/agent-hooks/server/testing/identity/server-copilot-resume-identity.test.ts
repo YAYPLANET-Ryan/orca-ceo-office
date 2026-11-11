@@ -9,6 +9,7 @@ import { getAgentResumeArgv } from '../../../../../shared/agent-launch/startup/a
 import { AgentHookServer } from '../../agent-hook-server'
 import { type Body, buildBody, PANE, postHookEvent } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const ROOT = 'cf0e6ff2-9ede-46de-a430-5778cf8da164'
 const CHILD = 'copilot-helper'
 
@@ -57,7 +58,7 @@ function expectResume(server: AgentHookServer, id: string = ROOT): void {
 }
 
 it('rejects old-relay child identity before a root exists and keeps later root/owner changes authoritative', () => {
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   // Old normalized relays may omit source but already forward toolAgentId and providerSession.
   const child = {
     paneKey: PANE,
@@ -66,8 +67,18 @@ it('rejects old-relay child identity before a root exists and keeps later root/o
     providerSession: { key: 'session_id', id: CHILD },
     payload: { state: 'working', prompt: 'child work', agentType: 'copilot' }
   }
+  // Fork 6d65165647: a relayed provider session is refused without attestation for any agent,
+  // so neither the child nor a root identity is ever bound from the relay.
+  const expectRefused = (count: number) => {
+    expect(server.getStatusSnapshot()).toEqual([])
+    expect(server.getProviderSessionIdentities()).toEqual([])
+    expect(server.getContextIntegrityRejections()).toEqual({
+      remote_context_attestation_unavailable: count
+    })
+  }
   server.ingestRemote(child, 'host-1')
   expect(server.getStatusSnapshot()[0]?.providerSession).toBeUndefined()
+  expectRefused(1)
   const root = {
     ...child,
     toolAgentId: undefined,
@@ -75,24 +86,25 @@ it('rejects old-relay child identity before a root exists and keeps later root/o
   }
   server.ingestRemote(root, 'host-1')
   server.ingestRemote({ ...child, isReplay: true }, 'host-1')
-  expectResume(server)
+  expectRefused(3)
   server.ingestRemote(
     { ...root, providerSession: { key: 'session_id', id: 'next-root' } },
     'host-1'
   )
-  expectResume(server, 'next-root')
+  expectRefused(4)
   server.ingestRemote(child, 'host-2')
   expect(server.getStatusSnapshot()[0]?.providerSession).toBeUndefined()
   server.ingestRemote(root, 'host-2')
   server.ingestRemote({ ...child, worktreeId: 'wt-2' }, 'host-2')
   expect(server.getStatusSnapshot()[0]?.providerSession).toBeUndefined()
+  expectRefused(7)
 })
 
 it.each(['same-launch', 'resumed-launch'])(
   'persists the parent through cold listeners and a %s token',
   async (token) => {
     const dir = mkdtempSync(join(tmpdir(), 'copilot-resume-identity-'))
-    let server = new AgentHookServer()
+    let server = attestFixtureHookContext(new AgentHookServer())
     const post = async (body: Body, launchToken: string) => {
       expect((await postHookEvent(server, { ...body, launchToken }, '/hook/copilot')).status).toBe(
         204
@@ -103,7 +115,7 @@ it.each(['same-launch', 'resumed-launch'])(
       await post(rootEnd(), 'same-launch')
       expectResume(server)
       server.stop()
-      server = new AgentHookServer()
+      server = attestFixtureHookContext(new AgentHookServer())
       await server.start({ env: 'production', userDataPath: dir })
       // Child hooks here are documented shapes, not captured.
       await post(
@@ -117,7 +129,7 @@ it.each(['same-launch', 'resumed-launch'])(
       )
       expectResume(server)
       server.stop()
-      server = new AgentHookServer()
+      server = attestFixtureHookContext(new AgentHookServer())
       await server.start({ env: 'production', userDataPath: dir })
       expectResume(server)
       const hydrated = server.getStatusSnapshot()[0]
@@ -148,7 +160,7 @@ it.each(['same-launch', 'resumed-launch'])(
 )
 
 it('does not undo a host new-run reset or resurrect its locator on the next child hook', () => {
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   server.ingestRemote(normalize(rootEnd()), null)
   server.ingestTerminalStatus({
     paneKey: PANE,

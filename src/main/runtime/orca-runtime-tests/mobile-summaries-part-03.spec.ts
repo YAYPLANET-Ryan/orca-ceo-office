@@ -26,6 +26,8 @@ function storedWorktreeMeta(
 }
 
 describe('OrcaRuntimeService', () => {
+  // Fork 6d65165647: terminal OSC Claude/Codex status is refused without attestation; this test
+  // uses an unprotected agent (gemini) because its subject is row freshness, not provenance.
   it('keeps an OSC row from an SSH pane after its PTY disconnects', async () => {
     // OSC snapshots must retain SSH transport provenance for the remote-row exemption.
     const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession({
@@ -52,7 +54,7 @@ describe('OrcaRuntimeService', () => {
     })
     runtime.onPtyData(
       'ssh-osc-pty',
-      '\x1b]9999;{"state":"working","prompt":"remote osc agent","agentType":"codex"}\x07',
+      '\x1b]9999;{"state":"working","prompt":"remote osc agent","agentType":"gemini"}\x07',
       1
     )
     runtime['recordPtyWorktree']('ssh-osc-pty', TEST_WORKTREE_ID, { connected: false })

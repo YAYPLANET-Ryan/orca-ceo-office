@@ -3,6 +3,7 @@ import { AgentHookServer } from '../../agent-hook-server'
 import { buildBody, PANE, postHookEvent } from '../server.test-fixtures'
 import { buildRuntimeMobileAgentStatus } from '../../../../runtime/session-lifecycle/projection/runtime-mobile-agent-status-builder'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({
   getCohortAtEmit: vi.fn(() => ({ nth_repo_added: 2 }))
@@ -12,7 +13,7 @@ afterEach(() => vi.restoreAllMocks())
 
 describe('nested hooks retain the session used by mobile', () => {
   it('keeps the Claude mobile transcript through a nested Codex review', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       await postHookEvent(

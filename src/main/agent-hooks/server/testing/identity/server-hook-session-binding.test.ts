@@ -28,6 +28,7 @@ import {
 } from '../../../../startup/main-window-agent-status'
 import { agentHookServer as server } from '../../agent-hook-server'
 import { buildBody, PANE, GOOD_PANE, postHookEvent } from '../server.test-fixtures'
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 
 const bridge = vi.hoisted(() => ({
   send: vi.fn<(channel: string, data: AgentStatusIpcPayload) => void>()
@@ -58,6 +59,8 @@ if (!isRendererFixture(rendererFixture)) {
 }
 const { expectReturnedRenderer } = rendererFixture
 
+attestFixtureHookContext(server)
+
 const ROOT = 'ordinary-root-B'
 const CHILD = 'delegated-child-A'
 let dir: string
@@ -67,7 +70,12 @@ beforeEach(async () => {
   bridge.send.mockClear()
   await restart()
 })
-afterEach(() => {
+afterEach(async () => {
+  // Refused hooks persist the context quarantine asynchronously; let that write land before the
+  // directory is removed.
+  await vi.waitFor(() =>
+    expect(server.getContextQuarantineSnapshot().durability).not.toBe('pending')
+  )
   vi.restoreAllMocks()
   clearMainWindowAgentStatusListeners()
   server.stop()
@@ -159,6 +167,37 @@ function expectReturned(id = ROOT, agent: 'hermes' | 'antigravity' = 'hermes') {
   ).toBe(id)
 }
 
+// Fork 6d65165647: an unattested hook (Hermes here) aimed at a pane Claude/Codex holds is refused
+// (`unattested_source_targets_protected_pane`), and so is a relayed envelope that carries a provider
+// session or targets such a pane (`remote_context_attestation_unavailable`). Once the nested Codex
+// holds the pane the Hermes parent cannot re-enter it, so those steps assert the refusal and that
+// the Codex row and the last published frame are left unchanged.
+const PROTECTED_PANE_REFUSAL = 'unattested_source_targets_protected_pane'
+const REMOTE_REFUSAL = 'remote_context_attestation_unavailable'
+function refusals(reason: string): number {
+  return server.getContextIntegrityRejections()[reason] ?? 0
+}
+async function expectRefused(
+  action: () => Promise<void> | void,
+  count = 1,
+  reason = PROTECTED_PANE_REFUSAL
+) {
+  const before = refusals(reason)
+  const published = frame()
+  const rows = server.getStatusSnapshot()
+  await action()
+  expect(refusals(reason)).toBe(before + count)
+  expect(frame()).toBe(published)
+  expect(server.getStatusSnapshot()).toEqual(rows)
+}
+function expectNestedHolds() {
+  expect(frame()).toMatchObject({ agentType: 'codex', providerSession: { id: 'nested-codex' } })
+  expect(server.getStatusSnapshot()[0]).toMatchObject({
+    agentType: 'codex',
+    providerSession: { id: 'nested-codex' }
+  })
+}
+
 it.each(['sessionless', 'replacement', 'positive-after-foreign'] as const)(
   'settles the complete HTTP parent iteration after %s',
   async (mode) => {
@@ -178,29 +217,42 @@ it.each(['sessionless', 'replacement', 'positive-after-foreign'] as const)(
       await post('hermes', { hook_event_name: 'on_session_end', session_id: ROOT })
       await nested()
     }
-    await positive(id)
-    expect(frame().paneOwner?.session).toBe(id)
-    // A different child avoids completing the renewed root when it was formerly a child itself.
-    await post('hermes', {
-      hook_event_name: 'pre_llm_call',
-      session_id: 'new-helper',
-      platform: 'subagent'
-    })
-    await post('hermes', { hook_event_name: 'on_session_end', session_id: 'new-helper' })
-    expect(frame().state).toBe('done')
-    await nested()
-    await tool('unrecognized-child')
-    expect(frame().agentType).toBe('codex')
-    await tool(id)
-    expectReturned(id)
+    const helper = async () => {
+      // A different child avoids completing the renewed root when it was formerly a child itself.
+      await post('hermes', {
+        hook_event_name: 'pre_llm_call',
+        session_id: 'new-helper',
+        platform: 'subagent'
+      })
+      await post('hermes', { hook_event_name: 'on_session_end', session_id: 'new-helper' })
+    }
     if (mode === 'sessionless') {
-      await childDone()
+      await positive(id)
+      expect(frame().paneOwner?.session).toBe(id)
+      await helper()
+      expect(frame().state).toBe('done')
+    } else {
+      // The nested Codex already holds the pane, so the parent's renewal and its helper are refused.
+      await expectRefused(() => positive(id))
+      await expectRefused(helper, 2)
+    }
+    await nested()
+    await expectRefused(() => tool('unrecognized-child'))
+    expect(frame().agentType).toBe('codex')
+    // The parent's own tool call no longer returns the pane to Hermes.
+    await expectRefused(() => tool(id))
+    expectNestedHolds()
+    if (mode === 'sessionless') {
+      await expectRefused(childDone, 2)
       await nested()
     }
     server.stop()
     await restart()
-    await tool(id)
-    expectReturned(id)
+    await expectRefused(() => tool(id))
+    expect(server.getStatusSnapshot()[0]).toMatchObject({
+      agentType: 'codex',
+      providerSession: { id: 'nested-codex' }
+    })
   }
 )
 
@@ -208,7 +260,7 @@ it('keeps root-own completion terminal even when its binding matches', async () 
   await positive()
   await post('hermes', { hook_event_name: 'post_llm_call', session_id: ROOT, platform: 'cli' })
   await nested()
-  await tool()
+  await expectRefused(() => tool())
   expect(frame().agentType).toBe('codex')
 })
 
@@ -225,17 +277,18 @@ it('retires the binding on an actual host clear, including through a later forei
   expect(frame().paneOwner).toBeUndefined()
   await post('hermes', { hook_event_name: 'on_session_end', session_id: CHILD })
   await nested()
-  await tool()
+  await expectRefused(() => tool())
   expect(frame().agentType).toBe('codex')
   server.stop()
   await restart()
-  await tool()
-  expect(server.getStatusSnapshot()[0]?.providerSession).toBeUndefined()
-  await positive('fresh-C')
-  await childDone()
+  await expectRefused(() => tool())
+  // The retired Hermes binding is not restored; the pane still belongs to the nested Codex.
+  expect(server.getStatusSnapshot()[0]?.providerSession?.id).not.toBe(ROOT)
+  await expectRefused(() => positive('fresh-C'))
+  await expectRefused(childDone, 2)
   await nested()
-  await tool('fresh-C')
-  expectReturned('fresh-C')
+  await expectRefused(() => tool('fresh-C'))
+  expectNestedHolds()
   server.recordLaunchResumeIdentity({
     paneKey: PANE,
     worktreeId: 'wt-1',
@@ -243,6 +296,7 @@ it('retires the binding on an actual host clear, including through a later forei
     providerSession: { key: 'session_id', id: 'explicit-seed' },
     launchedAt: frame().receivedAt + 1
   })
+  // An explicit launch seed replaces the Codex row, so the seeded Hermes parent may re-enter.
   await tool('explicit-seed')
   expectReturned('explicit-seed')
 })
@@ -263,10 +317,11 @@ it.each([257, 512])(
     // An older build's file wins over the saved rows on the next start.
     writeFileSync(path, JSON.stringify(saved))
     await restart()
-    await tool('different-session')
-    expect(server.getStatusSnapshot()[0]?.providerSession).toBeUndefined()
-    await tool(id)
-    expectReturned(id)
+    // Both tools target the pane the nested Codex holds, so neither matches the legacy tuple.
+    await expectRefused(() => tool('different-session'))
+    expect(server.getStatusSnapshot()[0]?.providerSession?.id).not.toBe(id)
+    await expectRefused(() => tool(id))
+    expectNestedHolds()
     expect(readAgentProcessPresence({ agent: 'hermes', session: id })?.session).toBe(id)
     expect(readAgentProcessPresence({ agent: 'antigravity', session: id })?.session).toBe(id)
     expect(readAgentProcessPresence({ agent: 'codex', session: id })?.session).toBeUndefined()
@@ -342,14 +397,14 @@ it('forwards a cold host comparison to the retained canonical binding without cr
     const envelope = build(id)
     expect(envelope.agentPresence).toEqual({ agent: 'hermes', session: id })
     expect(envelope.providerSession).toBeUndefined()
-    server.ingestRemote(envelope, null)
-    expect(frame().agentType).toBe(id === ROOT ? 'hermes' : 'codex')
+    // Each cold comparison targets the Codex-held pane and is refused.
+    await expectRefused(() => server.ingestRemote(envelope, null), 1, REMOTE_REFUSAL)
+    expect(frame().agentType).toBe('codex')
   }
-  expectReturned()
+  expectNestedHolds()
   server.clearPaneState(PANE)
-  server.ingestRemote(build('unknown-child'), null)
-  expect(server.getStatusSnapshot()[0]?.providerSession).toBeUndefined()
-  expect(frame().paneOwner).toBeUndefined()
+  await expectRefused(() => server.ingestRemote(build('unknown-child'), null), 1, REMOTE_REFUSAL)
+  expect(server.getStatusSnapshot()[0]?.providerSession?.id).toBe('nested-codex')
 })
 
 it('rejects before mutating provider folds and validates scoped IDs with the locator parser', () => {
@@ -403,7 +458,14 @@ it.each([
   if (!event) {
     throw new Error('Missing scope test tool')
   }
-  server.ingestRemote({ ...buildRelayHookEnvelope(event, 'hermes'), ...scope }, scope.connectionId)
+  const envelope = { ...buildRelayHookEnvelope(event, 'hermes'), ...scope }
+  if (scope.paneKey === PANE) {
+    // The Codex-held pane refuses the relayed Hermes tool outright, so nothing is projected.
+    await expectRefused(() => server.ingestRemote(envelope, scope.connectionId), 1, REMOTE_REFUSAL)
+    expect(server.getStatusSnapshotForPane(PANE)[0]?.providerSession?.id).toBe('nested-codex')
+    return
+  }
+  server.ingestRemote(envelope, scope.connectionId)
   const rows = server.getStatusSnapshotForPane(scope.paneKey)
   expect(rows[0]?.providerSession).toBeUndefined()
 })
@@ -418,6 +480,7 @@ it('does not let positive authority bypass a different proven process owner', as
   if (!event) {
     throw new Error('Missing Claude owner event')
   }
+  const refusedBefore = refusals(REMOTE_REFUSAL)
   server.ingestRemote(
     {
       ...event,
@@ -429,9 +492,8 @@ it('does not let positive authority bypass a different proven process owner', as
     },
     null
   )
-  await positive('cannot-steal')
-  expect(server.getStatusSnapshot()[0]).toMatchObject({
-    agentType: 'claude',
-    providerSession: { id: 'claude-owner' }
-  })
+  // Fork 6d65165647: relayed Claude/Codex status is refused without attestation, so the relayed
+  // Claude owner never becomes a row for positive authority to bypass.
+  expect(server.getStatusSnapshot()).toEqual([])
+  expect(refusals(REMOTE_REFUSAL)).toBe(refusedBefore + 1)
 })

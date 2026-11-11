@@ -13,6 +13,7 @@ import { StatsCollector } from './collector'
 import { AgentHookServer, _internals } from '../agent-hooks/server/agent-hook-server'
 import { PANE as STORE_PANE } from '../agent-hooks/server/testing/server.test-fixtures'
 
+import { attestFixtureHookContext } from '../agent-hooks/server/testing/attested-hook-context.test-fixtures'
 let userDataDir: string
 
 vi.mock('electron', () => ({
@@ -276,17 +277,19 @@ describe('AgentSessionTransitionRecorder fed by the status store', () => {
       tabId: 'tab-1',
       worktreeId: 'wt-1',
       connectionId: null,
-      payload: { state: 'working' as const, prompt: 'build', agentType: 'claude' as const }
+      // Fork 6d65165647: terminal OSC Claude/Codex status is refused without attestation; this
+      // clock test uses an unprotected agent (gemini) because nothing in it is agent-specific.
+      payload: { state: 'working' as const, prompt: 'build', agentType: 'gemini' as const }
     }
     const now = vi.spyOn(Date, 'now').mockReturnValue(T)
-    const first = new AgentHookServer()
+    const first = attestFixtureHookContext(new AgentHookServer())
     await first.start({ env: 'production', userDataPath: hookDataDir })
     first.ingestTerminalStatus(osc)
     first.flushStatusPersistSync()
     first.stop()
 
     now.mockReturnValue(T + 3_600_000)
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const starts = sink()
     const recorder = new AgentSessionTransitionRecorder(starts)
     try {

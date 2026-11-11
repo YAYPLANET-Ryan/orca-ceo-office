@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({
   getCohortAtEmit: () => ({ nth_repo_added: 2 })
@@ -21,7 +22,7 @@ async function withClaudeHookServer(
     server: AgentHookServer
   ) => Promise<void>
 ): Promise<void> {
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   await server.start({ env: 'production' })
   try {
     const env = server.buildPtyEnv()

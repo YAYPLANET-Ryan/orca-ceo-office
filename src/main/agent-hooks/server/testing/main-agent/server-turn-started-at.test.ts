@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, postHookEvent, PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -46,7 +47,7 @@ describe('the host-stamped turn start', () => {
   })
 
   async function startServer(): Promise<AgentHookServer> {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     servers.push(server)
     await server.start({ env: 'production', userDataPath })
     return server
@@ -80,6 +81,8 @@ describe('the host-stamped turn start', () => {
     expect(turnStartedAt(server)).toBeGreaterThan(started!)
   })
 
+  // Fork 6d65165647: relayed and terminal-title Claude/Codex status is refused without
+  // attestation, so neither path can stamp or drop a turn start.
   it('is not stamped by a relayed replay', async () => {
     const server = await startServer()
     const envelope = {
@@ -90,20 +93,20 @@ describe('the host-stamped turn start', () => {
       payload: { state: 'working' as const, prompt: 'relayed', agentType: 'claude' as const }
     }
     server.ingestRemote(envelope, 'ssh-turn')
-    const started = turnStartedAt(server)
-    expect(started).toEqual(expect.any(Number))
-    await nextMillisecond()
-
     server.ingestRemote({ ...envelope, isReplay: true }, 'ssh-turn')
-    expect(turnStartedAt(server)).toBe(started)
+    expect(server.getStatusSnapshot()).toEqual([])
+    expect(server.getContextIntegrityRejections()).toMatchObject({
+      remote_context_attestation_unavailable: 2
+    })
   })
 
-  // An OSC repaint can land before the prompt hook; it must not count from the finished turn.
+  // An OSC repaint can land before the prompt hook; it must not reopen the finished turn.
   it('drops the stamp when a finished main agent runs again with no turn-opening event', async () => {
     const server = await startServer()
     await post(server, { hook_event_name: 'UserPromptSubmit', prompt: 'Rename the module' })
     await post(server, { hook_event_name: 'Stop' })
-    expect(turnStartedAt(server)).toEqual(expect.any(Number))
+    const started = turnStartedAt(server)
+    expect(started).toEqual(expect.any(Number))
 
     server.ingestTerminalStatus({
       paneKey: PANE,
@@ -111,8 +114,10 @@ describe('the host-stamped turn start', () => {
       worktreeId: 'wt-1',
       payload: { state: 'working', prompt: 'Rename the module', agentType: 'claude' }
     })
-    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
-    expect(server.getStatusSnapshot()[0]).not.toHaveProperty('turnStartedAt')
+    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'done', turnStartedAt: started })
+    expect(server.getContextIntegrityRejections()).toMatchObject({
+      terminal_context_attestation_unavailable: 1
+    })
   })
 
   it('reaches the live push and survives a restart through the status file', async () => {

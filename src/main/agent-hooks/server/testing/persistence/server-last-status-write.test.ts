@@ -6,7 +6,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, postHookEvent, recentTs, PANE, RUNNING_SHELL } from '../server.test-fixtures'
+import { launchTokenHash } from '../../../../../shared/agent-hook-listener/transport/agent-hook-spool'
+import type { HookContextSnapshotReader } from '../../hook-context-snapshot'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
+
+// Fork 6d65165647: a hook's launch token is admitted only when the pane's PTY exported it.
+function reportPtyLaunchToken(server: AgentHookServer, launchToken: string): AgentHookServer {
+  const fixtureRead = (server as unknown as { readHookContextSnapshot: HookContextSnapshotReader })
+    .readHookContextSnapshot
+  server.setHookContextSnapshotReader(async (envelope) => {
+    const snapshot = await fixtureRead(envelope)
+    return snapshot && { ...snapshot, launchTokenHash: launchTokenHash(launchToken) ?? '' }
+  })
+  return server
+}
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -47,7 +61,10 @@ describe('Last-status persistence', () => {
   }
 
   it('writes last-status.json after a hook event', async () => {
-    const server = new AgentHookServer()
+    const server = reportPtyLaunchToken(
+      attestFixtureHookContext(new AgentHookServer()),
+      'launch-bearer-must-not-persist'
+    )
     await server.start({
       env: 'production',
       userDataPath
@@ -127,7 +144,7 @@ describe('Last-status persistence', () => {
       'utf8'
     )
 
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       const launchTokenHash = createHash('sha256').update(launchToken).digest('hex')
@@ -143,7 +160,7 @@ describe('Last-status persistence', () => {
       server.stop()
     }
 
-    const restartedServer = new AgentHookServer()
+    const restartedServer = attestFixtureHookContext(new AgentHookServer())
     await restartedServer.start({ env: 'production', userDataPath })
     try {
       expect(restartedServer.getHydratedAuthorityCommitments()).toEqual([
@@ -187,7 +204,7 @@ describe('Last-status persistence', () => {
       'utf8'
     )
 
-    const first = new AgentHookServer()
+    const first = attestFixtureHookContext(new AgentHookServer())
     await first.start({ env: 'production', userDataPath })
     first.clearStatusEntriesForConnection('ssh-target')
     first.flushStatusPersistSync()
@@ -201,7 +218,7 @@ describe('Last-status persistence', () => {
       connectionId: 'ssh-target'
     })
 
-    const restored = new AgentHookServer()
+    const restored = attestFixtureHookContext(new AgentHookServer())
     await restored.start({ env: 'production', userDataPath })
     expect(
       restored.attestCompatibilityAuthority({
@@ -215,7 +232,7 @@ describe('Last-status persistence', () => {
     restored.flushStatusPersistSync()
     restored.stop()
 
-    const retired = new AgentHookServer()
+    const retired = attestFixtureHookContext(new AgentHookServer())
     await retired.start({ env: 'production', userDataPath })
     try {
       expect(
@@ -232,7 +249,7 @@ describe('Last-status persistence', () => {
   })
 
   it('persists and hydrates Pi session identity without creating status telemetry', async () => {
-    const firstServer = new AgentHookServer()
+    const firstServer = attestFixtureHookContext(new AgentHookServer())
     const firstRendererListener = vi.fn()
     const statusChangeListener = vi.fn()
     firstServer.setListener(firstRendererListener)
@@ -277,7 +294,7 @@ describe('Last-status persistence', () => {
       firstServer.stop()
     }
 
-    const hydratedServer = new AgentHookServer()
+    const hydratedServer = attestFixtureHookContext(new AgentHookServer())
     await hydratedServer.start({ env: 'production', userDataPath })
     try {
       const hydratedListener = vi.fn()

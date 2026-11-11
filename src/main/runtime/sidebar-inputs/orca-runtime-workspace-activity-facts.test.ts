@@ -4,6 +4,9 @@ import type { RuntimeMobileSessionTabsSnapshot } from '../../../shared/runtime-s
 import { AgentHookServer } from '../../agent-hooks/server/agent-hook-server'
 import { OrcaRuntimeService } from '../orca-runtime'
 
+import { attestFixtureHookContext } from '../../agent-hooks/server/testing/attested-hook-context.test-fixtures'
+// Fork 6d65165647: terminal-title Claude/Codex status is refused without attestation; this
+// suite uses an unprotected agent (gemini) because no assertion is agent-specific.
 vi.mock('../../../shared/sidebar-inputs-switch', () => ({ ORCA_SIDEBAR_INPUTS_IS_MAIN: true }))
 
 const WT = 'repo-1::/tmp/worktree-a'
@@ -73,7 +76,7 @@ describe('runtime workspace activity facts', () => {
 
   it('reads agent status from the hook-server store it is attached to', () => {
     const runtime = createRuntime()
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const detach = runtime.workspaceActivityFacts.attachAgentStatusStore(server)
     try {
       runtime.syncWindowGraph(1, {
@@ -86,7 +89,7 @@ describe('runtime workspace activity facts', () => {
       server.ingestTerminalStatus({
         paneKey: `tab-1:${LEAF}`,
         tabId: 'tab-1',
-        payload: { state: 'waiting', prompt: 'approve?', agentType: 'claude' }
+        payload: { state: 'waiting', prompt: 'approve?', agentType: 'gemini' }
       })
       expect(runtime.getWorkspaceActivityFacts().facts[WT]?.agent).toBe('permission')
     } finally {

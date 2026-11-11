@@ -7,6 +7,7 @@ import { buildBody, GOOD_PANE, PANE, postHookEvent } from '../../server.test-fix
 import { ClaudeObservedConfigDirs } from '../../../../../claude-accounts/claude-observed-config-dirs'
 import { installClaudeObservedConfigDirs } from '../../../../../claude-accounts/claude-profile-installed-router'
 
+import { attestFixtureHookContext } from '../../attested-hook-context.test-fixtures'
 vi.mock('../../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../../telemetry/cohort-classifier', () => ({ getCohortAtEmit: () => ({}) }))
 vi.mock('../../../../../../shared/agent-status/process/agent-process-presence-probe', () => ({
@@ -31,7 +32,7 @@ it('records the Claude config folder from Claude hooks only, not same-layout Cod
   }
   const dirs = new ClaudeObservedConfigDirs(join(root, 'observed.json'), () => ({}))
   installClaudeObservedConfigDirs(dirs)
-  server = new AgentHookServer()
+  server = attestFixtureHookContext(new AgentHookServer())
   await server.start({ env: 'production', userDataPath: join(root, 'orca') })
   const post = (path: string, transcriptPath: string, paneKey = PANE) =>
     postHookEvent(

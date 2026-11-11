@@ -26,7 +26,9 @@ async function makeRuntimeWithHookRow(
   const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
     command: 'claude'
   })
-  const payload = { state, prompt: 'review the PR', agentType: 'claude' } as const
+  // Fork 6d65165647: relay/terminal Claude/Codex status is refused without attestation; the row
+  // uses an unprotected agent (gemini) because the subject is pane-to-terminal lookup, not provenance.
+  const payload = { state, prompt: 'review the PR', agentType: 'gemini' } as const
   if (source === 'http') {
     const paneKey = runtime.getTerminalPaneKey(handle)
     if (!paneKey) {

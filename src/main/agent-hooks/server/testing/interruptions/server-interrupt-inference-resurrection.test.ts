@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -31,7 +32,7 @@ describe('AgentHookServer listener replay', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       server.ingestRemote(
         {
           paneKey: PANE,
@@ -91,7 +92,7 @@ describe('AgentHookServer listener replay', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       server.ingestRemote(
         {
           paneKey: PANE,
@@ -142,11 +143,13 @@ describe('AgentHookServer listener replay', () => {
     }
   })
 
+  // Fork 6d65165647: relayed Claude/Codex status is refused without attestation, so neither the
+  // turn nor its late tool progress reaches a row that an interrupt could settle.
   it('suppresses same-turn Claude tool progress after the stale suppression window', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       server.ingestRemote(
         {
           paneKey: PANE,
@@ -158,19 +161,19 @@ describe('AgentHookServer listener replay', () => {
         },
         'conn-1'
       )
-      const baseline = server.getStatusSnapshot()[0]
+      expect(server.getStatusSnapshot()).toEqual([])
 
       vi.setSystemTime(1_500)
       expect(
         server.inferInterrupt({
           paneKey: PANE,
-          baselineUpdatedAt: baseline.receivedAt,
-          baselineStateStartedAt: baseline.stateStartedAt,
+          baselineUpdatedAt: 1_000,
+          baselineStateStartedAt: 1_000,
           baselinePrompt: 'repeat task',
           baselineAgentType: 'claude',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
 
       vi.setSystemTime(16_501)
       server.ingestRemote(
@@ -191,16 +194,10 @@ describe('AgentHookServer listener replay', () => {
         'conn-1'
       )
 
-      expect(server.getStatusSnapshot()).toEqual([
-        expect.objectContaining({
-          state: 'done',
-          prompt: 'repeat task',
-          agentType: 'claude',
-          interrupted: true,
-          receivedAt: 1_500,
-          stateStartedAt: 1_500
-        })
-      ])
+      expect(server.getStatusSnapshot()).toEqual([])
+      expect(server.getContextIntegrityRejections()).toMatchObject({
+        remote_context_attestation_unavailable: 2
+      })
     } finally {
       vi.useRealTimers()
     }
@@ -210,7 +207,7 @@ describe('AgentHookServer listener replay', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       server.ingestRemote(
         {
           paneKey: PANE,

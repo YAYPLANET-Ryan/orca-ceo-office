@@ -5,6 +5,11 @@ import { join } from 'node:path'
 import { AgentHookServer } from '../../../agent-hook-server'
 import { PANE } from '../../server.test-fixtures'
 
+import {
+  attestFixtureHookContext,
+  FIXTURE_AGENT_PROCESS,
+  FIXTURE_LAUNCH_TOKEN
+} from '../../attested-hook-context.test-fixtures'
 const line = (payload: unknown): string => `${JSON.stringify({ type: 'event_msg', payload })}\n`
 
 describe('Codex recorded turn interruption', () => {
@@ -42,7 +47,7 @@ describe('Codex recorded turn interruption', () => {
       )
       writeFileSync(childPath, line({ type: 'task_started' }))
     }
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -57,6 +62,8 @@ describe('Codex recorded turn interruption', () => {
           paneKey: PANE,
           tabId: 'tab-1',
           worktreeId: 'folder-1',
+          launchToken: FIXTURE_LAUNCH_TOKEN,
+          agentProcess: FIXTURE_AGENT_PROCESS,
           payload: {
             hook_event_name: 'UserPromptSubmit',
             session_id: 'main-session',
@@ -81,6 +88,8 @@ describe('Codex recorded turn interruption', () => {
               paneKey: PANE,
               tabId: 'tab-1',
               worktreeId: 'folder-1',
+              launchToken: FIXTURE_LAUNCH_TOKEN,
+              agentProcess: FIXTURE_AGENT_PROCESS,
               payload: {
                 hook_event_name: hookEventName,
                 session_id: 'side-session',

@@ -5,6 +5,7 @@ import { afterEach, expect, it } from 'vitest'
 import { AgentHookServer } from '../../../agent-hook-server'
 import { buildBody, postHookEvent } from '../../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../../attested-hook-context.test-fixtures'
 // Shapes captured from Codex 0.164: a /side fork is its own session with no rollout.
 const MAIN = '01a16f91-ac03-73f2-acdc-2bc83dbedce3'
 const SIDE = '01a16f91-c78b-7420-b400-e3d4afc8626a'
@@ -34,7 +35,7 @@ it('keeps the main Codex turn working through a /side chat after Orca restarts',
       providerSession: { id: MAIN }
     })
   }
-  let server = new AgentHookServer()
+  let server = attestFixtureHookContext(new AgentHookServer())
   await server.start({ env: 'production', userDataPath })
   try {
     await postHookEvent(
@@ -51,7 +52,7 @@ it('keeps the main Codex turn working through a /side chat after Orca restarts',
     await post({ ...side, hook_event_name: 'SessionStart', source: 'fork' })
     // Terminals outlive the app, so the side chat continues while every listener cache starts empty.
     server.stop()
-    server = new AgentHookServer()
+    server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     await post({
       ...side,
@@ -75,7 +76,7 @@ it('keeps the main Codex turn working through a /side chat after Orca restarts',
 it('lets a new ephemeral Codex conversation take over a pane whose last turn finished', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'codex-side-thread-'))
   dirs.push(dir)
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   await server.start({ env: 'production' })
   try {
     const main = { session_id: MAIN, transcript_path: join(dir, 'rollout-main.jsonl') }
@@ -119,7 +120,7 @@ it.each([
 ])('keeps the main Codex row when Codex $thread', async ({ prompt, mainStopFirst }) => {
   const dir = mkdtempSync(join(tmpdir(), 'codex-side-thread-'))
   dirs.push(dir)
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   await server.start({ env: 'production' })
   const post = (payload: Record<string, unknown>): Promise<Response> =>
     postHookEvent(server, buildBody(payload), '/hook/codex')
@@ -151,7 +152,7 @@ it.each([
 it('lets a new ephemeral Codex conversation take over a row still working, without its old prompt', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'codex-side-thread-'))
   dirs.push(dir)
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   await server.start({ env: 'production' })
   const post = (payload: Record<string, unknown>): Promise<Response> =>
     postHookEvent(server, buildBody(payload), '/hook/codex')

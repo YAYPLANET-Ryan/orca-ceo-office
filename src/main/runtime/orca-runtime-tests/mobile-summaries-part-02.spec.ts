@@ -185,6 +185,8 @@ describe('OrcaRuntimeService', () => {
     })
   })
 
+  // Fork 6d65165647: terminal OSC Claude/Codex status is refused without attestation; this test
+  // uses an unprotected agent (gemini) because its subject is row freshness, not provenance.
   it('keeps a fresh OSC row when the cached hook row for the same pane is older', async () => {
     const leafId = '44444444-4444-4444-8444-444444444444'
     const paneKey = `tab-1:${leafId}`
@@ -196,7 +198,7 @@ describe('OrcaRuntimeService', () => {
       worktreeId: TEST_WORKTREE_ID,
       connectionId: null,
       // Keep the agent unchanged to isolate freshness from cross-agent inheritance.
-      payload: { state: 'working', prompt: 'earlier hook row', agentType: 'codex' }
+      payload: { state: 'working', prompt: 'earlier hook row', agentType: 'gemini' }
     })
     runtime.attachWindow(1)
     runtime.syncWindowGraph(1, {
@@ -221,7 +223,7 @@ describe('OrcaRuntimeService', () => {
     })
     runtime.onPtyData(
       'pty-1',
-      '\x1b]9999;{"state":"working","prompt":"fresh OSC row","agentType":"codex"}\x07',
+      '\x1b]9999;{"state":"working","prompt":"fresh OSC row","agentType":"gemini"}\x07',
       321
     )
 
@@ -230,7 +232,7 @@ describe('OrcaRuntimeService', () => {
 
     expect(summary).toMatchObject({ hasHostSidebarActivity: true, status: 'working' })
     expect(summary?.agents).toEqual([
-      expect.objectContaining({ paneKey, prompt: 'fresh OSC row', agentType: 'codex' })
+      expect.objectContaining({ paneKey, prompt: 'fresh OSC row', agentType: 'gemini' })
     ])
   })
 
@@ -455,6 +457,8 @@ describe('OrcaRuntimeService', () => {
     ])
   })
 
+  // Fork 6d65165647: terminal OSC Claude/Codex status is refused without attestation; this test
+  // uses an unprotected agent (gemini) because its subject is row freshness, not provenance.
   it('keeps the connected-PTY rescue when a hook row outraces the OSC row for the same pane', async () => {
     // Hooks carry no ptyId; preserve the OSC-observed id when a fresher hook wins.
     const paneKey = 'race-tab:dddddddd-dddd-4ddd-8ddd-dddddddddddd'
@@ -478,7 +482,7 @@ describe('OrcaRuntimeService', () => {
     })
     runtime.onPtyData(
       'race-pty',
-      '\x1b]9999;{"state":"working","prompt":"osc ping","agentType":"codex"}\x07',
+      '\x1b]9999;{"state":"working","prompt":"osc ping","agentType":"gemini"}\x07',
       1
     )
     statusWiring.statusStore.ingestTerminalStatus({
@@ -486,7 +490,7 @@ describe('OrcaRuntimeService', () => {
       tabId: 'race-tab',
       worktreeId: TEST_WORKTREE_ID,
       connectionId: null,
-      payload: { state: 'working', prompt: 'hook-fresh agent', agentType: 'codex' }
+      payload: { state: 'working', prompt: 'hook-fresh agent', agentType: 'gemini' }
     })
     const pty = runtime['ptysById'].get('race-pty')!
     runtime['terminalIdentity'].setRecordedSurface(pty, null, null, undefined)

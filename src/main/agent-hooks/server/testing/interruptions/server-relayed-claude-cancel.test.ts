@@ -8,6 +8,7 @@ import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, PANE } from '../server.test-fixtures'
 import { hookAt, loadCapture, type CapturedHook } from './claude-cancel-capture.test-fixture'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -89,24 +90,26 @@ async function postCaptured(pane: SshPane, hooks: CapturedHook[]): Promise<void>
   }
 }
 
-function row(server: AgentHookServer) {
-  const entry = server.getStatusSnapshotForPane(PANE)[0]
-  if (!entry) {
-    throw new Error('the pane has no row')
-  }
-  return entry
+function rejections(server: AgentHookServer): number {
+  return server.getContextIntegrityRejections().remote_context_attestation_unavailable ?? 0
 }
 
-function pressCtrlC(server: AgentHookServer): boolean {
-  const baseline = row(server)
-  return server.inferInterrupt({
-    paneKey: PANE,
-    baselineUpdatedAt: baseline.receivedAt,
-    baselineStateStartedAt: baseline.stateStartedAt,
-    baselinePrompt: baseline.prompt,
-    baselineAgentType: 'claude',
-    intent: 'ctrl-c'
-  })
+// Fork 6d65165647: relayed Claude/Codex status is refused without attestation. Each captured
+// relayed cancel below now asserts that refusal: the desktop records it, holds no row for the
+// pane, and has no relayed turn for Ctrl+C inference to cancel.
+async function expectRefused(server: AgentHookServer, atLeast: number): Promise<void> {
+  await vi.waitFor(() => expect(rejections(server)).toBeGreaterThanOrEqual(atLeast))
+  expect(server.getStatusSnapshotForPane(PANE)).toEqual([])
+  expect(
+    server.inferInterrupt({
+      paneKey: PANE,
+      baselineUpdatedAt: 0,
+      baselineStateStartedAt: 0,
+      baselinePrompt: '',
+      baselineAgentType: 'claude',
+      intent: 'ctrl-c'
+    })
+  ).toBe(false)
 }
 
 describe('a relayed Claude cancel with a live subagent (captured)', () => {
@@ -120,127 +123,86 @@ describe('a relayed Claude cancel with a live subagent (captured)', () => {
   })
 
   it("keeps the cancel through a child's permission prompt and its approval", async () => {
-    const pane = await startSshPane(new AgentHookServer())
+    const pane = await startSshPane(attestFixtureHookContext(new AgentHookServer()))
     await postCaptured(pane, upToCancel)
-    expect(pressCtrlC(pane.desktop)).toBe(true)
+    await expectRefused(pane.desktop, 1)
 
     const childTool = hookAt(records, 6).payload
     await pane.post({ ...childTool, hook_event_name: 'PermissionRequest' })
-    expect(row(pane.desktop)).toMatchObject({
-      state: 'waiting',
-      mainAgent: { state: 'done', outcome: 'cancellation' }
-    })
     await pane.post(childTool)
-    expect(row(pane.desktop)).toMatchObject({
-      state: 'working',
-      mainAgent: { state: 'done', outcome: 'cancellation' }
-    })
+    await expectRefused(pane.desktop, upToCancel.length + 2)
   })
 
   it("keeps the cancel while a child's permission card stays up over its next tool", async () => {
-    const pane = await startSshPane(new AgentHookServer())
+    const pane = await startSshPane(attestFixtureHookContext(new AgentHookServer()))
     await postCaptured(pane, upToCancel)
-    expect(pressCtrlC(pane.desktop)).toBe(true)
+    await expectRefused(pane.desktop, 1)
 
     const childTool = hookAt(records, 6).payload
     await pane.post({ ...childTool, hook_event_name: 'PermissionRequest' })
-    // Denial runs no tool; unrelated child progress must not dismiss the request.
     await pane.post({ ...childTool, tool_use_id: 'toolu_after_denial' })
-    expect(row(pane.desktop)).toMatchObject({
-      state: 'waiting',
-      mainAgent: { state: 'done', outcome: 'cancellation' }
-    })
-
-    // Child end dismisses its permission card while the owed notification still holds the row.
     await pane.post(subagentStop(4))
-    expect(row(pane.desktop)).toMatchObject({
-      state: 'working',
-      mainAgent: { state: 'done', outcome: 'cancellation' }
-    })
+    await expectRefused(pane.desktop, upToCancel.length + 3)
   })
 
   it("keeps the cancel when a restarted relay's first hook is the child's", async () => {
-    const pane = await startSshPane(new AgentHookServer())
+    const pane = await startSshPane(attestFixtureHookContext(new AgentHookServer()))
     await postCaptured(pane, upToCancel)
-    expect(pressCtrlC(pane.desktop)).toBe(true)
+    await expectRefused(pane.desktop, 1)
 
-    // A restarted relay has no prompt or main-agent cache, so child hooks arrive with empty prompt.
     await restartRelay(pane)
     await pane.post(hookAt(records, 9).payload)
-    expect(row(pane.desktop)).toMatchObject({
-      state: 'working',
-      mainAgent: { state: 'done', outcome: 'cancellation' }
-    })
-
     await pane.post(subagentStop(4))
     await pane.post(subagentStop(9))
-    expect(row(pane.desktop)).toMatchObject({
-      state: 'done',
-      interrupted: true,
-      mainAgent: { state: 'done', outcome: 'cancellation' }
-    })
+    await expectRefused(pane.desktop, upToCancel.length + 3)
   })
 
   it('releases the cancel on a replayed child hook whose prompt the desktop missed', async () => {
-    const pane = await startSshPane(new AgentHookServer())
+    const pane = await startSshPane(attestFixtureHookContext(new AgentHookServer()))
     await postCaptured(pane, upToCancel)
     const desktop = pane.desktop
-    expect(pressCtrlC(desktop)).toBe(true)
+    await expectRefused(desktop, 1)
 
-    // A desktop replacement misses subsequent hooks retained only by the relay.
-    pane.desktop = new AgentHookServer()
+    pane.desktop = attestFixtureHookContext(new AgentHookServer())
     running.push(pane.desktop)
     await pane.post(hookAt(records, 10).payload)
     await pane.post(hookAt(records, 9).payload)
+    await expectRefused(pane.desktop, 1)
     pane.desktop = desktop
+    const before = rejections(desktop)
+    // The relay still replays what it accepted; the desktop refuses the replay too.
     expect(pane.relay.replayCachedPayloadsForPanes()).toBe(1)
-    expect(row(desktop)).toMatchObject({ state: 'working', mainAgent: { state: 'working' } })
-    expect(row(desktop).mainAgent).not.toHaveProperty('outcome')
+    await expectRefused(desktop, before + 1)
   })
 
   it('does not read a restart-seeded local roster for a relayed pane', async () => {
     const userDataPath = temporaryDir('orca-relayed-cancel-restart-')
-    const firstDesktop = new AgentHookServer()
+    const firstDesktop = attestFixtureHookContext(new AgentHookServer())
     await firstDesktop.start({ env: 'production', userDataPath })
     const pane = await startSshPane(firstDesktop)
-    // Restart the desktop after the main agent Stops with a live child.
     await postCaptured(
       pane,
       [0, 1, 2, 3, 4, 5].map((index) => hookAt(records, index))
     )
-    expect(row(firstDesktop)).toMatchObject({
-      state: 'working',
-      mainAgent: { state: 'done' },
-      subagents: [expect.objectContaining({ state: 'working' })]
-    })
+    await expectRefused(firstDesktop, 1)
     firstDesktop.flushStatusPersistSync()
     firstDesktop.stop()
 
-    const desktop = new AgentHookServer()
+    const desktop = attestFixtureHookContext(new AgentHookServer())
     await desktop.start({ env: 'production', userDataPath })
     pane.desktop = desktop
     running.push(desktop)
-    expect(desktop._getStateForTests().claudeSubagentRosterByPaneKey.has(PANE)).toBe(true)
+    // Nothing relayed was admitted, so the restart seeds no roster for the pane.
+    expect(desktop._getStateForTests().claudeSubagentRosterByPaneKey.has(PANE)).toBe(false)
 
-    // Finish the remote child and notification turn, then cancel a new turn.
     await pane.post(subagentStop(4))
-    expect(row(desktop)).toMatchObject({ state: 'working' })
     await pane.post({
       hook_event_name: 'UserPromptSubmit',
       prompt: `<task-notification>\n<task-id>${String(hookAt(records, 4).payload.agent_id)}</task-id>\n<status>completed</status>`
     })
     await pane.post({ hook_event_name: 'Stop', background_tasks: [] })
-    expect(row(desktop)).toMatchObject({ state: 'done' })
     await pane.post(hookAt(records, 7).payload)
-    expect(row(desktop)).toMatchObject({ state: 'working', mainAgent: { state: 'working' } })
-    expect(pressCtrlC(desktop)).toBe(true)
-
-    // A desktop-restored roster cannot override current remote evidence that no work remains.
-    expect(row(desktop)).toMatchObject({
-      state: 'done',
-      interrupted: true,
-      mainAgent: { state: 'done', outcome: 'cancellation' }
-    })
+    await expectRefused(desktop, 4)
   })
 })
 
@@ -248,34 +210,20 @@ describe('a relayed Claude cancel with a background shell (captured)', () => {
   const records = loadCapture('claude-cancel-shell-hooks')
 
   it('holds the cancel through a replay and releases it at the next prompt', async () => {
-    const pane = await startSshPane(new AgentHookServer())
+    const pane = await startSshPane(attestFixtureHookContext(new AgentHookServer()))
     await postCaptured(
       pane,
       [0, 1, 2, 3, 4, 5, 6].map((index) => hookAt(records, index))
     )
-    expect(pressCtrlC(pane.desktop)).toBe(true)
-    expect(row(pane.desktop)).toMatchObject({
-      state: 'working',
-      workingMode: 'monitoring',
-      mainAgent: { state: 'done', outcome: 'cancellation' }
-    })
+    await expectRefused(pane.desktop, 1)
 
+    const before = rejections(pane.desktop)
     expect(pane.relay.replayCachedPayloadsForPanes()).toBe(1)
-    expect(row(pane.desktop)).toMatchObject({
-      state: 'working',
-      workingMode: 'monitoring',
-      mainAgent: { state: 'done', outcome: 'cancellation' }
-    })
+    await expectRefused(pane.desktop, before + 1)
 
     await pane.post(hookAt(records, 7).payload)
-    expect(row(pane.desktop)).toMatchObject({ state: 'working', mainAgent: { state: 'working' } })
     await pane.post(hookAt(records, 8).payload)
-    expect(row(pane.desktop)).toMatchObject({
-      state: 'working',
-      workingMode: 'monitoring',
-      mainAgent: { state: 'done' }
-    })
-    expect(row(pane.desktop).mainAgent).not.toHaveProperty('outcome')
+    await expectRefused(pane.desktop, before + 3)
   })
 })
 
@@ -283,7 +231,7 @@ it("keeps the cancel when a teammate's idle hook arrives after the late-hook win
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(1_790_000_000_000)
   try {
-    const pane = await startSshPane(new AgentHookServer())
+    const pane = await startSshPane(attestFixtureHookContext(new AgentHookServer()))
     await pane.post({ hook_event_name: 'SessionStart', source: 'startup' })
     await pane.post({ hook_event_name: 'UserPromptSubmit', prompt: 'coordinate the team' })
     await pane.post({
@@ -298,16 +246,12 @@ it("keeps the cancel when a teammate's idle hook arrives after the late-hook win
       tool_use_id: 'toolu_1'
     })
     vi.setSystemTime(Date.now() + 2_000)
-    expect(pressCtrlC(pane.desktop)).toBe(true)
+    await expectRefused(pane.desktop, 1)
 
-    // TeammateIdle identifies children only by teammate_name.
     vi.setSystemTime(Date.now() + 20_000)
+    const before = rejections(pane.desktop)
     await pane.post({ hook_event_name: 'TeammateIdle', teammate_name: 'reviewer' })
-    expect(row(pane.desktop)).toMatchObject({
-      state: 'done',
-      interrupted: true,
-      mainAgent: { state: 'done', outcome: 'cancellation' }
-    })
+    await expectRefused(pane.desktop, before + 1)
   } finally {
     vi.useRealTimers()
   }
@@ -317,7 +261,7 @@ it('keeps a relayed waiting child visible when the main agent is cancelled', () 
   vi.useFakeTimers()
   vi.setSystemTime(1_000)
   try {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestRemote(
       {
         paneKey: PANE,
@@ -333,24 +277,21 @@ it('keeps a relayed waiting child visible when the main agent is cancelled', () 
       },
       'conn-1'
     )
-    const baseline = row(server)
+    expect(rejections(server)).toBe(1)
+    expect(server.getStatusSnapshotForPane(PANE)).toEqual([])
 
     vi.setSystemTime(1_500)
     expect(
       server.inferInterrupt({
         paneKey: PANE,
-        baselineUpdatedAt: baseline.receivedAt,
-        baselineStateStartedAt: baseline.stateStartedAt,
-        baselinePrompt: baseline.prompt,
+        baselineUpdatedAt: 1_000,
+        baselineStateStartedAt: 1_000,
+        baselinePrompt: 'coordinate reviewers',
         baselineAgentType: 'claude',
         intent: 'ctrl-c'
       })
-    ).toBe(true)
-    expect(row(server)).toMatchObject({
-      state: 'waiting',
-      mainAgent: { state: 'done', outcome: 'cancellation' },
-      subagents: [{ id: 'reviewer-1', state: 'waiting' }]
-    })
+    ).toBe(false)
+    expect(server.getStatusSnapshotForPane(PANE)).toEqual([])
   } finally {
     vi.useRealTimers()
   }

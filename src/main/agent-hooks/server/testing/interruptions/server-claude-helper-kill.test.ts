@@ -9,6 +9,7 @@ import { buildRunningAgentChildRowModels } from '../../../../../shared/running-a
 import { AgentHookServer } from '../../agent-hook-server'
 import { buildBody, PANE, postHookEvent } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({
   getCohortAtEmit: () => ({ nth_repo_added: 2 })
@@ -67,7 +68,7 @@ async function host(kind: string, initial: Record<string, unknown>[] = []) {
   await writeFile(join(folder, 'session', 'subagents', 'agent-a123.jsonl'), lines(child))
   const body = (payload: Record<string, unknown>) =>
     buildBody({ session_id: 'session', transcript_path: path, ...payload })
-  const desktop = new AgentHookServer()
+  const desktop = attestFixtureHookContext(new AgentHookServer())
   const endpointDir = join(folder, 'endpoint')
   if (kind === 'spool') {
     await mkdir(join(endpointDir, 'spool'), { recursive: true })
@@ -120,6 +121,17 @@ async function host(kind: string, initial: Record<string, unknown>[] = []) {
   }
 }
 
+// Fork 6d65165647: relayed Claude/Codex status is refused without attestation, so the relay and
+// relay-spool variants assert that the desktop refuses the captured hooks and holds no row.
+async function expectRelayRefused(p: Awaited<ReturnType<typeof host>>): Promise<void> {
+  await vi.waitFor(() =>
+    expect(
+      p.desktop.getContextIntegrityRejections().remote_context_attestation_unavailable ?? 0
+    ).toBeGreaterThan(0)
+  )
+  expect(p.desktop.getStatusSnapshotForPane(PANE)).toEqual([])
+}
+
 it.each(['local', 'relay', 'spool'])(
   'settles the complete capture on %s through reads, replay and persistence',
   async (kind) => {
@@ -135,6 +147,13 @@ it.each(['local', 'relay', 'spool'])(
         last_assistant_message: 'READY'
       }
     ])
+    if (kind !== 'local') {
+      await expectRelayRefused(p)
+      await p.kill()
+      p.relay.replayCachedPayloadsForPanes()
+      await expectRelayRefused(p)
+      return
+    }
     const before = p.row()
     expect(before?.subagents?.[0]?.state).toBe('working')
     await p.kill()
@@ -167,7 +186,7 @@ it.each(['local', 'relay', 'spool'])(
     } else {
       p.desktop.flushStatusPersistSync()
       p.desktop.stop()
-      const restored = new AgentHookServer()
+      const restored = attestFixtureHookContext(new AgentHookServer())
       servers.push(restored)
       await restored.start({
         env: 'production',
@@ -193,6 +212,20 @@ it.each(['local', 'relay'])(
       { hook_event_name: 'UserPromptSubmit', prompt: 'work' },
       { hook_event_name: 'SubagentStart', agent_id: 'a123' }
     ])
+    if (kind === 'relay') {
+      await expectRelayRefused(p)
+      expect(
+        p.desktop.inferInterrupt({
+          paneKey: PANE,
+          baselineUpdatedAt: 0,
+          baselineStateStartedAt: 0,
+          baselinePrompt: 'work',
+          baselineAgentType: 'claude',
+          intent: 'ctrl-c'
+        })
+      ).toBe(false)
+      return
+    }
     const baseline = p.row()!
     expect(
       p.desktop.inferInterrupt({

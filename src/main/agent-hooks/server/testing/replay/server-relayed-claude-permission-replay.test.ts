@@ -10,6 +10,7 @@ import { buildBody, PANE } from '../server.test-fixtures'
 import { hookAt, loadCapture } from '../interruptions/claude-cancel-capture.test-fixture'
 import selfDenied from '../../../../claude/__fixtures__/claude-self-denied-permission-hooks.json'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -51,6 +52,8 @@ type SshPane = {
   desktop: AgentHookServer
   connected: boolean
   forwarded: AgentHookRelayEnvelope[]
+  /** Envelopes the desktop was handed; each is refused (see expectRefused). */
+  ingested: number
   post: (payload: Record<string, unknown>) => Promise<void>
 }
 
@@ -58,15 +61,17 @@ async function startSshPane(): Promise<SshPane> {
   const endpointDir = mkdtempSync(join(tmpdir(), 'orca-relayed-permission-'))
   temporaryPaths.push(endpointDir)
   const pane: SshPane = {
-    desktop: new AgentHookServer(),
+    desktop: attestFixtureHookContext(new AgentHookServer()),
     connected: true,
     forwarded: [],
+    ingested: 0,
     relay: new RelayAgentHookServer({
       endpointDir,
       token: 'relayed-permission-token',
       forward: (envelope) => {
         pane.forwarded.push(envelope)
         if (pane.connected) {
+          pane.ingested += 1
           pane.desktop.ingestRemote(envelope, 'conn-1')
         }
       }
@@ -92,18 +97,20 @@ async function postAll(pane: SshPane, payloads: Record<string, unknown>[]): Prom
   }
 }
 
-function row(server: AgentHookServer) {
-  const entry = server.getStatusSnapshotForPane(PANE)[0]
-  if (!entry) {
-    throw new Error('the pane has no row')
-  }
-  return entry
+// Fork 6d65165647: relayed Claude/Codex status is refused without attestation. The relay's own
+// replay envelopes are still asserted; the desktop refuses every one of them and keeps no row.
+function expectRefused(pane: SshPane): void {
+  expect(pane.ingested).toBeGreaterThan(0)
+  expect(pane.desktop.getStatusSnapshotForPane(PANE)).toEqual([])
+  expect(pane.desktop.getContextIntegrityRejections()).toEqual({
+    remote_context_attestation_unavailable: pane.ingested
+  })
 }
 
 async function waitingOnFirstRequest(): Promise<SshPane> {
   const pane = await startSshPane()
   await postAll(pane, [prompt, firstTool, firstPermission, firstNotification])
-  expect(row(pane.desktop)).toMatchObject({ state: 'waiting', toolName: 'Bash' })
+  expectRefused(pane)
   return pane
 }
 
@@ -119,8 +126,7 @@ describe('a relayed Claude permission wait across a reconnect (captured)', () =>
     await postAll(pane, [firstToolDone, secondTool])
     reconnect(pane)
 
-    expect(row(pane.desktop)).toMatchObject({ state: 'working', toolName: 'Bash' })
-    expect(row(pane.desktop).toolInput).toContain('second-file.txt')
+    expectRefused(pane)
     const replay = pane.forwarded.at(-1)
     expect(replay).toMatchObject({
       isReplay: true,
@@ -139,8 +145,7 @@ describe('a relayed Claude permission wait across a reconnect (captured)', () =>
     ])
     reconnect(pane)
 
-    expect(row(pane.desktop)).toMatchObject({ state: 'waiting' })
-    expect(row(pane.desktop).toolInput).toContain('first-file.txt')
+    expectRefused(pane)
   })
 
   it('ignores settled requests on a live (non-replay) envelope', async () => {
@@ -151,6 +156,7 @@ describe('a relayed Claude permission wait across a reconnect (captured)', () =>
     expect(live).toMatchObject({ hookEventName: 'PreToolUse' })
     expect(live?.isReplay).toBeUndefined()
     pane.connected = true
+    pane.ingested += 1
     pane.desktop.ingestRemote(
       {
         ...live,
@@ -160,7 +166,7 @@ describe('a relayed Claude permission wait across a reconnect (captured)', () =>
       },
       'conn-1'
     )
-    expect(row(pane.desktop)).toMatchObject({ state: 'waiting' })
+    expectRefused(pane)
   })
 })
 
@@ -176,9 +182,9 @@ describe.each([
   it('clears when its batch end arrives live', async () => {
     const pane = await startSshPane()
     await postAll(pane, untilWait)
-    expect(row(pane.desktop)).toMatchObject({ state: 'waiting' })
+    expectRefused(pane)
     await postAll(pane, untilBatch)
-    expect(row(pane.desktop)).toMatchObject({ state: 'working' })
+    expectRefused(pane)
   })
 
   it('clears on reconnect when the batch ended it while the desktop was away', async () => {
@@ -187,6 +193,6 @@ describe.each([
     pane.connected = false
     await postAll(pane, [...untilBatch, events[batchIndex + 1]])
     reconnect(pane)
-    expect(row(pane.desktop)).toMatchObject({ state: 'working' })
+    expectRefused(pane)
   })
 })

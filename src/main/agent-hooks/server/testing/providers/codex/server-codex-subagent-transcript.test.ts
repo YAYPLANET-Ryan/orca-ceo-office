@@ -6,6 +6,11 @@ import { join } from 'node:path'
 import { AgentHookServer } from '../../../agent-hook-server'
 import { makePaneKey } from '../../../../../../shared/workspace-layout/stable-pane-id'
 
+import {
+  attestFixtureHookContext,
+  FIXTURE_AGENT_PROCESS,
+  FIXTURE_LAUNCH_TOKEN
+} from '../../attested-hook-context.test-fixtures'
 const PANE_KEY = makePaneKey('tab-1', '11111111-1111-4111-8111-111111111111')
 const CHILD_ID = '019fa65f-3144-7151-9c02-cff7a28f316f'
 const SECOND_CHILD_ID = '019fa65f-3144-7151-9c02-cff7a28f3170'
@@ -55,7 +60,7 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
     writeFileSync(parentPath, spawnLine(CHILD_ID, '/root/pr_review'))
     writeFileSync(childPath, started)
     writeFileSync(secondChildPath, started)
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -70,6 +75,8 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
           paneKey: PANE_KEY,
           tabId: 'tab-1',
           worktreeId: 'wt-1',
+          launchToken: FIXTURE_LAUNCH_TOKEN,
+          agentProcess: FIXTURE_AGENT_PROCESS,
           payload: {
             hook_event_name: 'PostToolUse',
             session_id: 'root-session',
@@ -102,7 +109,7 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
     const childPath = join(dir, `rollout-child-${CHILD_ID}.jsonl`)
     writeFileSync(parentPath, spawnLine(CHILD_ID, '/root/pr_review'))
     writeFileSync(childPath, line({ type: 'event_msg', payload: { type: 'task_started' } }))
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -114,7 +121,14 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
             Connection: 'close',
             'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
           },
-          body: JSON.stringify({ paneKey: PANE_KEY, tabId: 'tab-1', worktreeId: 'wt-1', payload })
+          body: JSON.stringify({
+            paneKey: PANE_KEY,
+            tabId: 'tab-1',
+            worktreeId: 'wt-1',
+            launchToken: FIXTURE_LAUNCH_TOKEN,
+            agentProcess: FIXTURE_AGENT_PROCESS,
+            payload
+          })
         })
 
       await post('/hook/codex', {

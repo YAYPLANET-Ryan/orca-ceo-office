@@ -18,6 +18,7 @@ import { WslHookRelayManager } from '../wsl-hook-relay-manager'
 import { createManagedHookLocalFilesystem } from '../../installation/remote/testing/managed-hook-local-filesystem.test-fixture'
 import { codexHookService } from '../../../codex/hooks/installation/hook-service'
 
+import { attestFixtureHookContext } from '../../server/testing/attested-hook-context.test-fixtures'
 const BUNDLE_DIR = join(process.cwd(), 'out', 'relay', 'wsl')
 const BUNDLE_JS = join(BUNDLE_DIR, 'wsl-agent-hook-relay.js')
 const LEAF = '11111111-1111-4111-8111-111111111111'
@@ -78,7 +79,7 @@ describe.skipIf(process.platform === 'win32')(
       const preferredPort = await pickFreePort()
       const version = readFileSync(join(BUNDLE_DIR, '.version'), 'utf8').trim()
 
-      orcaServer = new AgentHookServer()
+      orcaServer = attestFixtureHookContext(new AgentHookServer())
       const events: { paneKey: string; payload: unknown; connectionId: string | null }[] = []
       orcaServer.setListener((event) => {
         events.push({

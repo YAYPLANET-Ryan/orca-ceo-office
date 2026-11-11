@@ -5,7 +5,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, PANE, postHookEvent } from '../server.test-fixtures'
+import { launchTokenHash } from '../../../../../shared/agent-hook-listener/transport/agent-hook-spool'
+import type { HookContextSnapshotReader } from '../../hook-context-snapshot'
 
+import {
+  attestFixtureHookContext,
+  FIXTURE_LAUNCH_TOKEN
+} from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({
   getCohortAtEmit: vi.fn(() => ({ nth_repo_added: 2 }))
@@ -14,18 +20,36 @@ vi.mock('../../../../telemetry/cohort-classifier', () => ({
 describe('saved agent status cadence', () => {
   let userDataPath: string
   let server: AgentHookServer
+  let ptyLaunchToken = FIXTURE_LAUNCH_TOKEN
+
+  // Fork 6d65165647: a new launch token is admitted only when the pane's PTY exported it, so the
+  // fixture PTY reports the token of its latest launch.
+  const followPtyLaunchToken = (target: AgentHookServer): AgentHookServer => {
+    const fixtureRead = (
+      target as unknown as { readHookContextSnapshot: HookContextSnapshotReader }
+    ).readHookContextSnapshot
+    target.setHookContextSnapshotReader(async (envelope) => {
+      const snapshot = await fixtureRead(envelope)
+      return snapshot && { ...snapshot, launchTokenHash: launchTokenHash(ptyLaunchToken) ?? '' }
+    })
+    return target
+  }
 
   const lastStatusPath = (): string => join(userDataPath, 'agent-hooks', 'last-status.json')
   const readPrompt = (): unknown =>
     JSON.parse(readSavedStatus(lastStatusPath())).entries[PANE]?.payload?.prompt
-  const prompt = (text: string, launchToken?: string): Promise<Response> =>
-    postHookEvent(
+  const prompt = (text: string, launchToken?: string): Promise<Response> => {
+    if (launchToken) {
+      ptyLaunchToken = launchToken
+    }
+    return postHookEvent(
       server,
       buildBody(
         { hook_event_name: 'UserPromptSubmit', prompt: text },
         launchToken ? { launchToken } : {}
       )
     )
+  }
 
   beforeEach(async () => {
     _internals.resetCachesForTests()
@@ -35,7 +59,8 @@ describe('saved agent status cadence', () => {
       toFake: ['setTimeout', 'clearTimeout', 'Date']
     })
     userDataPath = mkdtempSync(join(tmpdir(), 'orca-persist-throttle-'))
-    server = new AgentHookServer()
+    ptyLaunchToken = FIXTURE_LAUNCH_TOKEN
+    server = followPtyLaunchToken(attestFixtureHookContext(new AgentHookServer()))
     await server.start({ env: 'production', userDataPath })
   })
 

@@ -14,6 +14,7 @@ import {
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -94,7 +95,7 @@ afterEach(() => {
 
 describe('AgentHookServer ingestStructuredStatus', () => {
   it("folds the host's live child records into an idle session the way the hook lane folds a roster", () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestStructuredStatus(summary({ status: 'idle' }), SUBJECT)
     server.ingestStructuredChildWork(SUBJECT, [liveChild('child-1', 'agent')], 'codex')
     server.ingestStructuredStatus(summary({ status: 'idle', updatedAt: OBSERVED_AT + 1 }), SUBJECT)
@@ -119,7 +120,7 @@ describe('AgentHookServer ingestStructuredStatus', () => {
   })
 
   it("reads child liveness from the host's records, never from the summary's task list", () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestStructuredStatus(
       summary({
         status: 'idle',
@@ -132,7 +133,7 @@ describe('AgentHookServer ingestStructuredStatus', () => {
 
   // Monitoring age must not become the age of a newly working turn.
   it('restarts the state clock when monitoring becomes a real turn', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestStructuredStatus(summary({ status: 'idle' }), SUBJECT)
     server.ingestStructuredChildWork(SUBJECT, [liveChild('shell-1', 'command')], 'codex')
     server.ingestStructuredStatus(summary({ status: 'idle' }), SUBJECT)
@@ -155,7 +156,7 @@ describe('AgentHookServer ingestStructuredStatus', () => {
 
   // Background edges do not advance journal activity; host receipt must keep live monitoring rows fresh.
   it('dates a task edge by when the host saw it, not by the journal clock', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const before = Date.now()
     server.ingestStructuredStatus(summary({ status: 'idle', updatedAt: OBSERVED_AT }), SUBJECT)
     server.ingestStructuredChildWork(SUBJECT, [liveChild('shell-1', 'command')], 'codex')
@@ -170,7 +171,7 @@ describe('AgentHookServer ingestStructuredStatus', () => {
 
   // The renderer feed owns structured panes, so host deletion must neither clear them nor rewrite hook persistence.
   it('drops the row without sending the renderer a clear for a pane it does not write', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const cleared: unknown[] = []
     const dropped: string[] = []
     server.setPaneStatusClearListener((clear) => cleared.push(clear))
@@ -202,13 +203,15 @@ describe('structured rows and last-status.json', () => {
 
   // Restore republishes from the journal; a second persisted copy would compete as unconfirmed state.
   it('are never written, while hook rows still are', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
+      // Fork 6d65165647: terminal Claude/Codex status is refused without attestation; the hook row
+      // only needs to be persistable, so it comes from gemini.
       server.ingestTerminalStatus({
         paneKey: PANE,
         connectionId: null,
-        payload: { state: 'working', prompt: 'watch the build', agentType: 'claude' }
+        payload: { state: 'working', prompt: 'watch the build', agentType: 'gemini' }
       })
       server.ingestStructuredStatus(summary(), SUBJECT)
       server.flushStatusPersistSync()
@@ -221,7 +224,7 @@ describe('structured rows and last-status.json', () => {
     } = JSON.parse(readSavedStatus(lastStatusPath()))
     expect(Object.keys(file.entries)).toEqual([PANE])
 
-    const restored = new AgentHookServer()
+    const restored = attestFixtureHookContext(new AgentHookServer())
     await restored.start({ env: 'production', userDataPath })
     try {
       expect(restored.getStatusSnapshot().map((row) => row.paneKey)).toEqual([PANE])
@@ -249,7 +252,7 @@ describe('structured rows and last-status.json', () => {
         }
       })
     )
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       expect(server.getStatusSnapshot()).toEqual([])
@@ -261,7 +264,7 @@ describe('structured rows and last-status.json', () => {
 
 describe('the main agent fact on a structured row', () => {
   it('publishes the main agent beside the folded state, on the journal clock with continuity', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestStructuredStatus(summary({ status: 'idle' }), SUBJECT)
     server.ingestStructuredChildWork(SUBJECT, [liveChild('c', 'agent')], 'codex')
     server.ingestStructuredStatus(summary({ status: 'idle' }), SUBJECT)

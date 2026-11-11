@@ -3,11 +3,14 @@ import { AgentHookServer, _internals } from '../../../agent-hook-server'
 import { buildBody, PANE, postHookEvent } from '../../server.test-fixtures'
 import { CODEX_CAPACITY_MESSAGE } from '../../../../../../shared/codex-native-notice'
 
+import { attestFixtureHookContext } from '../../attested-hook-context.test-fixtures'
 afterEach(() => _internals.resetCachesForTests())
 
+// Fork 6d65165647: relay and terminal Codex status is refused without attestation, so a capacity
+// verdict from those paths no longer reaches the shared status store.
 describe('Codex capacity verdict in the shared status store', () => {
   it('keeps a local failure through Stop and child activity, then clears it on retry', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     const post = (payload: Record<string, unknown>) =>
       postHookEvent(server, buildBody({ session_id: 'session-1', ...payload }), '/hook/codex')
@@ -29,31 +32,25 @@ describe('Codex capacity verdict in the shared status store', () => {
           mainAgent: { state: 'done', outcome: 'failure', stateStartedAt: Date.now() }
         }
       })
+      // The terminal capacity verdict is refused; the hook-owned row is left as the prompt set it.
+      expect(server.getStatusSnapshotForPane(PANE)[0]).toEqual(previous)
       expect(server.getStatusSnapshotForPane(PANE)[0]).toMatchObject({
         prompt: 'Say hi',
         model: 'gpt-5',
-        lastAssistantMessage: CODEX_CAPACITY_MESSAGE,
         providerSession: { id: 'session-1' },
-        mainAgent: { state: 'done', outcome: 'failure' }
+        mainAgent: { state: 'working' }
       })
-      await post({ hook_event_name: 'Stop' })
-      await post({ hook_event_name: 'SubagentStart', agent_id: 'child-1' })
-      expect(server.getStatusSnapshotForPane(PANE)[0]).toMatchObject({
-        state: 'working',
-        mainAgent: { state: 'done', outcome: 'failure' }
+      expect(server.getStatusSnapshotForPane(PANE)[0]?.lastAssistantMessage).toBeUndefined()
+      expect(server.getContextIntegrityRejections()).toEqual({
+        terminal_context_attestation_unavailable: 1
       })
-      await post({ hook_event_name: 'UserPromptSubmit', prompt: 'Say hi' })
-      expect(server.getStatusSnapshotForPane(PANE)[0]?.mainAgent).toMatchObject({
-        state: 'working'
-      })
-      expect(server.getStatusSnapshotForPane(PANE)[0]?.mainAgent?.outcome).toBeUndefined()
     } finally {
       server.stop()
     }
   })
 
   it('accepts host capacity evidence after an earlier done and preserves it across relay restatements', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestRemote(
       {
         paneKey: PANE,
@@ -88,6 +85,10 @@ describe('Codex capacity verdict in the shared status store', () => {
       },
       'ssh-host'
     )
-    expect(server.getStatusSnapshotForPane(PANE)[0]?.mainAgent?.outcome).toBe('failure')
+    expect(server.getStatusSnapshotForPane(PANE)).toEqual([])
+    expect(server.getContextIntegrityRejections()).toEqual({
+      remote_context_attestation_unavailable: 2,
+      terminal_context_attestation_unavailable: 1
+    })
   })
 })

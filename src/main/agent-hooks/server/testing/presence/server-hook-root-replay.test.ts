@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PANE } from '../server.test-fixtures'
+import { FIXTURE_LAUNCH_TOKEN } from '../attested-hook-context.test-fixtures'
 import { makePaneKey } from '../../../../../shared/workspace-layout/stable-pane-id'
 import {
   readHookRootEvidence,
@@ -37,6 +38,10 @@ vi.mock('../../../../../shared/agent-status/process/agent-process-presence-probe
 
 registerRootTestHarness()
 
+// Fork 6d65165647: a replayed Claude hook is admitted only with root evidence answered within its
+// own admission deadline; process-less, nested and unanswered records are refused, never kept as
+// fallbacks for a late answer to heal.
+
 beforeEach(() => {
   // Replay's answer deadline runs on the monotonic clock and its timers, so both are faked.
   vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout'] })
@@ -58,6 +63,8 @@ function spooled(
     worktreeId: 'wt-1',
     source: 'claude',
     receivedAt: NOW,
+    // A hook spooled by the pane's own PTY carries its launch token.
+    launchToken: FIXTURE_LAUNCH_TOKEN,
     ...(pid === null ? {} : { agentProcess: JSON.stringify(capture(pid)) }),
     payload
   }
@@ -198,17 +205,23 @@ describe('startup spool replay of panes without a proven owner', () => {
     await requested
     await vi.advanceTimersByTimeAsync(500)
     await started
-    expect(server.presence(healed)).toEqual({ agent: 'claude', session: 'b' })
-    // Both answers arrive well before either pair's own 500 ms would have ended.
+    // The process-less records are refused outright; the rest miss their admission deadline.
+    expect(server.getContextIntegrityRejections()).toMatchObject({
+      process_generation_unconfirmed: 2,
+      context_evidence_unavailable: 4
+    })
     await vi.advanceTimersByTimeAsync(20)
-    expect(server.presence(healed)).toMatchObject({ process: capture(49969), session: 'b' })
-    expect(server.row(healed)).toMatchObject({ prompt: 'B' })
-    expect(server.presence(exiting)).toMatchObject({ process: capture(49969), ended: true })
-    expect(server.exits).toBe(1)
+    for (const paneKey of [slow, healed, exiting]) {
+      expect(server.presence(paneKey)).toBeUndefined()
+      expect(server.row(paneKey)).toBeUndefined()
+    }
+    expect(server.exits).toBe(0)
+    // Answers after the drain heal and retire nothing.
     vi.useRealTimers()
     release()
     await settled(3)
-    expect(server.exits).toBe(1)
+    expect(server.presence(healed)).toBeUndefined()
+    expect(server.exits).toBe(0)
   })
 
   it.each<[string, Proc[], number]>([
@@ -244,8 +257,14 @@ describe('startup spool replay of panes without a proven owner', () => {
       await vi.advanceTimersByTimeAsync(500)
       await started
       expect(performance.now() - startedAt).toBe(500)
-      expect(server.row()).toMatchObject({ prompt: 'Parent task' })
-      expect(server.presence()).toEqual({ agent: 'claude', session: 'parent' })
+      // The process-less parent and the nested child are refused by their evidence, the child's
+      // repeat at its admission deadline before its read answers; nothing takes the pane.
+      expect(server.getContextIntegrityRejections()).toMatchObject({
+        process_generation_unconfirmed: 2,
+        context_evidence_unavailable: 2
+      })
+      expect(server.row()).toBeUndefined()
+      expect(server.presence()).toBeUndefined()
       release()
     }
   )

@@ -343,6 +343,8 @@ describe('OrcaRuntimeService', () => {
       })
     ])
   })
+  // Fork 6d65165647: terminal OSC Claude/Codex status is refused without attestation; this test
+  // uses an unprotected agent (gemini) because its subject is row freshness, not provenance.
   it('does not carry hook monitoring mode into a newer OSC turn', async () => {
     const leafId = '55555555-5555-4555-8555-555555555555'
     const statusWiring = makeAgentStatusStoreWiring()
@@ -371,12 +373,12 @@ describe('OrcaRuntimeService', () => {
         state: 'working',
         workingMode: 'monitoring',
         prompt: 'watch tests',
-        agentType: 'claude'
+        agentType: 'gemini'
       }
     })
     runtime.onPtyData(
       'pty-1',
-      '\x1b]9999;{"state":"working","prompt":"fix tests","agentType":"claude"}\x07',
+      '\x1b]9999;{"state":"working","prompt":"fix tests","agentType":"gemini"}\x07',
       1
     )
 

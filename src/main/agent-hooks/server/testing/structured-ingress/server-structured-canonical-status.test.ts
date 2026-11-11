@@ -12,6 +12,7 @@ import {
 import { AgentHookServer } from '../../agent-hook-server'
 import { PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({ getCohortAtEmit: vi.fn(() => ({})) }))
 
@@ -39,12 +40,14 @@ function summary(
   }
 }
 
+// Fork 6d65165647: terminal and relayed Claude/Codex status is refused without attestation. These
+// cases are about legacy versus canonical addresses, so the legacy evidence comes from gemini.
 function terminal(server: AgentHookServer, paneKey: string): void {
   server.ingestTerminalStatus({
     paneKey,
     worktreeId: SCOPE.workspaceId,
     connectionId: null,
-    payload: { state: 'working', prompt: 'legacy PTY', agentType: 'claude' }
+    payload: { state: 'working', prompt: 'legacy PTY', agentType: 'gemini' }
   })
 }
 
@@ -52,7 +55,7 @@ afterEach(() => vi.restoreAllMocks())
 
 describe('structured canonical production slice', () => {
   it('isolates identical session identifiers across host, WSL and workspace kind scopes', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const scopes: AgentStatusExecutionScope[] = [
       SCOPE,
       { ...SCOPE, wslDistro: 'Ubuntu' },
@@ -78,7 +81,7 @@ describe('structured canonical production slice', () => {
   })
 
   it('refuses late PTY and relay evidence at a canonically owned address without fanout', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestStructuredStatus(summary(), SUBJECT)
     const before = server.getCanonicalStatusSnapshot()
     const changed = vi.fn()
@@ -87,7 +90,7 @@ describe('structured canonical production slice', () => {
     server.subscribeEnrichedStatus(enriched)
     terminal(server, PANE_KEY)
     server.ingestRemote(
-      { paneKey: PANE_KEY, payload: { state: 'done', prompt: 'late', agentType: 'claude' } },
+      { paneKey: PANE_KEY, payload: { state: 'done', prompt: 'late', agentType: 'gemini' } },
       'ssh-route'
     )
     expect(server.getCanonicalStatusSnapshot()).toEqual(before)
@@ -98,7 +101,7 @@ describe('structured canonical production slice', () => {
   })
 
   it('refuses a canonical address already occupied by unbound legacy evidence', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     terminal(server, PANE_KEY)
     expect(() => server.ingestStructuredStatus(summary(), SUBJECT)).toThrow(
       'conflicts with legacy evidence'
@@ -110,9 +113,9 @@ describe('structured canonical production slice', () => {
   })
 
   it('keeps incomplete remote evidence exclusively legacy and pane cleanup cannot remove a canonical row', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestRemote(
-      { paneKey: PANE, payload: { state: 'working', prompt: 'remote', agentType: 'claude' } },
+      { paneKey: PANE, payload: { state: 'working', prompt: 'remote', agentType: 'gemini' } },
       'ssh-route'
     )
     expect(server.getCanonicalStatusSnapshot().parents).toEqual([])

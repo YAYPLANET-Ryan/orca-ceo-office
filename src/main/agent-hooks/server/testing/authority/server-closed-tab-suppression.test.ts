@@ -4,7 +4,21 @@ import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { CLOSED_AGENT_STATUS_TAB_IDS_MAX } from '../../server-constants'
 import { makePaneKey } from '../../../../../shared/workspace-layout/stable-pane-id'
 import { buildBody, PANE, LEAF_2, LEAF_3 } from '../server.test-fixtures'
+import { launchTokenHash } from '../../../../../shared/agent-hook-listener/transport/agent-hook-spool'
+import type { HookContextSnapshotReader } from '../../hook-context-snapshot'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
+
+// Fork 6d65165647: a hook's launch token is admitted only when the pane's PTY exported it.
+function reportPtyLaunchToken(server: AgentHookServer, launchToken: string): AgentHookServer {
+  const fixtureRead = (server as unknown as { readHookContextSnapshot: HookContextSnapshotReader })
+    .readHookContextSnapshot
+  server.setHookContextSnapshotReader(async (envelope) => {
+    const snapshot = await fixtureRead(envelope)
+    return snapshot && { ...snapshot, launchTokenHash: launchTokenHash(launchToken) ?? '' }
+  })
+  return server
+}
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -31,7 +45,7 @@ afterEach(() => {
 
 describe('AgentHookServer listener replay', () => {
   it('suppresses local HTTP hook writes for a recently closed tab', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -60,7 +74,10 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('accepts a new local prompt after launch authority retires in a reusable pane', async () => {
-    const server = new AgentHookServer()
+    const server = reportPtyLaunchToken(
+      attestFixtureHookContext(new AgentHookServer()),
+      'retired-launch-token'
+    )
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -100,7 +117,7 @@ describe('AgentHookServer listener replay', () => {
   // Reattach must restore mid-turn and idle panes without waiting for a new-turn event.
   for (const kind of ['pi', 'omp'] as const) {
     it(`re-attaching a retired ${kind} pane restores status without needing a new turn`, async () => {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       await server.start({ env: 'production' })
       try {
         const env = server.buildPtyEnv()
@@ -134,7 +151,7 @@ describe('AgentHookServer listener replay', () => {
   }
 
   it('re-attach does not lift a closed-tab tombstone', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -163,7 +180,7 @@ describe('AgentHookServer listener replay', () => {
 
   // Reattach must rebuild retired aliases because the live process still posts its original pane key.
   it('re-attaching a detached pane accepts hooks on the pane key its process launched under', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const detachedPane = makePaneKey('tab-2', LEAF_2)
@@ -196,7 +213,7 @@ describe('AgentHookServer listener replay', () => {
 
   // Restoring the original key must not rebuild an alias into the closed owner tab.
   it('re-opens the original pane instead of rebuilding an alias into a closed tab', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const detachedPane = makePaneKey('tab-2', LEAF_2)
@@ -229,7 +246,7 @@ describe('AgentHookServer listener replay', () => {
 
   // After tab-ID eviction, the pane fence must remain; use a non-boundary event that cannot lift it.
   it('leaves a closed tab pane fenced once its tab id is evicted', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const detachedPane = makePaneKey('tab-2', LEAF_2)
@@ -276,7 +293,7 @@ describe('AgentHookServer listener replay', () => {
 
   // Detached legacy aliases can span tabs; their own closed tab must remain fenced.
   it('keeps a legacy alias fenced when its own tab closed but the owner tab did not', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const legacyPane = 'tab-1:0'
@@ -310,7 +327,7 @@ describe('AgentHookServer listener replay', () => {
   })
 
   it('does not clobber a newer alias when replaying a retired fence', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const legacyPane = 'tab-1:0'
@@ -342,14 +359,16 @@ describe('AgentHookServer listener replay', () => {
     }
   })
 
+  // Fork 6d65165647: remote-relay Claude/Codex status is refused without attestation; replay
+  // fencing after retirement is not provider-specific, so an unprotected agent relays it.
   it('accepts a live remote prompt but not replay after launch authority retires', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestRemote(
       {
         paneKey: PANE,
         hookEventName: 'UserPromptSubmit',
         launchToken: 'retired-remote-launch-token',
-        payload: { state: 'working', prompt: 'first launch', agentType: 'claude' }
+        payload: { state: 'working', prompt: 'first launch', agentType: 'gemini' }
       },
       'conn-1'
     )
@@ -361,7 +380,7 @@ describe('AgentHookServer listener replay', () => {
         hookEventName: 'UserPromptSubmit',
         launchToken: 'retired-remote-launch-token',
         isReplay: true,
-        payload: { state: 'working', prompt: 'stale replay', agentType: 'claude' }
+        payload: { state: 'working', prompt: 'stale replay', agentType: 'gemini' }
       },
       'conn-1'
     )
@@ -372,7 +391,7 @@ describe('AgentHookServer listener replay', () => {
         paneKey: PANE,
         hookEventName: 'UserPromptSubmit',
         launchToken: 'retired-remote-launch-token',
-        payload: { state: 'working', prompt: 'remote manual restart', agentType: 'claude' }
+        payload: { state: 'working', prompt: 'remote manual restart', agentType: 'gemini' }
       },
       'conn-1'
     )

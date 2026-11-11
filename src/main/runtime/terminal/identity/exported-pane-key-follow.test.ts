@@ -21,13 +21,15 @@ let NEW_PANE_KEY = ''
 const SURVIVOR = `${TEST_WORKTREE_ID}@@survivor`
 const OTHER = `${TEST_WORKTREE_ID}@@other`
 
+// Fork 6d65165647: relayed Claude/Codex status is refused without attestation; these pane-key
+// follow tests use an unprotected agent (gemini) because no assertion is agent-specific.
 function hookFromOldShell(state: 'working' | 'done'): void {
   agentHookServer.ingestRemote(
     {
       paneKey: OLD_PANE_KEY,
       tabId: OLD_TAB,
       worktreeId: TEST_WORKTREE_ID,
-      payload: { state, prompt: 'fix the bug', agentType: 'claude' }
+      payload: { state, prompt: 'fix the bug', agentType: 'gemini' }
     },
     null
   )

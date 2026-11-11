@@ -7,6 +7,7 @@ import {
   type WorkspaceSurfaceActivity
 } from './workspace-activity-facts-producer'
 
+import { attestFixtureHookContext } from '../../agent-hooks/server/testing/attested-hook-context.test-fixtures'
 const WT_A = 'repo-1::/tmp/a'
 const WT_B = 'repo-1::/tmp/b'
 
@@ -25,6 +26,8 @@ function createProducer(tabs: Record<string, string> = {}) {
   return { producer, surfaces, readSurfaces }
 }
 
+// Fork 6d65165647: terminal-title and relay Claude/Codex status is refused without attestation;
+// these attribution tests use an unprotected agent (gemini) because no assertion is agent-specific.
 function terminalStatus(
   server: AgentHookServer,
   paneKey: string,
@@ -39,7 +42,7 @@ function terminalStatus(
     payload: {
       state,
       prompt: 'task',
-      agentType: 'codex',
+      agentType: 'gemini',
       ...(workingMode ? { workingMode } : {})
     }
   })
@@ -51,7 +54,7 @@ describe('WorkspaceActivityFactsProducer', () => {
   })
 
   it('follows agent status transitions without re-reading any surfaces', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const { producer, readSurfaces } = createProducer()
     const detach = producer.attachAgentStatusStore(server)
     try {
@@ -76,7 +79,7 @@ describe('WorkspaceActivityFactsProducer', () => {
   })
 
   it('keeps the surfaces it last read when only the agent changes', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const { producer, surfaces } = createProducer()
     surfaces.set(WT_A, { ...NONE, terminal: 'live' })
     producer.refreshWorkspace(WT_A)
@@ -96,7 +99,7 @@ describe('WorkspaceActivityFactsProducer', () => {
   })
 
   it('seeds from rows that predate attaching and attributes a pane through its tab', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     terminalStatus(server, PANE_A, WT_B, 'working')
     const { producer } = createProducer({ 'tab-a': WT_A })
     const detach = producer.attachAgentStatusStore(server)
@@ -108,7 +111,7 @@ describe('WorkspaceActivityFactsProducer', () => {
   })
 
   it('re-attributes a pane once its tab becomes known', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const tabs: Record<string, string> = {}
     const { producer } = createProducer(tabs)
     const detach = producer.attachAgentStatusStore(server)
@@ -116,7 +119,7 @@ describe('WorkspaceActivityFactsProducer', () => {
       server.ingestTerminalStatus({
         paneKey: PANE_A,
         tabId: 'tab-a',
-        payload: { state: 'working', prompt: 'task', agentType: 'codex' }
+        payload: { state: 'working', prompt: 'task', agentType: 'gemini' }
       })
       expect(producer.snapshot().facts).toEqual({})
       tabs['tab-a'] = WT_A
@@ -128,7 +131,7 @@ describe('WorkspaceActivityFactsProducer', () => {
   })
 
   it('attributes an SSH pane to the workspace its host reported', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const { producer } = createProducer({ 'tab-a': WT_B })
     const detach = producer.attachAgentStatusStore(server)
     try {
@@ -137,7 +140,7 @@ describe('WorkspaceActivityFactsProducer', () => {
           paneKey: PANE_A,
           tabId: 'tab-a',
           worktreeId: WT_A,
-          payload: { state: 'working', prompt: 'remote', agentType: 'claude' }
+          payload: { state: 'working', prompt: 'remote', agentType: 'gemini' }
         },
         'ssh-conn'
       )
@@ -150,7 +153,7 @@ describe('WorkspaceActivityFactsProducer', () => {
 
   it('drops an agent whose evidence goes stale, on one timer', () => {
     vi.useFakeTimers()
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     const { producer } = createProducer()
     const detach = producer.attachAgentStatusStore(server)
     try {

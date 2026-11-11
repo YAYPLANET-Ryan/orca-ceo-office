@@ -13,6 +13,7 @@ import { RelayAgentHookServer } from '../../../../../../wsl-guest/agent-hook-ser
 import { AgentHookServer } from '../../../agent-hook-server'
 import { buildBody, postHookEvent } from '../../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../../attested-hook-context.test-fixtures'
 // Captured from a completed Codex CLI 0.159.0 /review; session and turn IDs were replaced.
 const reviewRecords = readFileSync(
   new URL('../../../../__fixtures__/codex-review-child-0159.jsonl', import.meta.url),
@@ -37,7 +38,7 @@ describe('Codex turn completion without Stop', () => {
 
   async function startHost(relayed: boolean): Promise<void> {
     directory = mkdtempSync(join(tmpdir(), 'codex-turn-end-'))
-    desktop = new AgentHookServer()
+    desktop = attestFixtureHookContext(new AgentHookServer())
     published = []
     desktop.setListener((status) => published.push(status.hookEventName))
     if (!relayed) {
@@ -151,6 +152,15 @@ describe('Codex turn completion without Stop', () => {
       const failure = { error: { message: 'usage limit' } }
       appendFileSync(rootPath, event({ type: 'task_complete', turn_id: 'root-turn', ...failure }))
       await vi.advanceTimersByTimeAsync(5_000)
+      if (relayed) {
+        // Fork 6d65165647: relayed Codex status is refused without attestation.
+        expect(desktop.getStatusSnapshot()).toEqual([])
+        expect(
+          desktop.getContextIntegrityRejections().remote_context_attestation_unavailable
+        ).toBeGreaterThan(0)
+        expect(published).toEqual([])
+        return
+      }
       expect(desktop.getStatusSnapshot()[0]).toMatchObject({
         state: 'done',
         mainAgent: { state: 'done', outcome: 'failure' }

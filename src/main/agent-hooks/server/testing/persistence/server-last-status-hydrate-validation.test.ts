@@ -14,6 +14,7 @@ import {
   LEAF_2
 } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -83,7 +84,7 @@ describe('Last-status persistence', () => {
       }),
       'utf8'
     )
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({
       env: 'production',
       userDataPath
@@ -104,7 +105,7 @@ describe('Last-status persistence', () => {
   })
 
   it('clearPaneState evicts the entry from the on-disk file', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({
       env: 'production',
       userDataPath
@@ -128,7 +129,7 @@ describe('Last-status persistence', () => {
   })
 
   it('stop() flushes pending debounced writes synchronously', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({
       env: 'production',
       userDataPath

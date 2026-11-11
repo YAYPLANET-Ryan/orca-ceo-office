@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AgentHookServer } from '../../agent-hook-server'
 import type { ClaudeStatusLineRateLimits } from '../../../../../shared/claude-statusline-rate-limits'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 describe('AgentHookServer /statusline/claude', () => {
   let server: AgentHookServer
 
   beforeEach(async () => {
-    server = new AgentHookServer()
+    server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
   })
 
@@ -26,6 +27,7 @@ describe('AgentHookServer /statusline/claude', () => {
     })
   }
 
+  // Fork 6d65165647: /statusline/claude Claude status is refused without attestation.
   it('forwards parsed rate limits to the statusline listener', async () => {
     const events: ClaudeStatusLineRateLimits[] = []
     server.setClaudeStatusLineListener((event) => {
@@ -45,13 +47,10 @@ describe('AgentHookServer /statusline/claude', () => {
     }).toString()
 
     await expect(post(body)).resolves.toMatchObject({ status: 204 })
-    expect(events).toEqual([
-      {
-        configDir: '/home/dev/managed',
-        fiveHour: { used_percentage: 12.5, resets_at: 1738425600 },
-        sevenDay: { used_percentage: 40, resets_at: 1712059200 }
-      }
-    ])
+    expect(events).toEqual([])
+    expect(server.getContextIntegrityRejections()).toEqual({
+      auxiliary_context_attestation_unavailable: 1
+    })
   })
 
   it('rejects posts with a bad token and ignores payloads without rate limits', async () => {

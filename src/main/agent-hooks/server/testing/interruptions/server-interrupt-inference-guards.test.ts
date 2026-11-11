@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, PANE, RUNNING_SHELL } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
@@ -26,12 +27,32 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+// Fork 6d65165647: relayed Claude/Codex status is refused without attestation. The relayed Claude
+// guards below assert that refusal: no row, no Claude background metadata, nothing to infer from.
+function expectRelayedClaudeRefused(server: AgentHookServer, ingested: number, prompt: string) {
+  expect(server.getStatusSnapshot()).toEqual([])
+  expect(server._getStateForTests().claudeRunningNonAgentTaskPaneKeys.has(PANE)).toBe(false)
+  expect(server.getContextIntegrityRejections()).toMatchObject({
+    remote_context_attestation_unavailable: ingested
+  })
+  expect(
+    server.inferInterrupt({
+      paneKey: PANE,
+      baselineUpdatedAt: 0,
+      baselineStateStartedAt: 0,
+      baselinePrompt: prompt,
+      baselineAgentType: 'claude',
+      intent: 'ctrl-c'
+    })
+  ).toBe(false)
+}
+
 describe('AgentHookServer listener replay', () => {
   it('does not infer an interrupt while a subagent child is still working', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       server.ingestRemote(
         {
           paneKey: PANE,
@@ -47,20 +68,9 @@ describe('AgentHookServer listener replay', () => {
         },
         'conn-1'
       )
-      const baseline = server.getStatusSnapshot()[0]
 
       vi.setSystemTime(1_500)
-      const applied = server.inferInterrupt({
-        paneKey: PANE,
-        baselineUpdatedAt: baseline.receivedAt,
-        baselineStateStartedAt: baseline.stateStartedAt,
-        baselinePrompt: 'review loop',
-        baselineAgentType: 'claude',
-        intent: 'ctrl-c'
-      })
-
-      expect(applied).toBe(false)
-      expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+      expectRelayedClaudeRefused(server, 1, 'review loop')
     } finally {
       vi.useRealTimers()
     }
@@ -71,7 +81,7 @@ describe('AgentHookServer listener replay', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       server.ingestRemote(
         {
           paneKey: PANE,
@@ -82,20 +92,9 @@ describe('AgentHookServer listener replay', () => {
         },
         'conn-1'
       )
-      let baseline = server.getStatusSnapshot()[0]
 
       vi.setSystemTime(1_500)
-      expect(
-        server.inferInterrupt({
-          paneKey: PANE,
-          baselineUpdatedAt: baseline.receivedAt,
-          baselineStateStartedAt: baseline.stateStartedAt,
-          baselinePrompt: 'run in background',
-          baselineAgentType: 'claude',
-          intent: 'ctrl-c'
-        })
-      ).toBe(false)
-      expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+      expectRelayedClaudeRefused(server, 1, 'run in background')
 
       vi.setSystemTime(2_000)
       server.ingestRemote(
@@ -108,19 +107,9 @@ describe('AgentHookServer listener replay', () => {
         },
         'conn-1'
       )
-      baseline = server.getStatusSnapshot()[0]
 
       vi.setSystemTime(2_500)
-      expect(
-        server.inferInterrupt({
-          paneKey: PANE,
-          baselineUpdatedAt: baseline.receivedAt,
-          baselineStateStartedAt: baseline.stateStartedAt,
-          baselinePrompt: 'run in background',
-          baselineAgentType: 'claude',
-          intent: 'ctrl-c'
-        })
-      ).toBe(true)
+      expectRelayedClaudeRefused(server, 2, 'run in background')
     } finally {
       vi.useRealTimers()
     }
@@ -130,7 +119,7 @@ describe('AgentHookServer listener replay', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       server.ingestRemote(
         {
           paneKey: PANE,
@@ -146,28 +135,9 @@ describe('AgentHookServer listener replay', () => {
         },
         'conn-1'
       )
-      const baseline = server.getStatusSnapshot()[0]
 
       vi.setSystemTime(1_500)
-      expect(
-        server.inferInterrupt({
-          paneKey: PANE,
-          baselineUpdatedAt: baseline.receivedAt,
-          baselineStateStartedAt: baseline.stateStartedAt,
-          baselinePrompt: 'run in background',
-          baselineAgentType: 'claude',
-          intent: 'ctrl-c'
-        })
-      ).toBe(true)
-      // Cancel the main agent without discarding live shell inventory or marking the working row interrupted.
-      const inferred = server.getStatusSnapshot()[0]
-      expect(inferred).toMatchObject({
-        state: 'working',
-        workingMode: 'monitoring',
-        mainAgent: { state: 'done', outcome: 'cancellation', stateStartedAt: 1_500 }
-      })
-      expect(inferred.interrupted).toBeUndefined()
-      expect(server._getStateForTests().claudeRunningNonAgentTaskPaneKeys.has(PANE)).toBe(true)
+      expectRelayedClaudeRefused(server, 1, 'run in background')
     } finally {
       vi.useRealTimers()
     }
@@ -177,7 +147,7 @@ describe('AgentHookServer listener replay', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       const relayTurn = (prompt: string, startedAt: number): void =>
         server.ingestRemote(
           {
@@ -193,30 +163,14 @@ describe('AgentHookServer listener replay', () => {
           },
           'conn-1'
         )
-      const cancel = (prompt: string): boolean => {
-        const baseline = server.getStatusSnapshot()[0]
-        return server.inferInterrupt({
-          paneKey: PANE,
-          baselineUpdatedAt: baseline.receivedAt,
-          baselineStateStartedAt: baseline.stateStartedAt,
-          baselinePrompt: prompt,
-          baselineAgentType: 'claude',
-          intent: 'ctrl-c'
-        })
-      }
       relayTurn('first', 900)
       vi.setSystemTime(1_500)
-      expect(cancel('first')).toBe(true)
+      expectRelayedClaudeRefused(server, 1, 'first')
 
-      // Relay-owned turns must not inherit the local record's earlier cancellation clock.
       vi.setSystemTime(5_000)
       relayTurn('second', 5_000)
       vi.setSystemTime(6_000)
-      expect(cancel('second')).toBe(true)
-      expect(server.getStatusSnapshot()[0]).toMatchObject({
-        state: 'done',
-        mainAgent: { state: 'done', outcome: 'cancellation', stateStartedAt: 6_000 }
-      })
+      expectRelayedClaudeRefused(server, 2, 'second')
     } finally {
       vi.useRealTimers()
     }
@@ -226,7 +180,7 @@ describe('AgentHookServer listener replay', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       server.ingestRemote(
         {
           paneKey: PANE,
@@ -242,26 +196,9 @@ describe('AgentHookServer listener replay', () => {
         },
         'conn-1'
       )
-      const baseline = server.getStatusSnapshot()[0]
 
       vi.setSystemTime(1_500)
-      expect(
-        server.inferInterrupt({
-          paneKey: PANE,
-          baselineUpdatedAt: baseline.receivedAt,
-          baselineStateStartedAt: baseline.stateStartedAt,
-          baselinePrompt: 'delegate',
-          baselineAgentType: 'claude',
-          intent: 'ctrl-c'
-        })
-      ).toBe(true)
-      // Relayed rows carry their own child evidence; main-agent cancellation must preserve it.
-      expect(server.getStatusSnapshot()[0]).toMatchObject({
-        state: 'working',
-        subagents: [{ id: 'a1', state: 'working' }],
-        mainAgent: { state: 'done', outcome: 'cancellation' }
-      })
-      expect(server.getStatusSnapshot()[0].workingMode).toBeUndefined()
+      expectRelayedClaudeRefused(server, 1, 'delegate')
     } finally {
       vi.useRealTimers()
     }
@@ -271,7 +208,7 @@ describe('AgentHookServer listener replay', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       server.ingestRemote(
         {
           paneKey: PANE,
@@ -288,32 +225,16 @@ describe('AgentHookServer listener replay', () => {
         },
         'conn-1'
       )
-      const baseline = server.getStatusSnapshot()[0]
 
       vi.setSystemTime(1_500)
-      // Ctrl+C at an idle lead's prompt stops none of the child work shown.
-      expect(
-        server.inferInterrupt({
-          paneKey: PANE,
-          baselineUpdatedAt: baseline.receivedAt,
-          baselineStateStartedAt: baseline.stateStartedAt,
-          baselinePrompt: 'run in background',
-          baselineAgentType: 'claude',
-          intent: 'ctrl-c'
-        })
-      ).toBe(false)
-      expect(server.getStatusSnapshot()[0]).toMatchObject({
-        state: 'working',
-        workingMode: 'monitoring',
-        mainAgent: { state: 'done' }
-      })
+      expectRelayedClaudeRefused(server, 1, 'run in background')
     } finally {
       vi.useRealTimers()
     }
   })
 
   it('blocks local HTTP interrupt inference for provider-owned work without exposing transport metadata', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     try {
       const env = server.buildPtyEnv()
@@ -376,75 +297,35 @@ describe('AgentHookServer listener replay', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
-      server.ingestRemote(
-        {
-          paneKey: PANE,
-          tabId: 'tab-1',
-          worktreeId: 'wt-1',
-          isReplay: true,
-          claudeRunningNonAgentTask: true,
-          payload: { state: 'working', prompt: 'stale replay', agentType: 'claude' }
-        },
-        'conn-1'
-      )
-      const baseline = server.getStatusSnapshot()[0]
-
+      const server = attestFixtureHookContext(new AgentHookServer())
+      const relay = (isReplay: boolean, running: boolean): void =>
+        server.ingestRemote(
+          {
+            paneKey: PANE,
+            tabId: 'tab-1',
+            worktreeId: 'wt-1',
+            ...(isReplay ? { isReplay } : {}),
+            claudeRunningNonAgentTask: running,
+            payload: { state: 'working', prompt: 'stale replay', agentType: 'claude' }
+          },
+          'conn-1'
+        )
+      relay(true, true)
       vi.setSystemTime(1_500)
-      expect(
-        server.inferInterrupt({
-          paneKey: PANE,
-          baselineUpdatedAt: baseline.receivedAt,
-          baselineStateStartedAt: baseline.stateStartedAt,
-          baselinePrompt: 'stale replay',
-          baselineAgentType: 'claude',
-          intent: 'ctrl-c'
-        })
-      ).toBe(false)
+      expectRelayedClaudeRefused(server, 1, 'stale replay')
 
-      vi.setSystemTime(1_500)
-      server.ingestRemote(
-        {
-          paneKey: PANE,
-          tabId: 'tab-1',
-          worktreeId: 'wt-1',
-          claudeRunningNonAgentTask: false,
-          payload: { state: 'working', prompt: 'stale replay', agentType: 'claude' }
-        },
-        'conn-1'
-      )
+      relay(false, false)
       vi.setSystemTime(2_000)
-      server.ingestRemote(
-        {
-          paneKey: PANE,
-          tabId: 'tab-1',
-          worktreeId: 'wt-1',
-          isReplay: true,
-          claudeRunningNonAgentTask: true,
-          payload: { state: 'working', prompt: 'stale replay', agentType: 'claude' }
-        },
-        'conn-1'
-      )
-      const liveBaseline = server.getStatusSnapshot()[0]
-
+      relay(true, true)
       vi.setSystemTime(2_500)
-      expect(
-        server.inferInterrupt({
-          paneKey: PANE,
-          baselineUpdatedAt: liveBaseline.receivedAt,
-          baselineStateStartedAt: liveBaseline.stateStartedAt,
-          baselinePrompt: 'stale replay',
-          baselineAgentType: 'claude',
-          intent: 'ctrl-c'
-        })
-      ).toBe(true)
+      expectRelayedClaudeRefused(server, 3, 'stale replay')
     } finally {
       vi.useRealTimers()
     }
   })
 
   it('does not apply Claude background metadata from a rejected remote status', () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.ingestRemote(
       {
         paneKey: PANE,
@@ -459,8 +340,6 @@ describe('AgentHookServer listener replay', () => {
       },
       'conn-1'
     )
-    const waiting = server.getStatusSnapshot()[0]
-
     server.ingestRemote(
       {
         paneKey: PANE,
@@ -476,15 +355,14 @@ describe('AgentHookServer listener replay', () => {
       'conn-1'
     )
 
-    expect(server.getStatusSnapshot()[0]).toEqual(waiting)
-    expect(server._getStateForTests().claudeRunningNonAgentTaskPaneKeys.has(PANE)).toBe(true)
+    expectRelayedClaudeRefused(server, 2, 'approve shell')
   })
 
   it('preserves an inferred interrupted row when OpenCode immediately reports SessionIdle', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       const listener = vi.fn()
       server.setListener(listener)
       server.ingestRemote(
@@ -550,7 +428,7 @@ describe('AgentHookServer listener replay', () => {
       vi.useFakeTimers()
       vi.setSystemTime(1_000)
       try {
-        const server = new AgentHookServer()
+        const server = attestFixtureHookContext(new AgentHookServer())
         server.ingestRemote(
           {
             paneKey: PANE,
@@ -592,7 +470,7 @@ describe('AgentHookServer listener replay', () => {
       vi.useFakeTimers()
       vi.setSystemTime(1_000)
       try {
-        const server = new AgentHookServer()
+        const server = attestFixtureHookContext(new AgentHookServer())
         server.ingestRemote(
           {
             paneKey: PANE,

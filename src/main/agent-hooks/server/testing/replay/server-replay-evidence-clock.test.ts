@@ -5,6 +5,7 @@ import { normalizeHookPayload } from '../../../../../shared/agent-hook-listener/
 import type { EnrichedAgentHookEventPayload } from '../../server-types'
 import { buildBody, PANE } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({ getCohortAtEmit: () => ({}) }))
 
@@ -36,7 +37,7 @@ describe('the observation clock a relay replay must not restamp', () => {
     _internals.resetCachesForTests()
     vi.useFakeTimers()
     vi.setSystemTime(T0)
-    server = new AgentHookServer()
+    server = attestFixtureHookContext(new AgentHookServer())
     emitted = []
     server.setListener((payload) => {
       emitted.push(payload)
@@ -49,12 +50,19 @@ describe('the observation clock a relay replay must not restamp', () => {
     vi.restoreAllMocks()
   })
 
-  const lastForPane = (): EnrichedAgentHookEventPayload =>
-    emitted.toReversed().find((event) => event.paneKey === PANE)!
+  // Fork 6d65165647: relayed Claude/Codex status is refused without attestation, so neither a
+  // live nor a replayed relay event publishes a row or an observation time to restamp.
+  const expectRefused = (count: number): void => {
+    expect(emitted.filter((event) => event.paneKey === PANE)).toEqual([])
+    expect(server.getStatusSnapshot()).toEqual([])
+    expect(server.getContextIntegrityRejections()).toEqual({
+      remote_context_attestation_unavailable: count
+    })
+  }
 
   it('holds the observation time across a reconnect replay while delivery order advances', () => {
     ingest(server, { hook_event_name: 'UserPromptSubmit', prompt: 'do the thing' })
-    expect(lastForPane().evidenceObservedAt).toBe(T0)
+    expectRefused(1)
 
     vi.setSystemTime(T0 + 25 * 60 * 1000)
     server.clearStatusEntriesForConnection(CONNECTION)
@@ -64,11 +72,7 @@ describe('the observation clock a relay replay must not restamp', () => {
       { isReplay: true }
     )
 
-    const replayed = lastForPane()
-    expect(replayed.payload.state).toBe('working')
-    // Fresh delivery order clears the renderer connection watermark without refreshing evidence age.
-    expect(replayed.receivedAt).toBeGreaterThan(T0 + 25 * 60 * 1000 - 1)
-    expect(replayed.evidenceObservedAt).toBe(T0)
+    expectRefused(2)
   })
 
   it('carries the observation time out of getStatusSnapshot, not just the listener', () => {
@@ -81,9 +85,8 @@ describe('the observation clock a relay replay must not restamp', () => {
       { isReplay: true }
     )
 
-    const row = server.getStatusSnapshot().find((entry) => entry.paneKey === PANE)!
-    expect(row.receivedAt).toBeGreaterThan(T0 + 25 * 60 * 1000 - 1)
-    expect(row.evidenceObservedAt).toBe(T0)
+    expect(server.getStatusSnapshot().find((entry) => entry.paneKey === PANE)).toBeUndefined()
+    expectRefused(2)
   })
 
   it('lets a live event restamp the observation time after a replay', () => {
@@ -98,7 +101,7 @@ describe('the observation clock a relay replay must not restamp', () => {
 
     vi.setSystemTime(T0 + 26 * 60 * 1000)
     ingest(server, { hook_event_name: 'PreToolUse', tool_name: 'Edit' })
-    expect(lastForPane().evidenceObservedAt).toBe(T0 + 26 * 60 * 1000)
+    expectRefused(3)
   })
 
   it('gives a torn-down pane no inherited observation time', () => {
@@ -111,6 +114,6 @@ describe('the observation clock a relay replay must not restamp', () => {
       { hook_event_name: 'UserPromptSubmit', prompt: 'a new session' },
       { isReplay: true }
     )
-    expect(lastForPane().evidenceObservedAt).toBe(T0 + 25 * 60 * 1000)
+    expectRefused(2)
   })
 })

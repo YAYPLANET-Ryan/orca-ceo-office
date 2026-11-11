@@ -16,6 +16,7 @@ import '../../../shared/sidebar-list/stamp-order'
 import { SortStampsProducer, type StoredTierEvidence } from './sort-stamps-producer'
 import type { SortStampsStore } from './sort-stamp-records'
 
+import { attestFixtureHookContext } from '../../agent-hooks/server/testing/attested-hook-context.test-fixtures'
 vi.mock('../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../telemetry/cohort-classifier', () => ({ getCohortAtEmit: vi.fn(() => ({})) }))
 
@@ -91,7 +92,7 @@ function createHarness() {
     now: () => Date.now()
   })
   producer.attachAgentTransitions(detector)
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   return {
     producer,
     detector,
@@ -129,6 +130,8 @@ function advance(ms: number): number {
   return Date.now()
 }
 
+// Fork 6d65165647: terminal-title Claude/Codex status is refused without attestation; these
+// stamping tests use an unprotected agent (gemini) because no assertion is agent-specific.
 function hook(
   server: AgentHookServer,
   state: 'working' | 'blocked' | 'waiting' | 'done',
@@ -138,7 +141,7 @@ function hook(
     paneKey: PANE,
     tabId: 'tab-a',
     worktreeId,
-    payload: { state, prompt: 'task', agentType: 'codex' }
+    payload: { state, prompt: 'task', agentType: 'gemini' }
   })
 }
 
@@ -147,7 +150,7 @@ function ingestRow(server: AgentHookServer, row: AgentTransitionStep['row']): vo
     paneKey: PANE,
     tabId: 'tab-a',
     worktreeId: WT,
-    payload: { ...row, prompt: 'task', agentType: 'codex' }
+    payload: { ...row, prompt: 'task', agentType: 'gemini' }
   })
 }
 
@@ -303,7 +306,7 @@ describe('SortStampsProducer: terminal events', () => {
     h.server.ingestTerminalStatus({
       paneKey: PANE,
       tabId: 'tab-a',
-      payload: { state: 'working', prompt: 'task', agentType: 'codex' }
+      payload: { state: 'working', prompt: 'task', agentType: 'gemini' }
     })
     expect(h.meta.get(WT)?.smartTier).toBeUndefined()
   })
@@ -314,7 +317,7 @@ describe('SortStampsProducer: terminal events', () => {
       paneKey: PANE,
       tabId: 'tab-a',
       worktreeId: FOLDER,
-      payload: { state: 'working', prompt: 'task', agentType: 'codex' }
+      payload: { state: 'working', prompt: 'task', agentType: 'gemini' }
     })
     h.sideEffects([title('⠋ Codex working')], { pane: PANE })
     expect(h.meta.get(WT)?.smartTier).toBe('working')
@@ -368,7 +371,7 @@ describe('SortStampsProducer: startup reconcile', () => {
       paneKey: PANE,
       tabId: 'tab-a',
       worktreeId: FOLDER,
-      payload: { state: 'working', prompt: 'task', agentType: 'codex' }
+      payload: { state: 'working', prompt: 'task', agentType: 'gemini' }
     })
     h.attach(h.server)
     const writes = h.writes.length
@@ -386,12 +389,12 @@ describe('SortStampsProducer: startup reconcile', () => {
   it('seeds hook rows hydrated after attach, so they are not taken for new events', async () => {
     const h = createHarness()
     // Hydration fills the store without a row mutation: the view shows rows the producer never heard of.
-    const source = new AgentHookServer()
+    const source = attestFixtureHookContext(new AgentHookServer())
     source.ingestTerminalStatus({
       paneKey: PANE,
       tabId: 'tab-a',
       worktreeId: WT,
-      payload: { state: 'working', prompt: 'task', agentType: 'codex' }
+      payload: { state: 'working', prompt: 'task', agentType: 'gemini' }
     })
     let hydrated = false
     const view: AgentStatusStoreView = {
@@ -417,7 +420,7 @@ describe('SortStampsProducer: a read Done beside a Working pane', () => {
       paneKey: OTHER_PANE,
       tabId: 'tab-b',
       worktreeId: WT,
-      payload: { state, prompt: 'task', agentType: 'codex' }
+      payload: { state, prompt: 'task', agentType: 'gemini' }
     })
   }
 

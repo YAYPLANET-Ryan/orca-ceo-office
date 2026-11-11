@@ -7,6 +7,7 @@ import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { makePaneKey } from '../../../../../shared/workspace-layout/stable-pane-id'
 import { LEAF_1, LEAF_2, LEAF_3, LEAF_4, LEAF_5, recentTs } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 const REMOVED = 'repo-1::/workspace/removed'
 const KEPT = 'repo-1::/workspace/kept'
 const LOCAL_PANE = makePaneKey('tab-local', LEAF_1)
@@ -24,10 +25,13 @@ function row(paneKey: string, worktreeId: string, connectionId: string | null) {
     connectionId,
     receivedAt,
     stateStartedAt: receivedAt,
-    payload: { state: 'working', prompt: 'stranded', agentType: 'codex' }
+    payload: { state: 'working', prompt: 'stranded', agentType: 'gemini' }
   }
 }
 
+// Fork 6d65165647: remote-relay and terminal-title Claude/Codex status is refused without
+// attestation; removed-worktree retirement is not provider-specific, so an unprotected agent
+// reports it.
 describe('AgentHookServer removed-worktree retirement', () => {
   let userDataPath: string
   const lastStatusPath = () => join(userDataPath, 'agent-hooks', 'last-status.json')
@@ -56,7 +60,7 @@ describe('AgentHookServer removed-worktree retirement', () => {
   })
 
   it('retires only the removing host rows and commitments, then persists the pruned map', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       // An SSH commitment recorded this session outlives its row across a disconnect clear.
@@ -66,7 +70,7 @@ describe('AgentHookServer removed-worktree retirement', () => {
           tabId: 'tab-ssh-idle',
           worktreeId: REMOVED,
           launchToken: 'idle-launch',
-          payload: { state: 'working', prompt: 'idle', agentType: 'codex' }
+          payload: { state: 'working', prompt: 'idle', agentType: 'gemini' }
         },
         'idle@box'
       )
@@ -100,12 +104,12 @@ describe('AgentHookServer removed-worktree retirement', () => {
   })
 
   it('fences only the retired pane, so its kept tab still reports a new agent', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production', userDataPath })
     try {
       server.dropStatusEntriesForRemovedWorktree(REMOVED, 'local')
       const newPane = makePaneKey('tab-local', '66666666-6666-4666-8666-666666666666')
-      const done = { state: 'done', prompt: 'late', agentType: 'codex' } as const
+      const done = { state: 'done', prompt: 'late', agentType: 'gemini' } as const
       server.ingestTerminalStatus({ paneKey: LOCAL_PANE, connectionId: null, payload: done })
       server.ingestTerminalStatus({ paneKey: newPane, connectionId: null, payload: done })
 
@@ -128,11 +132,11 @@ describe('AgentHookServer removed-worktree retirement', () => {
   ] as const)(
     'decides a reused pane by its occupant: $occupant',
     async ({ sshWorktree, localWorktree, host }) => {
-      const server = new AgentHookServer()
+      const server = attestFixtureHookContext(new AgentHookServer())
       await server.start({ env: 'production', userDataPath })
       try {
         const pane = makePaneKey('tab-reused', '77777777-7777-4777-8777-777777777777')
-        const working = { state: 'working', prompt: 'live', agentType: 'codex' } as const
+        const working = { state: 'working', prompt: 'live', agentType: 'gemini' } as const
         const reportLocally = (state: 'working' | 'done') =>
           server.ingestTerminalStatus({
             paneKey: pane,

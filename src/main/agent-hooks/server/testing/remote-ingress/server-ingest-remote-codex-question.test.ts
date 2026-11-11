@@ -8,6 +8,7 @@ import { buildRelayHookEnvelope } from '../../../../../wsl-guest/agent-hook-enve
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { PANE, buildBody } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({
   getCohortAtEmit: () => ({ nth_repo_added: 2 })
@@ -34,7 +35,7 @@ afterEach(() => {
 
 function remoteCodex() {
   const host = createHookListenerState()
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   return {
     server,
     report(payload: Record<string, unknown>, legacy = false) {
@@ -61,53 +62,37 @@ function remoteCodex() {
   }
 }
 
+// Fork 6d65165647: relayed Claude/Codex status is refused without attestation.
+const REMOTE_REFUSAL = 'remote_context_attestation_unavailable'
+
 describe('remote Codex questions', () => {
   it.each([false, true])(
     'keeps a host question waiting until its answer (legacy relay: %s)',
     (legacy) => {
       const pane = remoteCodex()
-      expect(
-        pane.report(
-          { hook_event_name: 'UserPromptSubmit', prompt: 'Update this workspace' },
-          legacy
-        )
-      ).toMatchObject({ state: 'working', mainAgent: { state: 'working' } })
-
-      const question = pane.report(
+      const hooks = [
+        { hook_event_name: 'UserPromptSubmit', prompt: 'Update this workspace' },
         {
           hook_event_name: 'PreToolUse',
           tool_name: 'request_user_input',
           tool_input: QUESTIONS,
           tool_use_id: 'question-1'
         },
-        legacy
-      )
-      expect(question).toMatchObject({
-        state: 'waiting',
-        mainAgent: { state: 'waiting' },
-        toolName: 'request_user_input',
-        interactivePrompt: JSON.stringify(QUESTIONS),
-        connectionId: 'wsl:Ubuntu',
-        worktreeId: 'folder-workspace'
-      })
-
-      expect(
-        pane.report(
-          {
-            hook_event_name: 'PostToolUse',
-            tool_name: 'request_user_input',
-            tool_input: QUESTIONS,
-            tool_response: '{"answers":{"scope":{"answers":["Current workspace"]}}}',
-            tool_use_id: 'question-1'
-          },
-          legacy
-        )
-      ).toMatchObject({ state: 'working', mainAgent: { state: 'working' } })
-      expect(pane.server.getStatusSnapshotForPane(PANE)[0]?.interactivePrompt).toBeUndefined()
-
-      expect(pane.report({ hook_event_name: 'Stop' }, legacy)).toMatchObject({
-        state: 'done',
-        mainAgent: { state: 'done' }
+        {
+          hook_event_name: 'PostToolUse',
+          tool_name: 'request_user_input',
+          tool_input: QUESTIONS,
+          tool_response: '{"answers":{"scope":{"answers":["Current workspace"]}}}',
+          tool_use_id: 'question-1'
+        },
+        { hook_event_name: 'Stop' }
+      ]
+      for (const hook of hooks) {
+        expect(pane.report(hook, legacy)).toBeUndefined()
+      }
+      expect(pane.server.getStatusSnapshot()).toEqual([])
+      expect(pane.server.getContextIntegrityRejections()).toEqual({
+        [REMOTE_REFUSAL]: hooks.length
       })
     }
   )
@@ -123,8 +108,10 @@ describe('remote Codex questions', () => {
       tool_input: QUESTIONS
     })
 
-    expect(pane.report({ hook_event_name: 'PreToolUse', tool_name: 'exec_command' })).toMatchObject(
-      { state: 'waiting', mainAgent: { state: 'working' } }
-    )
+    expect(
+      pane.report({ hook_event_name: 'PreToolUse', tool_name: 'exec_command' })
+    ).toBeUndefined()
+    expect(pane.server.getStatusSnapshot()).toEqual([])
+    expect(pane.server.getContextIntegrityRejections()).toEqual({ [REMOTE_REFUSAL]: 4 })
   })
 })

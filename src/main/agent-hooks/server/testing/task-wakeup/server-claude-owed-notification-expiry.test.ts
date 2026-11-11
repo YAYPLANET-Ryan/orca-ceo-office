@@ -4,6 +4,7 @@ import { CLAUDE_OWED_TASK_NOTIFICATION_LEASE_MS } from '../../../../../shared/ag
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, PANE, postHookEvent, RUNNING_SHELL } from '../server.test-fixtures'
 
+import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../../../telemetry/cohort-classifier', () => ({
   getCohortAtEmit: vi.fn(() => ({ nth_repo_added: 2 }))
@@ -28,7 +29,7 @@ afterEach(() => {
 
 describe('Claude owed task notification expiry on the hook server', () => {
   it('settles a pane whose launched shell vanished without a notification', async () => {
-    const server = new AgentHookServer()
+    const server = attestFixtureHookContext(new AgentHookServer())
     await server.start({ env: 'production' })
     const states: string[] = []
     server.setListener((event) => states.push(event.payload.state))
@@ -85,7 +86,7 @@ describe('Claude owed task notification expiry on the hook server', () => {
 const OWNER = 4242
 
 async function heldByAnOwedShell() {
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   await server.start({ env: 'production' })
   const agentProcess = (pid: number) =>
     JSON.stringify({ pid, platform: 'darwin', startTime: 'Fri Oct  2 12:00:00 2026' })

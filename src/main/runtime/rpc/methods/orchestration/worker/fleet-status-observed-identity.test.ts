@@ -17,6 +17,7 @@ import {
 
 import { projectFleetWorkerPage } from './worker-observation'
 
+import { attestFixtureHookContext } from '../../../../../agent-hooks/server/testing/attested-hook-context.test-fixtures'
 /** Capture hook identity at ingest; reminting cached observations during fleet reads could falsely match a new occupant's incarnation. Replay one row across rebind to catch that drift. */
 const PANE_KEY = 'tab-observed:11111111-1111-4111-8111-111111111111'
 const TERMINAL_HANDLE = 'term_observed'
@@ -46,7 +47,7 @@ function createWorld(): ObservedWorld {
       return dispatchId ? ({ dispatchId } as AgentStatusOrchestrationContext) : undefined
     }
   }
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   const observed = new AgentStatusObservedPaneIdentities()
   server.subscribeEnrichedStatus((entry) =>
     recordObservedAgentStatusPaneIdentity(observed, entry, identity)
@@ -70,7 +71,9 @@ function createWorld(): ObservedWorld {
       server.ingestTerminalStatus({
         paneKey,
         connectionId: null,
-        payload: { state, prompt: `turn ${state}`, agentType: 'claude' }
+        // Fork 6d65165647: terminal-title Claude/Codex status is refused without attestation; the
+        // identity tests use an unprotected agent (gemini) because none of them is agent-specific.
+        payload: { state, prompt: `turn ${state}`, agentType: 'gemini' }
       }),
     runtime: {
       getOrchestrationFleetAgentStatusSnapshot: () =>

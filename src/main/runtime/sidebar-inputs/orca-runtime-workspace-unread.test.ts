@@ -30,6 +30,9 @@ import {
 import type { WorktreeMeta } from '../../../shared/worktree/meta-types'
 import type { FolderWorkspace } from '../../../shared/folder-workspaces/folder-workspace-types'
 
+import { attestFixtureHookContext } from '../../agent-hooks/server/testing/attested-hook-context.test-fixtures'
+// Fork 6d65165647: terminal-title Claude/Codex status is refused without attestation; this
+// suite uses an unprotected agent (gemini) because no assertion is agent-specific.
 vi.mock('../../../shared/sidebar-inputs-switch', () => ({ ORCA_SIDEBAR_INPUTS_IS_MAIN: true }))
 
 const WT = 'repo-1::/tmp/worktree-a'
@@ -117,7 +120,7 @@ function createHeadlessHost() {
       }
     ]
   })
-  const server = new AgentHookServer()
+  const server = attestFixtureHookContext(new AgentHookServer())
   runtime.attachAgentStatusStore(server)
   const dispatcher = new RpcDispatcher({
     runtime,
@@ -131,7 +134,7 @@ function createHeadlessHost() {
         tabId: 'tab-1',
         worktreeId,
         ...(connectionId ? { connectionId } : {}),
-        payload: { state, prompt: 'task', agentType: 'claude' }
+        payload: { state, prompt: 'task', agentType: 'gemini' }
       })
     }
   }
