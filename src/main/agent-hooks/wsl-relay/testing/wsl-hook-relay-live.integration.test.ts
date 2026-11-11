@@ -64,7 +64,7 @@ describe.skipIf(process.platform === 'win32')(
       rmSync(fakeHome, { recursive: true, force: true })
     })
 
-    it('delivers a Claude hook POST from the live relay into ingestRemote and installs guest hooks', async () => {
+    it('carries a Claude hook POST from the live relay to a refused ingestRemote and installs guest hooks', async () => {
       fakeHome = mkdtempSync(join('/tmp', 'wsl-live-home-'))
       // Guest detection runs `claude --version`; stub it so the relay never runs the host's real CLI.
       const agentBin = join(fakeHome, 'agent-bin')
@@ -197,23 +197,27 @@ describe.skipIf(process.platform === 'win32')(
         prompt: 'live roundtrip'
       })
       expect(promptRes.status).toBe(204)
-      await vi.waitFor(() => expect(events.length).toBeGreaterThan(0), { timeout: 10_000 })
-      expect(events[0].paneKey).toBe(paneKey)
-      expect(events[0].connectionId).toBe('wsl:LiveDistro')
-      const working = events[0].payload as { state: string; prompt: string; agentType: string }
-      expect(working.state).toBe('working')
-      expect(working.prompt).toBe('live roundtrip')
-      expect(working.agentType).toBe('claude')
+      // Fork 6d65165647: relayed Claude/Codex status is refused without attestation, so the
+      // live chain is proved by the host recording the relayed hook's refusal, not by a row.
+      await vi.waitFor(
+        () =>
+          expect(
+            server.getContextIntegrityRejections().remote_context_attestation_unavailable
+          ).toBe(1),
+        { timeout: 10_000 }
+      )
 
       const stopRes = await postClaude({ hook_event_name: 'Stop' })
       expect(stopRes.status).toBe(204)
       await vi.waitFor(
-        () => {
-          const done = events.find((e) => (e.payload as { state?: string }).state === 'done')
-          expect(done).toBeTruthy()
-        },
+        () =>
+          expect(
+            server.getContextIntegrityRejections().remote_context_attestation_unavailable
+          ).toBe(2),
         { timeout: 10_000 }
       )
+      expect(events).toEqual([])
+      expect(server.getStatusSnapshotForPane(paneKey)).toEqual([])
 
       // Link death must schedule recovery before later hook events disappear into a dead mux.
       child?.kill()
