@@ -9,8 +9,6 @@ import {
   createTranscriptPane,
   TRANSCRIPT_PANE_PTY_ID
 } from '../../../../runtime/orca-runtime-tests/agent-transcript-pane-test-harness'
-import { launchTokenHash } from '../../../../../shared/agent-hook-listener/transport/agent-hook-spool'
-import type { HookContextSnapshotReader } from '../../hook-context-snapshot'
 import { buildBody, PANE, postHookEvent } from '../server.test-fixtures'
 import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 
@@ -47,17 +45,11 @@ afterEach(() => vi.useRealTimers())
 const REMOTE_REFUSAL = 'remote_context_attestation_unavailable'
 
 async function host(remote: boolean, launchToken?: string) {
-  const desktop = attestFixtureHookContext(new AgentHookServer())
-  if (launchToken !== undefined) {
-    // The transcript pane binds its own launch token; attest the hook's PTY with that token.
-    const internals = desktop as unknown as { readHookContextSnapshot: HookContextSnapshotReader }
-    const fixtureReader = internals.readHookContextSnapshot
-    const tokenHash = launchTokenHash(launchToken)
-    desktop.setHookContextSnapshotReader(async (envelope) => {
-      const snapshot = await fixtureReader(envelope)
-      return snapshot && tokenHash ? { ...snapshot, launchTokenHash: tokenHash } : snapshot
-    })
-  }
+  // The transcript pane binds its own launch token; attest the hook's PTY with that token.
+  const desktop = attestFixtureHookContext(
+    new AgentHookServer(),
+    launchToken === undefined ? {} : { launchToken }
+  )
   const dir = mkdtempSync(join(tmpdir(), 'orca-task-wakeup-'))
   const relay = remote
     ? new RelayAgentHookServer({

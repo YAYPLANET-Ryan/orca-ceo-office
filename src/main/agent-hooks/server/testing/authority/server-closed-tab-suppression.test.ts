@@ -4,20 +4,12 @@ import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { CLOSED_AGENT_STATUS_TAB_IDS_MAX } from '../../server-constants'
 import { makePaneKey } from '../../../../../shared/workspace-layout/stable-pane-id'
 import { buildBody, PANE, LEAF_2, LEAF_3 } from '../server.test-fixtures'
-import { launchTokenHash } from '../../../../../shared/agent-hook-listener/transport/agent-hook-spool'
-import type { HookContextSnapshotReader } from '../../hook-context-snapshot'
 
 import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 
 // Fork 6d65165647: a hook's launch token is admitted only when the pane's PTY exported it.
 function reportPtyLaunchToken(server: AgentHookServer, launchToken: string): AgentHookServer {
-  const fixtureRead = (server as unknown as { readHookContextSnapshot: HookContextSnapshotReader })
-    .readHookContextSnapshot
-  server.setHookContextSnapshotReader(async (envelope) => {
-    const snapshot = await fixtureRead(envelope)
-    return snapshot && { ...snapshot, launchTokenHash: launchTokenHash(launchToken) ?? '' }
-  })
-  return server
+  return attestFixtureHookContext(server, { launchToken })
 }
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),

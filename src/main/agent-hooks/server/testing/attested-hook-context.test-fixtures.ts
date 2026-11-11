@@ -21,8 +21,13 @@ export function isAttestedFixtureServer(server: AgentHookServer): boolean {
 }
 
 type AttestOptions = {
-  /** Keep a root evidence reader the suite installed; the harness only binds its verdict. */
-  keepRootEvidence?: boolean
+  /**
+   * The suite's own root evidence reader; the harness only binds a 'root' verdict to the PTY
+   * incarnation. `null` installs none. Omitted, every hook process reads as the pane's root.
+   */
+  rootEvidence?: HookRootEvidenceReader | null
+  /** The launch token the pane's PTY exported, when a suite launches with its own token. */
+  launchToken?: string | (() => string)
   incarnation?: string
 }
 
@@ -32,8 +37,12 @@ export function attestFixtureHookContext<T extends AgentHookServer>(
   options: AttestOptions = {}
 ): T {
   const incarnation = options.incarnation ?? FIXTURE_INCARNATION
-  const tokenHash = launchTokenHash(FIXTURE_LAUNCH_TOKEN)
+  const ptyLaunchToken = (): string =>
+    typeof options.launchToken === 'function'
+      ? options.launchToken()
+      : (options.launchToken ?? FIXTURE_LAUNCH_TOKEN)
   server.setHookContextSnapshotReader(async (envelope): Promise<HookContextSnapshot | null> => {
+    const tokenHash = launchTokenHash(ptyLaunchToken())
     if (!tokenHash || !envelope.paneKey || !envelope.worktreeId) {
       return null
     }
@@ -48,16 +57,13 @@ export function attestFixtureHookContext<T extends AgentHookServer>(
       reportedCwd: FIXTURE_CWD
     }
   })
-  const internals = server as unknown as { readHookRootEvidence?: HookRootEvidenceReader }
-  if (options.keepRootEvidence) {
-    const suiteReader = internals.readHookRootEvidence
-    if (suiteReader) {
-      server.setHookRootEvidenceReader(async (request) => {
-        const evidence = await suiteReader(request)
-        return evidence?.verdict === 'root' ? { ...evidence, binding: incarnation } : evidence
-      })
-    }
-  } else {
+  const suiteReader = options.rootEvidence
+  if (suiteReader) {
+    server.setHookRootEvidenceReader(async (request) => {
+      const evidence = await suiteReader(request)
+      return evidence?.verdict === 'root' ? { ...evidence, binding: incarnation } : evidence
+    })
+  } else if (suiteReader === undefined) {
     server.setHookRootEvidenceReader(async (request) => ({
       verdict: 'root',
       binding: incarnation,

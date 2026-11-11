@@ -136,14 +136,15 @@ export function launchServer(
   )
   const server = new RootTestServer()
   servers.push(server)
-  if (options.reader !== false) {
-    server.setHookRootEvidenceReader((request) =>
-      readHookRootEvidence(request, io).finally(() => {
-        answered++
-      })
-    )
-  }
-  attestFixtureHookContext(server, { keepRootEvidence: true })
+  attestFixtureHookContext(server, {
+    rootEvidence:
+      options.reader === false
+        ? null
+        : (request) =>
+            readHookRootEvidence(request, io).finally(() => {
+              answered++
+            })
+  })
   const start =
     options.start ??
     ((target) => target.start({ env: 'production', ...(userDataPath ? { userDataPath } : {}) }))

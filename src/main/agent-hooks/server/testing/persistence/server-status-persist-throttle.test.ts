@@ -5,8 +5,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { buildBody, PANE, postHookEvent } from '../server.test-fixtures'
-import { launchTokenHash } from '../../../../../shared/agent-hook-listener/transport/agent-hook-spool'
-import type { HookContextSnapshotReader } from '../../hook-context-snapshot'
 
 import {
   attestFixtureHookContext,
@@ -24,16 +22,8 @@ describe('saved agent status cadence', () => {
 
   // Fork 6d65165647: a new launch token is admitted only when the pane's PTY exported it, so the
   // fixture PTY reports the token of its latest launch.
-  const followPtyLaunchToken = (target: AgentHookServer): AgentHookServer => {
-    const fixtureRead = (
-      target as unknown as { readHookContextSnapshot: HookContextSnapshotReader }
-    ).readHookContextSnapshot
-    target.setHookContextSnapshotReader(async (envelope) => {
-      const snapshot = await fixtureRead(envelope)
-      return snapshot && { ...snapshot, launchTokenHash: launchTokenHash(ptyLaunchToken) ?? '' }
-    })
-    return target
-  }
+  const followPtyLaunchToken = (target: AgentHookServer): AgentHookServer =>
+    attestFixtureHookContext(target, { launchToken: () => ptyLaunchToken })
 
   const lastStatusPath = (): string => join(userDataPath, 'agent-hooks', 'last-status.json')
   const readPrompt = (): unknown =>

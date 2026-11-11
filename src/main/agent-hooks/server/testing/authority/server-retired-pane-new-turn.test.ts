@@ -99,7 +99,9 @@ describe("retired pane un-retires on each provider's own new-turn event", () => 
   })
 
   it.each(REFUSED_REMOTE_SOURCES)('%s', (source) => {
-    const server = relayToRetiredPane(source, NEW_TURN_EVENT[source] as string)
+    const hookEventName = NEW_TURN_EVENT[source]
+    expect(hookEventName).toEqual(expect.any(String))
+    const server = relayToRetiredPane(source, String(hookEventName))
     expect(server.getStatusSnapshot().some((entry) => entry.paneKey === PANE)).toBe(false)
     expect(server.getContextIntegrityRejections()).toMatchObject({
       remote_context_attestation_unavailable: 1

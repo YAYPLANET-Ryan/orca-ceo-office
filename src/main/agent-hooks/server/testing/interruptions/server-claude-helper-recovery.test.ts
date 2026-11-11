@@ -11,8 +11,6 @@ import { ClaudeHelperKillPoller } from '../../../../../shared/agent-hook-listene
 import '../../../../../shared/agent-hook-listener/providers/claude-transcript-decoder'
 import * as cursor from '../../../../../shared/agent-hook-listener/providers/claude-transcript-cursor'
 import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
-import { launchTokenHash } from '../../../../../shared/agent-hook-listener/transport/agent-hook-spool'
-import type { HookContextSnapshotReader } from '../../hook-context-snapshot'
 import '../../../../../shared/agent-hook-listener/transcripts/agent-transcript-poll-scheduler'
 
 // Complete captured lifecycle records, with runtime replay seeded by real persisted HTTP state.
@@ -79,15 +77,7 @@ const hooks = [
 
 // These hooks come from a PTY launched with the 'same-owner' token; attest that PTY.
 function attestSameOwner(server: AgentHookServer): AgentHookServer {
-  attestFixtureHookContext(server)
-  const internals = server as unknown as { readHookContextSnapshot: HookContextSnapshotReader }
-  const fixtureReader = internals.readHookContextSnapshot
-  const tokenHash = launchTokenHash('same-owner')
-  server.setHookContextSnapshotReader(async (envelope) => {
-    const snapshot = await fixtureReader(envelope)
-    return snapshot && tokenHash ? { ...snapshot, launchTokenHash: tokenHash } : snapshot
-  })
-  return server
+  return attestFixtureHookContext(server, { launchToken: 'same-owner' })
 }
 
 // Fork 6d65165647: relayed Claude/Codex status is refused without attestation. The relay-http and
