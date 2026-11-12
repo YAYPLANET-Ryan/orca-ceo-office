@@ -99,14 +99,19 @@ export function createAgentStatusRecoveryActions(
           return s
         }
         return {
-          sleepingAgentSessionsByPaneKey: {
-            ...s.sleepingAgentSessionsByPaneKey,
-            [paneKey]: {
-              ...record,
-              capturedAt: Math.max(record.capturedAt, exitedAt),
-              requiresManualResume: true
-            }
-          }
+          sleepingAgentSessionsByPaneKey: replaceRecordEntries<SleepingAgentSessionRecord>(
+            s.sleepingAgentSessionsByPaneKey,
+            [
+              [
+                paneKey,
+                {
+                  ...record,
+                  capturedAt: Math.max(record.capturedAt, exitedAt),
+                  requiresManualResume: true
+                }
+              ]
+            ]
+          )
         }
       })
     },
