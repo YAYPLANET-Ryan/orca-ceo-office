@@ -23,11 +23,16 @@ it('keeps byte-compared artifacts and source LF in an autocrlf checkout', () => 
     ['skills/example/SKILL.md', lf],
     ['src/cli/bundled-skill-guides.ts', lf],
     ...['cmd', 'bat', 'ps1', 'nsh'].map((extension) => [`config/example.${extension}`, crlf]),
-    ['resources/skills-extra/example.json', crlf],
-    ['vendor/resources/skills/example.json', crlf],
-    ['scripts/example.mjs', crlf],
-    ['config/scripts-extra/example.mjs', crlf],
-    ['vendor/config/scripts/example.mjs', crlf],
+    // Fork 6b68737faa pins every .json/.mjs LF so Windows checkouts pass the formatter and
+    // localization byte checks; these were unanchored-pattern controls upstream and are LF here.
+    ['resources/skills-extra/example.json', lf],
+    ['vendor/resources/skills/example.json', lf],
+    ['scripts/example.mjs', lf],
+    ['config/scripts-extra/example.mjs', lf],
+    ['vendor/config/scripts/example.mjs', lf],
+    // Extensions the fork does not pin still keep the checkout's CRLF.
+    ['resources/skills-extra/example.md', crlf],
+    ['scripts/example.sh', crlf],
     ['config/scripts/example.mjsx', crlf],
     ['src/main/runtime/__fixtures__/example.txt', crlf],
     ['src/main/daemon/__fixtures__/pty-transcripts/example.txt', crlf]

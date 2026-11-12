@@ -9,6 +9,7 @@ import {
   PANE,
   postHookEvent
 } from '../../src/main/agent-hooks/server/testing/server.test-fixtures'
+import { attestFixtureHookContext } from '../../src/main/agent-hooks/server/testing/attested-hook-context.test-fixtures'
 
 vi.mock('../../src/main/telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../../src/main/telemetry/cohort-classifier', () => ({ getCohortAtEmit: () => ({}) }))
@@ -24,7 +25,9 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
     const identity = { pid: process.pid, platform: process.platform, startTime: observed.startTime }
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const store = createTestStore()
-    const server = new AgentHookServer()
+    // Fork 6d65165647: local Claude/Codex hooks need the owned PTY's context before they may own
+    // the pane; the harness reports it so this suite exercises what happens after admission.
+    const server = attestFixtureHookContext(new AgentHookServer())
     server.setListener((event) => {
       store
         .getState()

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { useActiveWorktree } from '@/store/workspaces/selection/use-selected-worktree'
+import { selectWorktreesByRepo } from '@/store/workspaces/catalog/workspace-record-fields'
 import { joinPath } from '@/lib/path'
 import { readRuntimeFileContent } from '@/runtime/files/reads/runtime-file-read-client'
 import { requireRuntimeTargetForFileOwner } from '@/lib/file-owner-runtime-target'
@@ -70,7 +71,7 @@ const DEFAULT_MANIFEST: CeoOfficeManifest = {
 export default function CeoOfficeSidebar(): React.JSX.Element | null {
   const activeWorktree = useActiveWorktree()
   // Which host owns the active workspace. A paired client leaves
-  // settings.activeRuntimeEnvironmentId null while working entirely against a
+  // the global active-runtime setting null while working entirely against a
   // remote runtime, so reading the global value sent every manifest read to the
   // local disk — where E:/ORCA does not exist and fs:readFile answers "path
   // resolves outside allowed directories". Scope to the workspace instead, the
@@ -119,7 +120,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
     const candidates = ceoOfficeManifestRootCandidates({
       activeWorktreeId: activeWorktree.id,
       activeRoot: workspaceRoot ?? activeWorktree.path,
-      worktrees: Object.values(state.worktreesByRepo)
+      worktrees: Object.values(selectWorktreesByRepo(state))
         .flat()
         .map((worktree) => ({ id: worktree.id, path: worktree.path }))
     })
@@ -216,7 +217,7 @@ export default function CeoOfficeSidebar(): React.JSX.Element | null {
     // (finance, planning, marketing…), and index 0 would drop every terminal into
     // whichever happened to be created first.
     const state = useAppStore.getState()
-    const worktrees = state.worktreesByRepo[repo.id] ?? []
+    const worktrees = selectWorktreesByRepo(state)[repo.id] ?? []
     const worktree =
       worktrees.find((candidate) => candidate.id === state.activeWorktreeId) ?? worktrees[0]
     if (worktree) {

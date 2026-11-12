@@ -390,9 +390,11 @@ describe('real PTY decorative session-tabs fanout', () => {
       viewerState = { ...viewerState, ...patch }
     })
 
+    // Fork 6d65165647: terminal-reported Claude/Codex status is refused without attestation, so the
+    // retained status comes from an unprotected agent; the Codex titles below still drive the fanout.
     runtime.onPtyData(
       ptyId,
-      '\x1b]9999;{"state":"working","prompt":"retained work","agentType":"codex"}\x07',
+      '\x1b]9999;{"state":"working","prompt":"retained work","agentType":"gemini"}\x07',
       Date.now()
     )
     vi.advanceTimersByTime(50)
