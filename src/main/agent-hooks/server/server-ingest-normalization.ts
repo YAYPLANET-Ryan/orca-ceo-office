@@ -24,16 +24,17 @@ import type { AdmittedHookContext } from './hook-context-snapshot'
 import { AgentHookServerResumeCheckpoints } from './admitted-resume-checkpoint'
 
 export abstract class AgentHookServerIngestNormalization extends AgentHookServerResumeCheckpoints {
-  /** HTTP and spool hooks share one ownership preflight before provider folds; a drain passes
-   *  the one answer deadline all its records share. */
+  /** HTTP and spool hooks share one ownership preflight before provider folds; a drain passes the
+   *  answer deadline its records share. `ownerExitOnly` skips root acquisition (admission proves it). */
   protected checkHookOwner(
     source: AgentHookSource,
     body: unknown,
-    answerBy?: number
+    answerBy?: number,
+    ownerExitOnly = false
   ): Promise<unknown> | undefined {
     const challenges = this.undecidedOwnerChallenges
     let challenged: string | undefined
-    const read = this.readHookRootEvidence
+    const read = ownerExitOnly ? undefined : this.readHookRootEvidence
     const pending = checkHookOwnerPresence(
       this.state,
       source,
@@ -187,21 +188,24 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
       this.applySpoolHook(record, body, context)
     }
     const body = this.normalizeHookBodyPaneKeyAlias(buildSpoolHookBody(record))
-    if (!this.requiresContextAdmission(record.source, body)) {
-      const pending = this.checkHookOwner(record.source, body, answerBy)
-      return pending ? pending.then(() => apply()) : apply()
-    }
-    return this.admitLocalHookContext(record.source, body, undefined, true).then((context) => {
-      if (context) {
-        try {
-          apply(context === true ? undefined : context)
-        } finally {
-          if (context !== true) {
-            context.release()
-          }
-        }
-      }
-    })
+    const source = record.source
+    const guarded = this.requiresContextAdmission(source, body)
+    const run = (): Promise<void> | void =>
+      guarded
+        ? this.admitLocalHookContext(source, body, undefined, true).then((context) => {
+            if (context) {
+              try {
+                apply(context === true ? undefined : context)
+              } finally {
+                if (context !== true) {
+                  context.release()
+                }
+              }
+            }
+          })
+        : apply()
+    // As on the live path, guarded records confirm an old owner's exit; admission proves the root.
+    return this.checkHookOwner(source, body, answerBy, guarded)?.then(run) ?? run()
   }
 
   private applySpoolHook(record: SpoolRecord, body: unknown, context?: AdmittedHookContext): void {
@@ -236,7 +240,8 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
       this.observations.rebind(event.paneKey)
     }
     this.recordCurrentAuthorityObservation(event)
-    const enriched = this.applyObservedLocalHook(event, normalized.onAccepted, record.receivedAt)
+    const rooted = context ? { ...event, rooted: true as const } : event
+    const enriched = this.applyObservedLocalHook(rooted, normalized.onAccepted, record.receivedAt)
     this.checkpointAdmittedProvider(record.source, context, enriched)
     if (event.payload.state !== 'done') {
       this.withdrawReplayObservation(this.resolvePaneKeyAlias(event.paneKey))
@@ -294,11 +299,10 @@ export abstract class AgentHookServerIngestNormalization extends AgentHookServer
       }
       this.recordCurrentAuthorityObservation(event)
       toolCallOwner = event
-      const enriched = this.checkpointAdmittedProvider(
-        source,
-        admitted,
-        this.applyObservedLocalHook(event, normalized.onAccepted)
-      )
+      // Guarded hooks record no root attempt; the presence fold reads admission's proof instead.
+      const observed = admitted === true ? event : { ...event, rooted: true as const }
+      const applied = this.applyObservedLocalHook(observed, normalized.onAccepted)
+      const enriched = this.checkpointAdmittedProvider(source, admitted, applied)
       if (enriched && admitted === true) {
         // An attested hook's process was proved during admission; only unattested ones need it.
         this.checkAgentPresenceAfterHook(event, enriched)

@@ -132,7 +132,6 @@ describe('idle foreground process owns its provider session', () => {
       })
       await server.checkAgentPresence(PANE)
       expect(emitted.mock.lastCall?.[0].agentPresence?.suspended).toBe(true)
-      const emits = emitted.mock.calls.length
       probe.mockImplementation(async (_identity, _read, _platform, observe) => {
         if (verdict === 'live') {
           observe?.(false)
@@ -148,11 +147,12 @@ describe('idle foreground process owns its provider session', () => {
         }),
         '/hook/codex'
       )
-      // The nested provider is refused at admission, before any owner recheck or emit.
+      // Q-CP0131-1: the owner recheck clears the suspension before admission refuses the nested
+      // provider (fork 6d65165647), as upstream rechecks before any provider fold.
       expect(refusals(server, 'process_generation_unconfirmed')).toBe(1)
-      expect(probe).toHaveBeenCalledTimes(1)
+      expect(probe).toHaveBeenCalledTimes(2)
       assertClaudeSession(server)
-      expect(emitted).toHaveBeenCalledTimes(emits)
+      expect(emitted.mock.lastCall?.[0].agentPresence?.suspended).toBeUndefined()
     }
   )
 
@@ -346,9 +346,9 @@ describe('idle foreground process owns its provider session', () => {
         assertClaudeSession(server)
         expect(server.getStatusSnapshot()).toEqual(before)
       }
-      // Each nested hook is refused at admission, before any owner probe.
+      // Q-CP0131-1: each nested hook rechecks the owner, then admission refuses it.
       expect(refusals(server, 'process_generation_unconfirmed')).toBe(5)
-      expect(probe).not.toHaveBeenCalled()
+      expect(probe).toHaveBeenCalledTimes(5)
       expect(emit).not.toHaveBeenCalled()
       await postHookEvent(
         server,

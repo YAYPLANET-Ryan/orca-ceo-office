@@ -130,9 +130,9 @@ export abstract class AgentHookServerLifecycle extends AgentHookServerStatusHook
           res.end()
           return
         }
-        if (!guardedContext) {
-          await this.checkHookOwner(source, aliasedBody)
-        }
+        // Guarded hooks prove their root at admission, but an old owner's exit must still be
+        // confirmed first so a new Claude/Codex can take a pane another agent left.
+        await this.checkHookOwner(source, aliasedBody, undefined, guardedContext)
         const admitted = await this.admitLocalHookContext(
           source,
           aliasedBody,

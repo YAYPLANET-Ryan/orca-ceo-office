@@ -70,15 +70,16 @@ export abstract class AgentHookServerStatusUpdate extends AgentHookServerStatusA
       (origin === 'hook' || origin === 'launch') && !restated,
       retireBinding,
       // A relay's owner is root proof only with the binding this link issued for the pane; its
-      // PID is never probed here. Without it the baseline never displaces a record.
-      incoming.connectionId
-        ? incoming.rooted && needsHookRootEvidence(recordedRow, sender)
-          ? 'root'
-          : undefined
-        : readHookProcessVerdict(this.state, recordedRow, {
-            paneKey: incoming.paneKey,
-            process: sender
-          })
+      // PID is never probed here. Without it the baseline never displaces a record. A local hook
+      // is rooted only when context admission proved its process is the pane's root.
+      incoming.rooted && needsHookRootEvidence(recordedRow, sender)
+        ? 'root'
+        : incoming.connectionId
+          ? undefined
+          : readHookProcessVerdict(this.state, recordedRow, {
+              paneKey: incoming.paneKey,
+              process: sender
+            })
     )
     const { event: rootIdentityIncoming, statusAdmissionSession } = rootContext
     const transitioned = rootContext.transitioned

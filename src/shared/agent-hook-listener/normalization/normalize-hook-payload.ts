@@ -1,6 +1,6 @@
 import { readHookAgentProcess } from '../../agent-status/process/agent-process-presence'
 import { isInheritedHookStatus } from '../presence/agent-hook-presence-transition'
-import { readHookProcessAdmission } from '../presence/agent-hook-owner-presence'
+import { isRetiredOwnerHook, readHookProcessAdmission } from '../presence/agent-hook-owner-presence'
 import { normalizeAgentStatusPayload } from '../../agent-status/contracts/agent-status-types'
 import type { AgentMainAgentStatus } from '../../agent-status/lifecycle/main-agent-status'
 import type { AgentHookSource } from '../transport/agent-hook-relay'
@@ -145,13 +145,12 @@ export function normalizeHookPayload(
       ? options.bindingStatusByPaneKey.get(paneKey)
       : previousStatus
   // A relay's provider view lags its committed rows; process evidence reads the committed one.
+  const processRows = options.bindingStatusByPaneKey ?? state.lastStatusByPaneKey
+  const processHook = { paneKey, worktreeId, process: agentProcess }
+  // Admission proved the pane root, not that the process is still the live owner (Q-CP0131-1).
   const processAdmission = options.admittedContext
-    ? { refused: false, verdict: 'root' as const }
-    : readHookProcessAdmission(state, options.bindingStatusByPaneKey ?? state.lastStatusByPaneKey, {
-        paneKey,
-        worktreeId,
-        process: agentProcess
-      })
+    ? { refused: isRetiredOwnerHook(processRows, processHook), verdict: 'root' as const }
+    : readHookProcessAdmission(state, processRows, processHook)
   if (
     processAdmission.refused ||
     isInheritedHookStatus(

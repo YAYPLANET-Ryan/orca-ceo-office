@@ -13,15 +13,8 @@ import {
 } from '../../../../../shared/agent-hook-listener/listener-state'
 import { readAgentProcessPresence } from '../../../../../shared/agent-status/process/agent-process-presence'
 import { AGENT_STATUS_2A_CURRENT_PRODUCER_MODE } from '../../../../../shared/agent-status/transport/agent-status-legacy-adapter'
-import { getDefaultWorkspaceSession } from '../../../../../shared/constants'
 import { buildRelayHookEnvelope } from '../../../../../wsl-guest/agent-hook-envelope-build'
 import { RelayProviderHookNormalization } from '../../../../../wsl-guest/agent-hook-provider-normalization'
-import { hookRowPaneResumeRecord } from '../../../../runtime/session-lifecycle/projection/hook-row-pane-resume-record'
-import {
-  hookStatusResumeCommand,
-  quitResumeRecords,
-  resumeStatusFromHookRow
-} from '../../../../runtime/terminal/stop/hook-status-resume-records'
 import {
   installMainWindowAgentStatusListeners,
   clearMainWindowAgentStatusListeners
@@ -57,7 +50,6 @@ function isRendererFixture(value: unknown): value is HookSessionBindingRendererF
 if (!isRendererFixture(rendererFixture)) {
   throw new Error('Missing renderer hook binding assertion fixture')
 }
-const { expectReturnedRenderer } = rendererFixture
 
 attestFixtureHookContext(server)
 
@@ -131,42 +123,6 @@ async function tool(id = ROOT) {
     tool_name: 'delegate_task'
   })
 }
-function expectReturned(id = ROOT, agent: 'hermes' | 'antigravity' = 'hermes') {
-  const data = frame()
-  expect(data).toMatchObject({
-    agentType: agent,
-    state: 'working',
-    providerSession: { id },
-    paneOwner: { agent, session: id }
-  })
-  expect(server.getStatusSnapshot()[0]?.providerSession?.id).toBe(id)
-  const tab = expectReturnedRenderer(data, id, agent, PANE, 'wt-1')
-  const status = resumeStatusFromHookRow(data, undefined)
-  if (!status) {
-    throw new Error('No host resume status')
-  }
-  const session = { ...getDefaultWorkspaceSession(), tabsByWorktree: { 'wt-1': [tab] } }
-  const checkpoint = hookStatusResumeCommand({
-    status,
-    session,
-    worktreeId: 'wt-1',
-    launchConfigOf: () => undefined
-  })
-  expect(checkpoint?.type === 'sleep' && checkpoint.records[0]?.providerSession.id).toBe(id)
-  expect(
-    quitResumeRecords({
-      statuses: [status],
-      session,
-      worktreeIdOf: () => 'wt-1',
-      launchConfigOf: () => undefined,
-      capturedAt: data.receivedAt
-    })[0]?.providerSession.id
-  ).toBe(id)
-  expect(
-    hookRowPaneResumeRecord({ rows: [data], worktreeId: 'wt-1', tab })?.providerSession.id
-  ).toBe(id)
-}
-
 // Fork 6d65165647: an unattested hook (Hermes here) aimed at a pane Claude/Codex holds is refused
 // (`unattested_source_targets_protected_pane`), and so is a relayed envelope that carries a provider
 // session or targets such a pane (`remote_context_attestation_unavailable`). Once the nested Codex
@@ -289,16 +245,20 @@ it('retires the binding on an actual host clear, including through a later forei
   await nested()
   await expectRefused(() => tool('fresh-C'))
   expectNestedHolds()
-  server.recordLaunchResumeIdentity({
-    paneKey: PANE,
-    worktreeId: 'wt-1',
-    agentType: 'hermes',
-    providerSession: { key: 'session_id', id: 'explicit-seed' },
-    launchedAt: frame().receivedAt + 1
-  })
-  // An explicit launch seed replaces the Codex row, so the seeded Hermes parent may re-enter.
-  await tool('explicit-seed')
-  expectReturned('explicit-seed')
+  // Q-CP0131-1: admission's root proof is now recorded on the Codex owner, as upstream records a
+  // root it acquires, so a launch seed for another agent no longer displaces it and the
+  // unattested Hermes parent stays out of the pane Codex holds (fork 6d65165647).
+  expect(
+    server.recordLaunchResumeIdentity({
+      paneKey: PANE,
+      worktreeId: 'wt-1',
+      agentType: 'hermes',
+      providerSession: { key: 'session_id', id: 'explicit-seed' },
+      launchedAt: frame().receivedAt + 1
+    })
+  ).toBe('seeded')
+  await expectRefused(() => tool('explicit-seed'))
+  expectNestedHolds()
 })
 
 it.each([257, 512])(
@@ -361,8 +321,10 @@ it('reenters Antigravity from retained first-record authority when that file is 
   rmSync(transcriptPath)
   await post('antigravity', hook('child-A'))
   expect(frame().agentType).toBe('codex')
-  await post('antigravity', hook(ROOT))
-  expectReturned(ROOT, 'antigravity')
+  // Fork 6d65165647: the nested Codex holds the pane, so the unattested Antigravity parent's return
+  // is refused rather than re-entering from its retained first record.
+  await expectRefused(() => post('antigravity', hook(ROOT)))
+  expectNestedHolds()
   writeFileSync(
     transcriptPath,
     `${JSON.stringify({ step_index: 0, source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content: 'sender=parent' })}\n`

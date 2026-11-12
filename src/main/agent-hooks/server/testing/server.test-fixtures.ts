@@ -65,6 +65,17 @@ export function recentTs(offsetMs = 0): number {
   return Date.now() - 60 * 60 * 1000 + offsetMs
 }
 
+// Fork 6d65165647 admits Claude/Codex hooks only with a process claim, so the default body carries
+// the fixture process. Other providers post none upstream; giving them the same fixture process
+// would make every agent in a test look like one OS process.
+function forGuardedSource(body: Body, path: string): Body {
+  if (path === '/hook/claude' || path === '/hook/codex' || body.agentProcess !== FIXTURE_AGENT_PROCESS) {
+    return body
+  }
+  const { agentProcess: _, ...rest } = body
+  return rest
+}
+
 export async function postHookEvent(
   server: AgentHookServer,
   body: Body,
@@ -113,6 +124,6 @@ export async function postHookEvent(
       }
     )
     req.on('error', reject)
-    req.end(JSON.stringify(withFixtureLaunchToken(server, body)))
+    req.end(JSON.stringify(forGuardedSource(withFixtureLaunchToken(server, body), path)))
   })
 }

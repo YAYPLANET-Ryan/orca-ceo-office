@@ -82,6 +82,26 @@ export function readHookProcessVerdict(
   return readHookProcessEvidence(state, previous, hook)?.verdict
 }
 
+/** The retired owner's own late hook: an exited process may still deliver a queued prompt. An
+ *  attested hook proved its root, but not that its process is still the pane's live owner. */
+export function isRetiredOwnerHook(
+  rows: ReadonlyMap<string, AgentHookEventPayload>,
+  hook: {
+    paneKey: string
+    worktreeId: string | undefined
+    process: AgentProcessIdentity | undefined
+  }
+): boolean {
+  // An ended owner may leave only its provider session behind; its exit still fences the process.
+  const owner = readLocalHookOwnerRow(rows, hook.paneKey, hook.worktreeId)?.agentPresence
+  return Boolean(
+    hook.process &&
+      owner?.process &&
+      owner.ended === true &&
+      isSameAgentProcess(owner.process, hook.process)
+  )
+}
+
 /** Refuse before provider folds: the retired owner's own late hook, a process the execution host
  *  proved is nested under, competing with or foreign to the pane's agent, or any unproved process
  *  replacing a suspended owner. */

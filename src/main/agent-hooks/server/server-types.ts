@@ -31,7 +31,8 @@ export type AgentStatusDispositionEvent = {
 export type IncomingAgentHookEvent = AgentHookEventPayload & {
   authorityRestartId?: string
   codexRosterAuthority?: CodexRemoteRosterAuthority
-  /** The relay echoed this link's current binding for the pane on the owner it proved. */
+  /** The relay echoed this link's current binding for the pane on the owner it proved, or local
+   *  context admission proved the hook's process is the pane's root. */
   rooted?: true
 }
 
