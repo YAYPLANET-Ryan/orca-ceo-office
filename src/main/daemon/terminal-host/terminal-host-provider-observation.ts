@@ -3,6 +3,7 @@ import { normalize } from 'node:path'
 import { launchTokenHash } from '../../../shared/agent-hook-listener/transport/agent-hook-spool'
 import type { Session } from '../sessions/session'
 import { getSessionHookContext } from './terminal-host-hook-context'
+import { getAliveTerminalHostSession } from './terminal-host-session-access'
 import {
   readHookProviderObservationUpdate,
   type HookProviderObservation,
@@ -80,4 +81,14 @@ export async function recordSessionProviderObservation(
   })
   observations.set(session, observation)
   return observation
+}
+
+/** Binds observation recording to a host's live sessions, keeping the host class within its size. */
+export function providerObservationRecorder(sessions: ReadonlyMap<string, Session>) {
+  return (update: HookProviderObservationUpdate, attachment: symbol) =>
+    recordSessionProviderObservation(
+      getAliveTerminalHostSession(sessions, update.ptyId),
+      attachment,
+      update
+    )
 }

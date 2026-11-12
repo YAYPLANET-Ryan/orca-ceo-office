@@ -11,8 +11,8 @@ if (!/^\d+$/.test(run ?? '') || Number(run) > 65535) {
 }
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
 // Bump both together when integrating a new upstream release; the pin forces a deliberate review.
-const UPSTREAM_VERSION = '1.4.255'
-const UPSTREAM_SOURCE = '084ce0eebbdda3f665251984804f2238be666296'
+const UPSTREAM_VERSION = '1.4.257'
+const UPSTREAM_SOURCE = 'b0570d90fc9af8c9e7e3566c0fb841d0884e2462'
 if (pkg.version !== UPSTREAM_VERSION) {
   throw new Error('Review the CEO version before updating upstream')
 }

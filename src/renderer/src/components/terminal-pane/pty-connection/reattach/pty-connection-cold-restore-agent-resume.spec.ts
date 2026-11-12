@@ -293,7 +293,9 @@ export function registerPtyConnectionColdRestoreAgentResumeTests(): void {
     ): Promise<{ transport: MockTransport; paneKey: string }> {
       vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
       const { connectPanePty } = await import('../connect-pane-pty')
-      const titleMocks = await vi.importMock<PtyConnectionAgentTitleMocks>('@/lib/agent-status')
+      const titleMocks = await vi.importMock<PtyConnectionAgentTitleMocks>(
+        '@/lib/agent-status/aggregation/worktree-agent-status'
+      )
       const transport = createMockTransport('fresh-pty')
       transport.connect.mockImplementation(async ({ sessionId }: { sessionId?: string }) =>
         sessionId

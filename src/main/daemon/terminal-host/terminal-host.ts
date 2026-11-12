@@ -29,8 +29,7 @@ import {
   hasLiveTerminalHostSessions
 } from './terminal-host-session-listing'
 import { createOrAttachTerminalSession } from './terminal-host-session-create'
-import { recordSessionProviderObservation } from './terminal-host-provider-observation'
-import type { HookProviderObservationUpdate } from '../../../shared/agent-hook-listener/state/hook-provider-observation'
+import { providerObservationRecorder } from './terminal-host-provider-observation'
 import { TerminalAttachCanceledError } from '../protocol/daemon-errors'
 import { randomUUID } from 'node:crypto'
 import {
@@ -52,6 +51,7 @@ const DEFAULT_MAX_TOMBSTONES = 1000
 
 export class TerminalHost {
   private sessions = new Map<string, Session>()
+  readonly recordProviderObservation = providerObservationRecorder(this.sessions)
   // Serializes creates for one id across async spawn validation.
   private pendingCreations = new Map<string, PendingTerminalCreation>()
   private sessionTeardown = new TerminalSessionTeardown(this.sessions)
@@ -312,11 +312,6 @@ export class TerminalHost {
 
   listSessions(attachmentFor?: (id: string) => symbol | undefined): SessionInfo[] {
     return listLiveTerminalHostSessions(this.sessions, this.agentSessionOwners, attachmentFor)
-  }
-
-  recordProviderObservation(update: HookProviderObservationUpdate, attachment: symbol) {
-    const session = getAliveTerminalHostSession(this.sessions, update.ptyId)
-    return recordSessionProviderObservation(session, attachment, update)
   }
 
   hasLiveSessions(): boolean {

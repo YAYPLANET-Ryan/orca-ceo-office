@@ -1,9 +1,6 @@
 // Compose the Node-host runtime; paired desktop pages work even without a local browser engine.
 import process from 'node:process'
-import {
-  createProviderObservationQuitStop,
-  saveAfterProviderObservationQuitStop
-} from '../agent-hooks/provider-observation-quit-drain'
+import * as quitDrain from '../agent-hooks/provider-observation-quit-drain'
 import { getAppEnvironment } from '../../shared/app-environment'
 import { resolveUserDataPath } from './orcad-app-paths'
 import { prepareOrcadCliLauncher } from './orcad-cli-launcher'
@@ -120,12 +117,12 @@ async function startOrcadRuntime(
   let uninstallObservedStatusIdentity = (): void => {}
   // Cleanups run in reverse: RPC, then recovery and watchers, then the final flush; the daemon
   // disconnect, registered above, runs last.
-  const stopAgentHooks = createProviderObservationQuitStop(agentHookServer)
+  const stopAgentHooks = quitDrain.createProviderObservationQuitStop(agentHookServer)
   registerCleanup(() => uninstallHookStatusRepublish())
   registerCleanup(() => uninstallObservedStatusIdentity())
   registerCleanup(async () => {
     // A SQLite-backed orcad has no JSON mirror to absorb a debounced write after SIGTERM.
-    await saveAfterProviderObservationQuitStop(stopAgentHooks, async () => {
+    await quitDrain.saveAfterProviderObservationQuitStop(stopAgentHooks, async () => {
       if (profileStoreForShutdown) {
         await flushOrcadProfileStoreForShutdown(profileStoreForShutdown, paneGridsForShutdown)
       }
