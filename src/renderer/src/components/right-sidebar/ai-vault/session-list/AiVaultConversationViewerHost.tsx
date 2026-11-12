@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { lazyWithRetry as lazy } from '@/lib/lazy-with-retry'
+import { lazyWithRetry as lazy } from '@/app-shell/startup/lazy-with-retry'
 import { ModalBoundary } from '../../../../app-shell/app-root-surface-boundaries'
 import { useAiVaultConversationViewerSession } from '../session-actions/ai-vault-conversation-viewer'
 

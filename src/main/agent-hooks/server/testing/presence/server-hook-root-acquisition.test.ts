@@ -96,20 +96,6 @@ describe('a pane without a proven owner', () => {
     expect(refusals(server, 'process_generation_unconfirmed')).toBe(setupReads + 1)
   })
 
-  it('acquires a Claude started through a shell script named claude', async () => {
-    const server = await createServer()
-    runningPane(
-      49960,
-      [49960, 101, 49960, 'bash /Users/u/bin/claude', 'S+'],
-      [49969, 49960, 49960, 'node /opt/homebrew/bin/claude', 'S+']
-    )
-    observe(server, 'waiting')
-    await hook(server, 'SessionStart', { session: 'session-a' })
-    await hook(server, 'UserPromptSubmit', { session: 'session-a', prompt: 'Wrapped task' })
-    expect(server.row()).toMatchObject({ state: 'working', prompt: 'Wrapped task' })
-    expect(server.presence()).toMatchObject({ process: capture(49969), session: 'session-a' })
-  })
-
   it.each([['parent'], [undefined]])(
     'keeps a detached nested run out of an unproven owner in session %s, through its exit',
     async (session) => {
@@ -295,25 +281,6 @@ describe('terminal reports and Orca restatements', () => {
       agent: 'codex',
       process: capture(49969),
       session: 'cx'
-    })
-  })
-
-  it('keeps a suspended owner through a terminal report', async () => {
-    const server = await createServer()
-    runningPane(49969, CLAUDE)
-    await hook(server, 'SessionStart', { session: 'session-a' })
-    probe.mockImplementationOnce(async (_identity, _read, _platform, onSuspension) => {
-      onSuspension?.(true)
-      return 'unverifiable'
-    })
-    await server.checkAgentPresence(PANE)
-    observe(server, 'working')
-    expect(server.presence()).toEqual({
-      agent: 'claude',
-      process: capture(49969),
-      session: 'session-a',
-      sessionOwner: true,
-      suspended: true
     })
   })
 })

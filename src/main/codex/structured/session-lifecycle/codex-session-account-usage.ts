@@ -10,7 +10,7 @@ import {
   mapCodexRpcRateLimits,
   type CodexAccountUsageRead,
   type RpcRateLimitsResponse
-} from '../../../rate-limits/codex-rpc-rate-limit-mapper'
+} from '../../../rate-limits/providers/codex/codex-rpc-rate-limit-mapper'
 import {
   runCodexProviderAppServer,
   type CodexProviderInvocationDeps

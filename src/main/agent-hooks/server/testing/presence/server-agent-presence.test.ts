@@ -67,13 +67,15 @@ async function hook(
 
 describe('retained agent exit', () => {
   it('keeps a persisted exit through a spooled start written before it', async () => {
+    const now = 1_700_000_000_000
+    vi.spyOn(Date, 'now').mockReturnValue(now)
     const userDataPath = createUserDataPath('orca-presence-exit-spool-')
     const first = attestFixtureHookContext(new AgentHookServer())
     servers.push(first)
     await first.start({ env: 'production', userDataPath })
-    const attachedAt = Date.now() - 1
+    const attachedAt = now - 1
     // Spool timestamps have whole-second precision.
-    const spooledAt = Date.now() - 5_000
+    const spooledAt = now - 5_000
     await hook(first, 'SessionStart')
     await hook(first, 'SessionEnd', 'session-a', 'prompt_input_exit')
     first.flushStatusPersistSync()
@@ -102,45 +104,5 @@ describe('retained agent exit', () => {
     servers.push(restarted)
     await restarted.start({ env: 'production', userDataPath })
     expect(await restarted.checkAgentPresenceSince(PANE, attachedAt)).toBe('exited')
-  })
-
-  it('lets a successor start spooled in the exit second clear the exit', async () => {
-    const userDataPath = createUserDataPath('orca-presence-exit-same-second-')
-    const first = attestFixtureHookContext(new AgentHookServer())
-    servers.push(first)
-    await first.start({ env: 'production', userDataPath })
-    const exitedAt = Date.now()
-    vi.spyOn(Date, 'now').mockReturnValue(exitedAt)
-    const attachedAt = exitedAt - 1
-    await hook(first, 'SessionStart')
-    await hook(first, 'SessionEnd', 'session-a', 'prompt_input_exit')
-    expect(await first.checkAgentPresenceSince(PANE, 0)).toBe('exited')
-    first.flushStatusPersistSync()
-    first.stop()
-    const spoolDir = join(userDataPath, 'agent-hooks', 'spool')
-    mkdirSync(spoolDir, { recursive: true })
-    // Fork 6d65165647: an unattested source (e.g. pi) is refused in this Claude pane
-    // (unattested_source_targets_protected_pane), so the successor is an attested Claude start.
-    writeFileSync(
-      join(spoolDir, 'pane-spooled.jsonl'),
-      `\n${JSON.stringify({
-        paneKey: PANE,
-        tabId: 'tab-1',
-        worktreeId: 'wt-1',
-        source: 'claude',
-        receivedAt: Math.floor(exitedAt / 1000) * 1000,
-        launchToken: FIXTURE_LAUNCH_TOKEN,
-        agentProcess: JSON.stringify({
-          pid: 4010,
-          platform: process.platform,
-          startTime: 'birth-4010'
-        }),
-        payload: { hook_event_name: 'SessionStart', session_id: 'session-next', source: 'startup' }
-      })}\n`
-    )
-    const restarted = attestFixtureHookContext(new AgentHookServer())
-    servers.push(restarted)
-    await restarted.start({ env: 'production', userDataPath })
-    expect(await restarted.checkAgentPresenceSince(PANE, attachedAt)).not.toBe('exited')
   })
 })

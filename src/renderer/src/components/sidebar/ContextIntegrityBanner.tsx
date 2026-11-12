@@ -1,6 +1,6 @@
 import { ContextIntegrityNotice } from './ContextIntegrityNotice'
 import { useEffect, useState } from 'react'
-import { installWindowVisibilityInterval } from '@/lib/window-visibility-interval'
+import { installWindowVisibilityInterval } from '@/lib/window-activity/window-visibility-interval'
 import { useAppStore } from '@/store'
 import { callRuntimeRpc } from '@/runtime/rpc/calls/runtime-rpc-call'
 import { useWorktreeRuntimeTarget } from '@/runtime/rpc/targets/use-worktree-runtime-target'

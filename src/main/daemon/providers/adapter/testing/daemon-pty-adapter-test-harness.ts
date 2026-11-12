@@ -104,6 +104,10 @@ export async function startDaemonAdapterHarness(
     tokenPath,
     log: daemonLog,
     spawnSubprocess,
+    // A daemon and the adapter that reaches it speak the same protocol generation.
+    ...(adapterOptions.protocolVersion !== undefined
+      ? { protocolVersion: adapterOptions.protocolVersion }
+      : {}),
     ...serverOptions
   })
   await server.start()

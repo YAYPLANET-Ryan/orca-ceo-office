@@ -28,6 +28,7 @@ export abstract class AgentHookServerConnectionCleanup extends AgentHookServerCl
           // A replacement remote process may reuse the pane; discard the lost owner's children.
           this.state.codexSubagentRosterByPaneKey.delete(paneKey)
           this.state.codexLeadStateByPaneKey.delete(paneKey)
+          this.state.codexAsyncQuestionsByPaneKey.delete(paneKey)
         } else if (deleted.payload.agentType === 'claude') {
           this.state.claudeSubagentRosterByPaneKey.delete(paneKey)
           this.state.claudeLeadStateByPaneKey.delete(paneKey)

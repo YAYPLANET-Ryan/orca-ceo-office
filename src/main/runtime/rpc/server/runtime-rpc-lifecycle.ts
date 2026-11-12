@@ -36,6 +36,7 @@ import {
   ensureDaemonSocketDir
 } from '../../../daemon/endpoint/publication/daemon-socket-endpoint-path'
 import { errorMessage } from '../../../../shared/error-message'
+import { logClientConnection } from './runtime-rpc-client-connection-log'
 import {
   loadHostDescriptor,
   publishHostDescriptor
@@ -285,6 +286,7 @@ export class RuntimeRpcLifecycle extends RuntimeRpcWebSocketDispatch {
         this.handleWebSocketBinaryMessage(bytes, socket.ws)
       },
       onReady: (socket) => {
+        logClientConnection('connected', socket)
         if (socket.transport.transport === 'direct') {
           this.authenticatedSourceRecorder.note(socket.transport.sourceClass)
         }
@@ -316,6 +318,7 @@ export class RuntimeRpcLifecycle extends RuntimeRpcWebSocketDispatch {
         void this.runtime.stagedFileSaves?.abortConnection(socket.connectionId)
         this.binaryMessageRouter.deleteConnection(socket.connectionId)
         this.declaredDesktopClients.forget(socket.connectionId)
+        logClientConnection('disconnected', socket)
         if (!hasOtherConnections) {
           this.runtime.onClientDisconnected(socket.device.clientId)
         }

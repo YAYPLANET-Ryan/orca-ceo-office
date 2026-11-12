@@ -1,3 +1,4 @@
+import { parseDaemonLaunchNoteChange } from '../protocol/daemon-launch-note-protocol'
 import { handleDaemonTerminalKill } from './daemon-terminal-kill'
 import { recordDaemonProviderObservation } from './daemon-hook-provider-observation'
 import { handleDaemonFencedTermination } from './daemon-fenced-termination'
@@ -149,6 +150,13 @@ export class DaemonRequestRouter {
         return {
           confirmed: await this.options.host.confirmShellForeground(request.payload.sessionId)
         }
+      case 'setLaunchNote': {
+        const change = parseDaemonLaunchNoteChange(request.payload.change)
+        if (change) {
+          this.options.host.setLaunchNote(request.payload.sessionId, change)
+        }
+        return {}
+      }
       case 'clearScrollback':
         this.options.host.clearScrollback(request.payload.sessionId)
         return {}

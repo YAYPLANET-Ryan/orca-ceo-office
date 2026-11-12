@@ -11,6 +11,7 @@ import {
 } from '../../../../../shared/agent-session/view/structured-agent-session-projection'
 import { AgentHookServer } from '../../agent-hook-server'
 import { PANE } from '../server.test-fixtures'
+import { agentHookRuntimeDeps } from '../../../runtime/agent-hook-runtime-deps'
 
 import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
 vi.mock('../../../../telemetry/client', () => ({ track: vi.fn() }))
@@ -54,6 +55,55 @@ function terminal(server: AgentHookServer, paneKey: string): void {
 afterEach(() => vi.restoreAllMocks())
 
 describe('structured canonical production slice', () => {
+  it('publishes the same public pane evidence while preserving resume-only provider identity', () => {
+    const server = new AgentHookServer()
+    const deps = agentHookRuntimeDeps(server, { read: () => ({ kind: 'unobserved' }) }, () => ({}))
+    // Fork 6d65165647: a Claude/Codex launch seed needs launch attestation, so the resume-only
+    // row here comes from an unprotected agent; the projection under test is agent-neutral.
+    server.recordLaunchResumeIdentity({
+      paneKey: PANE,
+      agentType: 'gemini',
+      providerSession: { key: 'session_id', id: 'resume-only' },
+      launchedAt: 100
+    })
+    expect(deps.getPublicAgentStatusSnapshotForPane(PANE)).toEqual([])
+    expect(deps.getAgentStatusSnapshotForPane(PANE)).toEqual([
+      expect.objectContaining({
+        providerSessionOnly: true,
+        providerSession: { key: 'session_id', id: 'resume-only' }
+      })
+    ])
+    expect(deps.getAgentProviderSessionRowsForPane(PANE)).toEqual([
+      expect.objectContaining({
+        providerSessionOnly: true,
+        providerSession: { key: 'session_id', id: 'resume-only' }
+      })
+    ])
+    terminal(server, PANE)
+    server.ingestStructuredStatus(summary(), SUBJECT)
+    const second = makeStructuredAgentStatusSubject(
+      { ...SCOPE, executionHostId: 'ssh:other' },
+      SESSION
+    )
+    server.ingestStructuredStatus({ ...summary(second), agent: 'claude', status: 'idle' }, second)
+    expect(deps.getAgentStatusSnapshotForPane(PANE).map(({ state }) => state)).toEqual(['working'])
+    expect(
+      deps
+        .getPublicAgentStatusSnapshotForPane(PANE_KEY)
+        .map(({ agentType, state }) => ({ agentType, state }))
+    ).toEqual([
+      { agentType: 'codex', state: 'working' },
+      { agentType: 'claude', state: 'done' }
+    ])
+    expect(deps.getAgentStatusSnapshot().map(({ paneKey, state }) => ({ paneKey, state }))).toEqual(
+      [
+        { paneKey: PANE, state: 'working' },
+        { paneKey: PANE_KEY, state: 'working' },
+        { paneKey: PANE_KEY, state: 'done' }
+      ]
+    )
+  })
+
   it('isolates identical session identifiers across host, WSL and workspace kind scopes', () => {
     const server = attestFixtureHookContext(new AgentHookServer())
     const scopes: AgentStatusExecutionScope[] = [

@@ -1,5 +1,7 @@
 // Why: daemons survive app updates, so wire behavior must be version-gated.
-// v56 retains attached-client provider observations across app restart without replacing launch intent.
+// v57 (CEO fork) retains attached-client provider observations across app restart without replacing
+// launch intent; upstream owns v56, so the fork's wire change takes the next number.
+// v56 accepts `reportFocusLost`; v55 daemons from 1.4.251 predate it and reject the request.
 // v55 observes the foreground group at the physical PTY owner.
 // v54 reads the macOS process table in process instead of forking setuid ps on every poll (#31783).
 // v53 rolls the daemon-side terminal fixes since v1.4.241 (foreground confirmation for chat continuation, ConPTY reflow, WSL malloc tunables) into a fresh daemon.
@@ -14,8 +16,9 @@
 // v43 dropped it with the revert); v41 stages long startup commands as sourced scripts; v40 rolled
 // the #25130/#24636 shell-wrapper changes and the wider agent list into a fresh daemon; older owners
 // stay attachable.
-export const PROTOCOL_VERSION = 56
-export const HOOK_PROVIDER_OBSERVATION_PROTOCOL_VERSION = 56
+export const PROTOCOL_VERSION = 57
+export const HOOK_PROVIDER_OBSERVATION_PROTOCOL_VERSION = 57
+export const FOCUS_LOSS_REPORT_PROTOCOL_VERSION = 56
 export const PTY_FOREGROUND_OBSERVATION_PROTOCOL_VERSION = 55
 export const FENCED_TERMINATION_PROTOCOL_VERSION = 51
 export const CLAUDE_ACCOUNT_FUNCTION_DAEMON_PROTOCOL_VERSION = 42
@@ -65,4 +68,14 @@ export function supportsPtyStartupIngress(protocolVersion: number): boolean {
 
 export function supportsMode2031UnsubscribeFact(protocolVersion: number): boolean {
   return protocolVersion >= MODE_2031_UNSUBSCRIBE_FACT_PROTOCOL_VERSION
+}
+
+export type DaemonRequestSupport = 'supported' | 'unsupported' | 'ask'
+
+/** `reportFocusLost` shipped inside v55 (1.4.252) without a bump, so only a v55 daemon can tell. */
+export function focusLossReportSupport(protocolVersion: number): DaemonRequestSupport {
+  if (protocolVersion >= FOCUS_LOSS_REPORT_PROTOCOL_VERSION) {
+    return 'supported'
+  }
+  return protocolVersion === FOCUS_LOSS_REPORT_PROTOCOL_VERSION - 1 ? 'ask' : 'unsupported'
 }

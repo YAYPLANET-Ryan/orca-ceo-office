@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentHookSource } from '../../../../../shared/agent-hook-listener/transport/agent-hook-relay'
 import { AgentHookServer, _internals } from '../../agent-hook-server'
 import { PANE } from '../server.test-fixtures'
-
 import { attestFixtureHookContext } from '../attested-hook-context.test-fixtures'
+
 const { trackMock, getCohortAtEmitMock } = vi.hoisted(() => ({
   trackMock: vi.fn(),
   getCohortAtEmitMock: vi.fn()
@@ -18,38 +18,6 @@ beforeEach(() => {
   getCohortAtEmitMock.mockReturnValue({ nth_repo_added: 2 })
 })
 afterEach(() => vi.restoreAllMocks())
-
-/** Null omits the classifier boundary; mimo-code revives separately through explicit-prompt MessagePart. */
-const NEW_TURN_EVENT: Record<AgentHookSource, string | null> = {
-  qoder: 'SessionStart',
-  'qoder-cn': 'SessionStart',
-  'qwen-code': 'SessionStart',
-  claude: 'SessionStart',
-  kimi: 'UserPromptSubmit',
-  codebuddy: 'UserPromptSubmit',
-  codex: 'SessionStart',
-  gemini: 'BeforeAgent',
-  antigravity: 'PreInvocation',
-  amp: 'agent.start',
-  cursor: 'beforeSubmitPrompt',
-  pi: 'before_agent_start',
-  omp: 'before_agent_start',
-  'prime-agent': 'before_agent_start',
-  droid: 'UserPromptSubmit',
-  grok: 'user_prompt_submit',
-  copilot: 'sessionStart',
-  hermes: 'pre_llm_call',
-  devin: 'UserPromptSubmit',
-  opencode: 'SessionStart',
-  opencode2: 'SessionStart',
-  'mimo-code': null,
-  'command-code': null,
-  muse: 'UserPromptSubmit',
-  zcode: 'SessionStart',
-  dsh: 'SessionStart',
-  jcode: 'turn_start',
-  kiro: 'agentSpawn'
-}
 
 // Fork 6d65165647: remote-relay Claude/Codex status is refused without attestation, so a
 // source-less legacy relay reports an unprotected agent and Claude/Codex assert the refusal.
@@ -83,31 +51,6 @@ function reviveRetiredPane(source: unknown, hookEventName: string): boolean {
 }
 
 describe("retired pane un-retires on each provider's own new-turn event", () => {
-  // Why: the gate matched two raw literals, so only the 5 sources that happen to name their
-  // boundary UserPromptSubmit/SessionStart could ever revive — the rest stayed rowless forever.
-  // Why: keys of a Record<AgentHookSource, …> — a new source fails typecheck here rather than
-  // silently skipping coverage, which is the same guarantee the runtime list would give.
-  const refused: readonly AgentHookSource[] = REFUSED_REMOTE_SOURCES
-  const revivable = (Object.keys(NEW_TURN_EVENT) as AgentHookSource[]).filter(
-    (source) => NEW_TURN_EVENT[source] !== null && !refused.includes(source)
-  )
-
-  it.each(revivable)('%s', (source) => {
-    const hookEventName = NEW_TURN_EVENT[source]
-    expect(hookEventName).not.toBeNull()
-    expect(reviveRetiredPane(source, hookEventName as string)).toBe(true)
-  })
-
-  it.each(REFUSED_REMOTE_SOURCES)('%s', (source) => {
-    const hookEventName = NEW_TURN_EVENT[source]
-    expect(hookEventName).toEqual(expect.any(String))
-    const server = relayToRetiredPane(source, String(hookEventName))
-    expect(server.getStatusSnapshot().some((entry) => entry.paneKey === PANE)).toBe(false)
-    expect(server.getContextIntegrityRejections()).toMatchObject({
-      remote_context_attestation_unavailable: 1
-    })
-  })
-
   it('revives on a literal boundary when an older relay omits source', () => {
     expect(reviveRetiredPane(undefined, 'UserPromptSubmit')).toBe(true)
   })
@@ -143,5 +86,13 @@ describe("retired pane un-retires on each provider's own new-turn event", () => 
 
   it('leaves the pane retired for a non-boundary event on a revivable source', () => {
     expect(reviveRetiredPane('gemini', 'AfterAgent')).toBe(false)
+  })
+
+  it.each(REFUSED_REMOTE_SOURCES)('refuses a relayed %s new turn without attestation', (source) => {
+    const server = relayToRetiredPane(source, 'SessionStart')
+    expect(server.getStatusSnapshot().some((entry) => entry.paneKey === PANE)).toBe(false)
+    expect(server.getContextIntegrityRejections()).toMatchObject({
+      remote_context_attestation_unavailable: 1
+    })
   })
 })

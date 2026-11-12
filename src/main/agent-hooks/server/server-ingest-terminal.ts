@@ -148,6 +148,13 @@ export abstract class AgentHookServerIngestTerminal extends AgentHookServerLaunc
     const previous = this.state.lastStatusByPaneKey.get(paneKey) as
       | EnrichedAgentHookEventPayload
       | undefined
+    // OSC 7501 names OpenCode 2 `opencode`; the row its hook or launch named keeps the generation.
+    const payload: ParsedAgentStatusPayload =
+      event.fromProgramStatus === true &&
+      event.payload.agentType === 'opencode' &&
+      previous?.payload.agentType === 'opencode2'
+        ? { ...event.payload, agentType: 'opencode2' }
+        : event.payload
     // OpenCode 1 run loads hooks in-process; a hook during the command owns its status.
     const hookOwnsCommand =
       event.yieldsToHookSince !== undefined &&
@@ -157,7 +164,7 @@ export abstract class AgentHookServerIngestTerminal extends AgentHookServerLaunc
     // Record ordering before removal, which also marks a program turn boundary.
     const workingSince =
       event.fromProgramStatus === true
-        ? this.programStatusFacets.noteState(paneKey, event.payload, now)
+        ? this.programStatusFacets.noteState(paneKey, payload, now)
         : undefined
     if (event.removesProgramStatusRow === true) {
       this.hookSilenceRechecks.cancel(paneKey)
@@ -173,7 +180,7 @@ export abstract class AgentHookServerIngestTerminal extends AgentHookServerLaunc
     }
     const yieldEndsAt =
       event.fromProgramStatus === true
-        ? programStatusHookYieldEndsAt(previous, event.payload, workingSince)
+        ? programStatusHookYieldEndsAt(previous, payload, workingSince)
         : undefined
     const hookOwnsAgent = yieldEndsAt !== undefined && now < yieldEndsAt
     if (event.fromProgramStatus === true) {
@@ -203,7 +210,7 @@ export abstract class AgentHookServerIngestTerminal extends AgentHookServerLaunc
       // OSC 7501 uses the hook precedence above; other terminal reports cannot settle child-held work.
       (event.fromProgramStatus !== true &&
         previous?.payload.agentType === 'claude' &&
-        event.payload.agentType === 'claude' &&
+        payload.agentType === 'claude' &&
         isAgentStatusHeldOpenByChildWork(previous.payload) &&
         previous.payload.subagents?.some((subagent) => subagent.state === 'working') === true)
     ) {
@@ -234,10 +241,10 @@ export abstract class AgentHookServerIngestTerminal extends AgentHookServerLaunc
       previous.worktreeId === worktreeId &&
       // A terminal handle joins row identity; acquiring or replacing it requires publication.
       previous.terminalHandle === (terminalHandle ?? previous.terminalHandle) &&
-      terminalStatusPayloadMatchesHook(previous.payload, event.payload, preserveActiveTurnStamp) &&
+      terminalStatusPayloadMatchesHook(previous.payload, payload, preserveActiveTurnStamp) &&
       // OSC 7501 child-only changes still require publication; absent children means none remain.
       (event.fromProgramStatus !== true ||
-        agentSubagentsEqual(previous.payload.subagents, event.payload.subagents))
+        agentSubagentsEqual(previous.payload.subagents, payload.subagents))
     ) {
       // An authority transfer must refresh enriched subscribers even for an identical payload.
       this.refreshTerminalStatusEvidence(
@@ -250,25 +257,23 @@ export abstract class AgentHookServerIngestTerminal extends AgentHookServerLaunc
     }
     // Terminal status carries no provider session; retain eligible cached identity without treating unknown as a mismatch (#10630).
     const claimedAgentType =
-      event.payload.agentType && event.payload.agentType !== 'unknown'
-        ? event.payload.agentType
-        : undefined
+      payload.agentType && payload.agentType !== 'unknown' ? payload.agentType : undefined
     // A live agent's turn after `done` keeps its session (OSC 7501 reports hookless slash commands); a new run or an exited agent's resume-only row does not. Launch seeds are not completed turns.
     const preservedProviderSession =
       previous?.providerSession &&
       !retiredIdentity &&
       (claimedAgentType === undefined || claimedAgentType === previous.payload.agentType) &&
       (previous.payload.state !== 'done' ||
-        event.payload.state === 'done' ||
+        payload.state === 'done' ||
         previous.observation?.origin === 'launch' ||
         (!newRun && previous.providerSessionOnly !== true))
         ? previous.providerSession
         : undefined
     // Without a new main-agent fact, preserve it only while the row's state and agent still match.
     const preservedMainAgent =
-      event.payload.mainAgent ??
+      payload.mainAgent ??
       (previous?.payload.mainAgent &&
-      previous.payload.state === event.payload.state &&
+      previous.payload.state === payload.state &&
       (claimedAgentType === undefined || claimedAgentType === previous.payload.agentType)
         ? previous.payload.mainAgent
         : undefined)
@@ -281,9 +286,7 @@ export abstract class AgentHookServerIngestTerminal extends AgentHookServerLaunc
         connectionId,
         ...(preservedProviderSession ? { providerSession: preservedProviderSession } : {}),
         ...(terminalHandle ? { terminalHandle } : {}),
-        payload: preservedMainAgent
-          ? { ...event.payload, mainAgent: preservedMainAgent }
-          : event.payload
+        payload: preservedMainAgent ? { ...payload, mainAgent: preservedMainAgent } : payload
       },
       undefined,
       event.origin ?? 'osc',

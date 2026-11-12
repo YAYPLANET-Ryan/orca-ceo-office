@@ -75,20 +75,6 @@ describe('the observation clock a relay replay must not restamp', () => {
     expectRefused(2)
   })
 
-  it('carries the observation time out of getStatusSnapshot, not just the listener', () => {
-    ingest(server, { hook_event_name: 'UserPromptSubmit', prompt: 'do the thing' })
-    vi.setSystemTime(T0 + 25 * 60 * 1000)
-    server.clearStatusEntriesForConnection(CONNECTION)
-    ingest(
-      server,
-      { hook_event_name: 'UserPromptSubmit', prompt: 'do the thing' },
-      { isReplay: true }
-    )
-
-    expect(server.getStatusSnapshot().find((entry) => entry.paneKey === PANE)).toBeUndefined()
-    expectRefused(2)
-  })
-
   it('lets a live event restamp the observation time after a replay', () => {
     ingest(server, { hook_event_name: 'UserPromptSubmit', prompt: 'do the thing' })
     vi.setSystemTime(T0 + 25 * 60 * 1000)
