@@ -96,9 +96,9 @@ export function isRetiredOwnerHook(
   const owner = readLocalHookOwnerRow(rows, hook.paneKey, hook.worktreeId)?.agentPresence
   return Boolean(
     hook.process &&
-      owner?.process &&
-      owner.ended === true &&
-      isSameAgentProcess(owner.process, hook.process)
+    owner?.process &&
+    owner.ended === true &&
+    isSameAgentProcess(owner.process, hook.process)
   )
 }
 

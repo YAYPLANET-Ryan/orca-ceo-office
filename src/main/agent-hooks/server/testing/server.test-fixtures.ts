@@ -69,7 +69,11 @@ export function recentTs(offsetMs = 0): number {
 // the fixture process. Other providers post none upstream; giving them the same fixture process
 // would make every agent in a test look like one OS process.
 function forGuardedSource(body: Body, path: string): Body {
-  if (path === '/hook/claude' || path === '/hook/codex' || body.agentProcess !== FIXTURE_AGENT_PROCESS) {
+  if (
+    path === '/hook/claude' ||
+    path === '/hook/codex' ||
+    body.agentProcess !== FIXTURE_AGENT_PROCESS
+  ) {
     return body
   }
   const { agentProcess: _, ...rest } = body
