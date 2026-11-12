@@ -120,6 +120,7 @@ it.each([
           tabId: 'tab-prompt',
           worktreeId: 'wt-1',
           source: 'codex',
+          // ast-grep-ignore: test-no-wall-clock -- The real hook server ages this record against its own clock.
           receivedAt: Math.floor(Date.now() / 1000) * 1000 - 60_000,
           launchToken: FIXTURE_LAUNCH_TOKEN,
           agentProcess: FIXTURE_AGENT_PROCESS,
