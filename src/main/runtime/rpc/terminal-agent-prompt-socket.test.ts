@@ -3,7 +3,7 @@ import type * as WorktreeListingModule from '../../git/worktrees/catalog/worktre
 import './unused-default-rpc-methods.test-fixture'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -28,6 +28,15 @@ import { getLocalPtyProvider } from '../../ipc/pty/provider/registry'
 import { createHookListenerState } from '../../../shared/agent-hook-listener/listener-state'
 import { normalizeHookPayload } from '../../../shared/agent-hook-listener/normalization/normalize-hook-payload'
 import { AgentHookServer } from '../../agent-hooks/server/agent-hook-server'
+import {
+  attestFixtureHookContext,
+  FIXTURE_AGENT_PROCESS,
+  FIXTURE_LAUNCH_TOKEN
+} from '../../agent-hooks/server/testing/attested-hook-context.test-fixtures'
+import { buildBody, postHookEvent } from '../../agent-hooks/server/testing/server.test-fixtures'
+
+const PROMPT_PANE = 'tab-prompt:22222222-2222-4222-8222-222222222222'
+const CODEX_SESSION = '11111111-1111-4111-8111-111111111111'
 
 vi.mock('../../git/worktrees/catalog/worktree-scan-cache', async (importOriginal) => {
   const listings = getWorktreeListingMocks()
@@ -77,8 +86,59 @@ it.each([
     const paired = boundary === 'paired'
     const codex = boundary.startsWith('codex-')
     const replay = boundary === 'codex-replay' || boundary === 'codex-cold-replay'
-    const hookServer = replay ? new AgentHookServer() : undefined
-    await hookServer?.start({ env: 'production' })
+    // Fork 6d65165647: local Codex readiness arrives only through attested local hooks, and a
+    // replayed row only through the spool drain that admits it like any other local hook.
+    // Status hooks start off so the drain runs when the first Enter turns them on; production
+    // always drains spooled records before it accepts a live hook.
+    const hookHome = replay ? mkdtempSync(join(tmpdir(), 'orca-prompt-hooks-')) : undefined
+    const hookServer = replay ? attestFixtureHookContext(new AgentHookServer()) : undefined
+    await hookServer?.start({
+      env: 'production',
+      userDataPath: hookHome,
+      statusHooksEnabled: false
+    })
+    // The runtime reads the screen right before it decides on another Enter, so the hooks a
+    // keypress produced have landed by the time that readiness check runs.
+    let hookWork: Promise<unknown> = Promise.resolve()
+    const postCodexHook = (payload: Record<string, unknown>) =>
+      hookServer &&
+      postHookEvent(
+        hookServer,
+        buildBody(payload, { paneKey: PROMPT_PANE, tabId: 'tab-prompt' }),
+        '/hook/codex'
+      ).then((response) => expect(response.status).toBe(204))
+    const replayOldTask = async () => {
+      if (!hookServer || !hookHome) {
+        return
+      }
+      const spool = join(hookHome, 'agent-hooks', 'spool')
+      mkdirSync(spool, { recursive: true })
+      writeFileSync(
+        join(spool, 'prompt-pane.jsonl'),
+        `${JSON.stringify({
+          paneKey: PROMPT_PANE,
+          tabId: 'tab-prompt',
+          worktreeId: 'wt-1',
+          source: 'codex',
+          receivedAt: Math.floor(Date.now() / 1000) * 1000 - 60_000,
+          launchToken: FIXTURE_LAUNCH_TOKEN,
+          agentProcess: FIXTURE_AGENT_PROCESS,
+          payload: {
+            hook_event_name: 'UserPromptSubmit',
+            session_id: CODEX_SESSION,
+            turn_id: 'turn-0',
+            prompt: 'old task'
+          }
+        })}\n`
+      )
+      hookServer.setStatusHooksEnabled(true)
+      // The replayed old-task row must be live in main before the readiness check reads it.
+      await vi.waitFor(() =>
+        expect(hookServer.getStatusSnapshot()).toEqual([
+          expect.objectContaining({ paneKey: PROMPT_PANE, state: 'working', prompt: 'old task' })
+        ])
+      )
+    }
     const text = codex ? 'x'.repeat(1_000) : 'first'
     const hookState = createHookListenerState()
     let hook: ReturnType<typeof normalizeHookPayload> = null
@@ -122,26 +182,27 @@ it.each([
             'production'
           )
           if (hook && hookServer) {
-            if (!held || boundary !== 'codex-cold-replay') {
-              hookServer.ingestRemote(hook, 'fixture-connection')
-            }
-            if (held) {
-              hookServer.ingestRemote(
-                {
-                  ...hook,
-                  hasExplicitPrompt: true,
-                  isReplay: true,
-                  payload: {
-                    ...hook.payload,
-                    state: 'working',
-                    prompt: 'old task',
-                    sessionBoundary: undefined,
-                    mainAgent: { state: 'working', stateStartedAt: 1_000 }
-                  }
-                },
-                'fixture-connection'
-              )
-            }
+            const startup = held
+            const live = startup
+              ? {
+                  hook_event_name: 'SessionStart',
+                  source: 'startup',
+                  session_id: CODEX_SESSION
+                }
+              : {
+                  hook_event_name: 'UserPromptSubmit',
+                  session_id: CODEX_SESSION,
+                  turn_id: 'turn-1',
+                  prompt: text
+                }
+            hookWork = hookWork.then(async () => {
+              if (startup) {
+                await replayOldTask()
+              }
+              if (!startup || boundary !== 'codex-cold-replay') {
+                await postCodexHook(live)
+              }
+            })
           }
         }
       },
@@ -171,7 +232,10 @@ it.each([
     if (codex) {
       Object.defineProperty(runtime, 'getPtyWriteHostPlatform', { value: () => 'win32' })
       Object.defineProperty(runtime, 'readCurrentTerminalWaitScreen', {
-        value: async () => ({ lines: [], draft: held ? '[Pasted Content 1000 chars]' : undefined })
+        value: async () => {
+          await hookWork
+          return { lines: [], draft: held ? '[Pasted Content 1000 chars]' : undefined }
+        }
       })
     }
     const db = new OrchestrationDb(':memory:')
@@ -358,7 +422,11 @@ it.each([
       }
       await exited
       await server?.stop()
+      await hookWork.catch(() => undefined)
       hookServer?.stop()
+      if (hookHome) {
+        rmSync(hookHome, { recursive: true, force: true })
+      }
       await transport.stop()
       await Promise.allSettled(done)
       db.close()
